@@ -1,0 +1,32 @@
+# --- Secrets (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# --- Python ---
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# --- Node / web ---
+web/node_modules/
+web/dist/
+node_modules/
+npm-debug.log*
+
+# --- Local tooling settings (personal, not shared) ---
+.claude/settings.local.json
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
