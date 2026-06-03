@@ -1,0 +1,34 @@
+[project]
+name = "annapurna-backend"
+version = "0.1.0"
+description = "Annapurna backend — connector ingest, attribution, reconciliation, and API layer."
+requires-python = ">=3.9"
+# Runtime dependencies are added per-milestone (M1+). M0 ships only the package skeleton.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["annapurna*"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+src = ["annapurna", "tests"]
+
+[tool.ruff.lint]
+# Sensible default rule set: pyflakes (F), pycodestyle (E/W), isort (I), bugbear (B), pyupgrade (UP).
+select = ["E", "W", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
