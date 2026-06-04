@@ -69,6 +69,16 @@ export function Dashboard() {
 
         <DataActions period={data?.period} onChanged={load} />
 
+        {data &&
+          data.features.length > 0 &&
+          data.totals.build_cost === 0 &&
+          data.totals.inference_cost === 0 && (
+            <p className="hint" role="status">
+              Your features are confirmed, but no cost is synced yet. Use <strong>Add cost data</strong>{" "}
+              above to sync inference and import build cost.
+            </p>
+          )}
+
         {data === null && !error ? (
           <p className="muted">Loading…</p>
         ) : data && data.features.length === 0 ? (
