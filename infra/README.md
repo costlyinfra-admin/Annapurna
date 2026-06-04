@@ -3,7 +3,7 @@
 Annapurna ships as a **single Docker image** that serves both the API and the
 built web app, backed by a managed Postgres. The full step-by-step is in
 **[`docs/deploy.md`](../docs/deploy.md)** (free stack: Neon + Render + GitHub
-Actions cron + your IONOS subdomain).
+Actions cron + your Cloudflare-managed subdomain).
 
 ## What's here / related
 

@@ -6,7 +6,7 @@ This gets the whole app live on a **free** stack, on your own subdomain.
 - **Database:** Neon (free managed Postgres)
 - **App (API + website):** Render (free Docker web service) — one service serves both
 - **Scheduled cost ingest:** GitHub Actions (free cron)
-- **Domain/DNS:** your existing IONOS panel (a single DNS record)
+- **Domain/DNS:** your existing Cloudflare dashboard (a single DNS record)
 
 > ⏱️ ~30–45 minutes the first time. Free-tier note: the Render free service **sleeps
 > after ~15 min idle** (first visit then takes ~30–60s to wake). Fine for demos;
@@ -56,15 +56,25 @@ on first deploy.
    and gives you a URL like `https://annapurna.onrender.com`. Open it — you should
    see the login page. 🎉
 
-## Step 3 — Your subdomain (Render + IONOS)
+## Step 3 — Your subdomain (Render + Cloudflare)
 
 1. In Render: **Settings → Custom Domains → Add** `annapurna.costlyinfra.com`.
-   Render shows you a target (a `CNAME` value).
-2. In **IONOS** (your domain's DNS settings), add a **CNAME record**:
-   - **Host/Name:** `annapurna`
-   - **Points to / Value:** the target Render gave you
+   Render shows you a target (a `CNAME` value like `annapurna.onrender.com`).
+2. In **Cloudflare** → your `costlyinfra.com` zone → **DNS → Add record**:
+   - **Type:** `CNAME`
+   - **Name:** `annapurna`
+   - **Target:** the value Render gave you
+   - **Proxy status:** **DNS only** (grey cloud) — see the note below
 3. Wait a few minutes. Render auto-issues a free HTTPS certificate, and
    **https://annapurna.costlyinfra.com** goes live. Your `www` site is untouched.
+
+> **⚠️ Cloudflare proxy + certificates.** Leave the record on **DNS only (grey
+> cloud)** at first. If you turn Cloudflare's proxy on (orange cloud) before
+> Render has issued its certificate, it can block the validation and you'll get
+> SSL errors. Once Render shows the domain as **Verified / certificate issued**,
+> you *may* switch the record to **Proxied (orange cloud)** for Cloudflare's CDN/
+> protection — but if you do, set Cloudflare **SSL/TLS → Overview → Full (strict)**
+> so it talks to Render over HTTPS. Simplest path: just keep it **DNS only**.
 
 ## Step 4 — Scheduled cost ingest (GitHub Actions, free)
 
