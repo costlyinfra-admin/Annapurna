@@ -10,16 +10,20 @@ Run locally:  uvicorn --factory annapurna.api:create_app --reload
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
+import time
 from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, build, credentials, dashboard, discovery, features, hook, inference
+from . import __version__, auth, build, credentials, dashboard, discovery, features, hook, inference
 from .github import GitHubError
 from .providers import ProviderError
+
+logger = logging.getLogger("annapurna.api")
 
 
 class SignupRequest(BaseModel):
@@ -138,7 +142,12 @@ def create_app() -> FastAPI:
     if not secret_key:
         raise RuntimeError("APP_SECRET_KEY must be set to run the API.")
 
-    app = FastAPI(title="Annapurna API")
+    logging.basicConfig(
+        level=os.environ.get("ANNAPURNA_LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+    app = FastAPI(title="Annapurna API", version=__version__)
     app.add_middleware(
         SessionMiddleware,
         secret_key=secret_key,
@@ -146,9 +155,27 @@ def create_app() -> FastAPI:
         https_only=False,  # set True behind HTTPS in production
     )
 
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        start = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception("unhandled error: %s %s", request.method, request.url.path)
+            raise
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "%s %s -> %d (%.0fms)",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+        )
+        return response
+
     @app.get("/api/health")
     def health() -> dict:
-        return {"status": "ok"}
+        return {"status": "ok", "version": __version__}
 
     @app.post("/api/auth/signup")
     def signup(body: SignupRequest, request: Request) -> auth.User:

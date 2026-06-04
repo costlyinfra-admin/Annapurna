@@ -15,6 +15,7 @@ Confidence ladder (design §7.3):
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from decimal import Decimal
 from typing import Optional
 
@@ -194,6 +195,12 @@ def run_scheduled_ingest(periods: Optional[list[dt.date]] = None) -> list[dict]:
                     hook.reconcile(str(tenant_id), period)
                     reconciled.add((str(tenant_id), period))
             except Exception as exc:  # one tenant/provider failing must not stop the rest
+                logging.getLogger("annapurna.ingest").warning(
+                    "inference ingest failed for tenant=%s provider=%s: %s",
+                    tenant_id,
+                    provider,
+                    exc,
+                )
                 results.append(
                     {"tenant_id": str(tenant_id), "provider": provider, "error": str(exc)}
                 )
