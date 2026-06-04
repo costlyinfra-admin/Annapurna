@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, credentials, discovery, features, inference
+from . import auth, build, credentials, discovery, features, inference
 from .github import GitHubError
 from .providers import ProviderError
 
@@ -79,6 +79,12 @@ class SignalRequest(BaseModel):
 class IngestRequest(BaseModel):
     provider: str = Field(pattern="^(anthropic|openai)$")
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")  # YYYY-MM
+
+
+class BuildImportRequest(BaseModel):
+    csv: str = Field(min_length=1, max_length=5_000_000)
+    tool: Optional[str] = Field(default=None, max_length=20)
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
 def _parse_period(value: Optional[str]) -> dt.date:
@@ -290,5 +296,22 @@ def create_app() -> FastAPI:
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
         return inference.inference_summary(user["tenant_id"], _parse_period(period))
+
+    # ---- Build cost ingest (coding tools, M5) --------------------------
+    @app.post("/api/build/import")
+    def import_build_cost(body: BuildImportRequest, user: CurrentUser) -> dict:
+        period = _parse_period(body.period)
+        try:
+            spends = build.parse_csv(body.csv, default_tool=body.tool, default_period=period)
+        except build.CsvImportError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return build.allocate_and_store(user["tenant_id"], spends, period)
+
+    @app.get("/api/build/summary")
+    def build_summary(
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        return build.build_summary(user["tenant_id"], _parse_period(period))
 
     return app

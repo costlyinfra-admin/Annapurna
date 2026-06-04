@@ -161,7 +161,11 @@ Built milestone-by-milestone per the build plan.
 - **M4 — Provider cost ingest (inference).** Read-only Anthropic + OpenAI cost
   connectors; ingest stores authoritative monthly totals (`source = cost_api`)
   attributed by key/project to a feature (high/med confidence) or to the
-  **Unattributed** bucket; `make ingest` runs the scheduled job. ← current baseline
+  **Unattributed** bucket; `make ingest` runs the scheduled job.
+- **M5 — Build-cost ingest (coding tools).** CSV import (Cursor-for-Teams seat
+  export and the universal fallback); allocates each developer's spend across
+  features by the PRs they authored; writes `build_cost` per feature and per
+  developer, broken down by tool, with confidence; unattributable spend → the
+  Unattributed bucket. ← current baseline
 
-Functional milestones (build-cost ingest, the three screens, the metering hook)
-follow in order.
+Functional milestones (the three screens, the metering hook) follow in order.

@@ -1,0 +1,69 @@
+"""End-to-end API: discover features -> import a coding-tool CSV -> build summary."""
+
+from __future__ import annotations
+
+import pytest
+from annapurna import discovery
+from annapurna.api import create_app
+from annapurna.github import PullRequest
+from fastapi.testclient import TestClient
+
+PASSWORD = "correct horse battery"
+
+
+def _pr(number, branch, author):
+    return PullRequest(
+        number, "acme/core", f"PR {number}", "", branch, author, "2026-05-01T00:00:00Z", ""
+    )
+
+
+FIXTURE_PRS = [
+    _pr(1, "feature/threat-triage", "alice"),
+    _pr(2, "feature/threat-scoring", "alice"),
+    _pr(3, "feature/report-gen", "bob"),
+]
+
+
+class _FakeGitHub:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def fetch_merged_prs(self, owner, since):
+        return FIXTURE_PRS
+
+
+@pytest.fixture
+def client(admin_conn, admin_conninfo, app_conninfo, monkeypatch):
+    monkeypatch.setenv("APP_SECRET_KEY", "unit-test-secret-key")
+    monkeypatch.setenv("DATABASE_URL", admin_conninfo)
+    monkeypatch.setenv("DATABASE_APP_URL", app_conninfo)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub())
+    c = TestClient(create_app())
+    c.post("/api/auth/signup", json={"email": "cto@acme.com", "password": PASSWORD})
+    c.post("/api/connectors/github/credential", json={"secret": "ghp_token"})
+    c.post("/api/discovery/run", json={"owner": "acme"})
+    return c
+
+
+def test_import_csv_and_summary(client):
+    csv_text = "developer,tool,amount\nalice,cursor,100\nbob,cursor,60\ndave,cursor,30\n"
+    summary = client.post("/api/build/import", json={"csv": csv_text, "period": "2026-05"}).json()
+
+    features = {f["name"]: f for f in summary["features"]}
+    assert features["Threat"]["amount"] == 100.0  # alice, all in Threat -> high
+    assert features["Threat"]["by_tool"] == {"cursor": 100.0}
+    assert features["Report"]["amount"] == 60.0
+    assert summary["unattributed"] == 30.0  # dave has no PRs
+    assert summary["total"] == 190.0
+
+    view = client.get("/api/build/summary", params={"period": "2026-05"}).json()
+    assert {d["developer_id"] for d in view["developers"]} == {"alice", "bob", "dave"}
+
+
+def test_bad_csv_returns_400(client):
+    resp = client.post("/api/build/import", json={"csv": "not,really,a,spend,file\n"})
+    assert resp.status_code == 400
