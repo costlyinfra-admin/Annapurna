@@ -3,13 +3,16 @@ name = "annapurna-backend"
 version = "0.1.0"
 description = "Annapurna backend — connector ingest, attribution, reconciliation, and API layer."
 requires-python = ">=3.9"
-# Runtime dependencies are added per-milestone (M1+). M0 ships only the package skeleton.
-dependencies = []
+# Runtime dependencies are added per-milestone. M1 adds the Postgres driver.
+dependencies = [
+    "psycopg[binary]>=3.1",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "pytest-postgresql>=6.0",
 ]
 
 [build-system]
