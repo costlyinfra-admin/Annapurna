@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 from annapurna import db
-from annapurna.migrations import apply_migrations
+from annapurna.migrations import MIGRATIONS_DIR, apply_migrations
 from pytest_postgresql import factories
 
 # Point pytest-postgresql at a discoverable pg_ctl (PATH, Homebrew, or apt/CI).
@@ -36,8 +36,9 @@ def admin_conn(postgresql):
     """A superuser/bootstrap connection to a migrated database (bypasses RLS)."""
     admin_conninfo = _conninfo(postgresql)
     applied = apply_migrations(admin_conninfo)
-    # Migrations should apply cleanly: both files, in order, on a fresh DB.
-    assert applied == ["0001_core_schema", "0002_tenant_isolation"]
+    # Migrations should apply cleanly: every file, in order, on a fresh DB.
+    expected = [path.stem for path in sorted(MIGRATIONS_DIR.glob("*.sql"))]
+    assert applied == expected
     return postgresql
 
 
