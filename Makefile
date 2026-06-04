@@ -21,6 +21,7 @@ help:
 	@echo "  make db-seed     - apply migrations and seed one demo tenant"
 	@echo "  make api         - run the backend API (uvicorn, port 8000)"
 	@echo "  make web         - run the web dev server (vite, port 5173)"
+	@echo "  make demo        - one-command seeded demo (throwaway DB + API + web)"
 	@echo "  make clean       - remove virtualenv, node_modules, build caches"
 
 # ---- install -------------------------------------------------------------
@@ -82,6 +83,10 @@ api:
 
 web:
 	cd $(WEB) && npm run dev
+
+# One-command demo: throwaway seeded Postgres + API + web. See docs/demo-script.md.
+demo:
+	./scripts/demo.sh
 
 # ---- clean ---------------------------------------------------------------
 clean:

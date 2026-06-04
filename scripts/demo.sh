@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# One-command demo: spins up a throwaway seeded Postgres, starts the API and the
+# web dev server, and prints the demo login. Everything is torn down on exit.
+#
+# Prereqs (one time): `make install`, and Postgres 16 (`brew install postgresql@16`).
+#
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+# Locate Postgres binaries (Homebrew keg-only path, or PATH).
+PGBIN=""
+for d in /opt/homebrew/opt/postgresql@16/bin /usr/local/opt/postgresql@16/bin; do
+  [ -x "$d/initdb" ] && PGBIN="$d" && break
+done
+if [ -z "$PGBIN" ] && command -v initdb >/dev/null 2>&1; then
+  PGBIN="$(dirname "$(command -v initdb)")"
+fi
+[ -n "$PGBIN" ] || { echo "✖ Postgres not found. Run: brew install postgresql@16"; exit 1; }
+export PATH="$PGBIN:$PATH"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+TMPD="$(mktemp -d)"
+UVPID=""
+cleanup() {
+  [ -n "$UVPID" ] && kill "$UVPID" 2>/dev/null || true
+  pg_ctl -D "$TMPD/data" stop >/dev/null 2>&1 || true
+  rm -rf "$TMPD"
+}
+trap cleanup EXIT
+
+echo "▶ Starting throwaway Postgres…"
+initdb -D "$TMPD/data" >/dev/null
+pg_ctl -D "$TMPD/data" -o "-k $TMPD -p 5544 -c listen_addresses=''" -l "$TMPD/log" -w start >/dev/null
+createdb -h "$TMPD" -p 5544 annapurna
+
+export DATABASE_URL="host=$TMPD port=5544 dbname=annapurna"
+export APP_SECRET_KEY="demo-secret-change-me"
+
+echo "▶ Migrating + seeding the Acme Security demo tenant…"
+make db-seed
+
+echo "▶ Starting API on http://localhost:8000 …"
+( cd backend && .venv/bin/uvicorn --factory annapurna.api:create_app --port 8000 --log-level warning ) &
+UVPID=$!
+
+echo ""
+echo "  ┌────────────────────────────────────────────────────────┐"
+echo "  │  Open http://localhost:5173                             │"
+echo "  │  Login:  demo@acme.com  /  annapurna-demo               │"
+echo "  └────────────────────────────────────────────────────────┘"
+echo ""
+echo "▶ Starting web on http://localhost:5173  (Ctrl-C to stop everything)…"
+cd web && npm run dev

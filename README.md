@@ -106,6 +106,10 @@ as the demo account it prints (`demo@acme.com` / `annapurna-demo`) — the seede
 "Acme Security" tenant has features with build + inference cost, usage, and an
 Unattributed bucket already populated.
 
+**Fastest path — one command:** `make demo` spins up a throwaway seeded database,
+starts both servers, and prints the login. See
+[docs/demo-script.md](docs/demo-script.md) for the full demo narrative.
+
 ## Database
 
 The data model (design doc §6) is six entities — `feature`, `feature_signal`,
@@ -181,6 +185,10 @@ Built milestone-by-milestone per the build plan.
   usage; a token-authed ingest endpoint costs tokens from versioned pricing tables
   and writes `source = hook` rows at High confidence; reconciliation ties hook
   totals to the provider bill and routes the gap to Unattributed (no
-  double-counting). The hook is optional and never blocks onboarding. ← current baseline
+  double-counting). The hook is optional and never blocks onboarding.
+- **M8 — Hardening & demo readiness.** Retry/backoff on ingest, graceful connector
+  failures, a React error boundary, request logging, and a one-command demo
+  (`make demo` + [docs/demo-script.md](docs/demo-script.md)). ← **v1 complete**
 
-Hardening & demo readiness (M8) follows.
+**v1 is feature-complete:** the connector path (build + inference cost per feature,
+confidence + evidence trail, Unattributed bucket) plus the optional metering hook.
