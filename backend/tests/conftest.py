@@ -52,3 +52,23 @@ def admin_conninfo(postgresql):
 def app_conninfo(postgresql):
     """Conninfo for the non-privileged application role (RLS applies)."""
     return _conninfo(postgresql, user=db.APP_ROLE)
+
+
+@pytest.fixture
+def app_env(admin_conn, admin_conninfo, app_conninfo, monkeypatch):
+    """Wire the modules' env to the test DB (admin + app roles). Returns admin conn."""
+    monkeypatch.setenv("DATABASE_URL", admin_conninfo)
+    monkeypatch.setenv("DATABASE_APP_URL", app_conninfo)
+    monkeypatch.setenv("APP_SECRET_KEY", "unit-test-secret-key")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # force heuristic discovery
+    return admin_conn
+
+
+@pytest.fixture
+def tenant_id(app_env):
+    """A committed tenant the app role can operate within."""
+    row = app_env.execute(
+        "INSERT INTO tenant (name) VALUES ('Test Tenant') RETURNING id"
+    ).fetchone()
+    app_env.commit()
+    return str(row[0])
