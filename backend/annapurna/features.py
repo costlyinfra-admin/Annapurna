@@ -7,11 +7,13 @@ through the app role, so RLS guarantees a tenant only ever touches its own featu
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Optional
 
 import psycopg
 
 from .db import app_dsn, connect, tenant_tx
+from .providers import month_start
 
 
 class FeatureNotFound(Exception):
@@ -188,6 +190,31 @@ def add_signal(
             VALUES (%s, %s, %s, %s, %s, 'manual')
             """,
             (tenant_id, feature_id, signal_type, external_ref, confidence),
+        )
+        return _feature(conn, feature_id)
+
+
+def set_usage(
+    tenant_id: str,
+    feature_id: str,
+    active_users: int,
+    events: Optional[int] = None,
+    period: Optional[dt.date] = None,
+) -> dict:
+    """Set a feature's usage for a month (manual/CSV input; design §9.3)."""
+    start = month_start(period or dt.date.today())
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        if _feature(conn, feature_id) is None:
+            raise FeatureNotFound(feature_id)
+        conn.execute(
+            "DELETE FROM feature_usage WHERE feature_id = %s AND period = %s", (feature_id, start)
+        )
+        conn.execute(
+            """
+            INSERT INTO feature_usage (tenant_id, feature_id, period, active_users, events, source)
+            VALUES (%s, %s, %s, %s, %s, 'manual')
+            """,
+            (tenant_id, feature_id, start, active_users, events),
         )
         return _feature(conn, feature_id)
 

@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, build, credentials, discovery, features, inference
+from . import auth, build, credentials, dashboard, discovery, features, inference
 from .github import GitHubError
 from .providers import ProviderError
 
@@ -84,6 +84,12 @@ class IngestRequest(BaseModel):
 class BuildImportRequest(BaseModel):
     csv: str = Field(min_length=1, max_length=5_000_000)
     tool: Optional[str] = Field(default=None, max_length=20)
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+
+
+class UsageRequest(BaseModel):
+    active_users: int = Field(ge=0)
+    events: Optional[int] = Field(default=None, ge=0)
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
@@ -313,5 +319,38 @@ def create_app() -> FastAPI:
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
         return build.build_summary(user["tenant_id"], _parse_period(period))
+
+    # ---- The three screens (M6) ----------------------------------------
+    @app.get("/api/dashboard")
+    def get_dashboard(
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        resolved = _parse_period(period) if period else None
+        return dashboard.dashboard(user["tenant_id"], resolved)
+
+    @app.get("/api/features/{feature_id}/detail")
+    def feature_detail(
+        feature_id: str,
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        resolved = _parse_period(period) if period else None
+        detail = dashboard.feature_detail(user["tenant_id"], feature_id, resolved)
+        if detail is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found")
+        return detail
+
+    @app.put("/api/features/{feature_id}/usage")
+    def set_feature_usage(feature_id: str, body: UsageRequest, user: CurrentUser) -> dict:
+        period = _parse_period(body.period) if body.period else None
+        try:
+            return features.set_usage(
+                user["tenant_id"], feature_id, body.active_users, body.events, period
+            )
+        except features.FeatureNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found"
+            ) from exc
 
     return app
