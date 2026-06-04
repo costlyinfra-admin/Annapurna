@@ -9,5 +9,5 @@
   "scripts": {
     "test": "node --test"
   },
-  "license": "UNLICENSED"
+  "license": "AGPL-3.0-or-later"
 }

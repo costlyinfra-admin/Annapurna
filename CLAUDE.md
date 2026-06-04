@@ -1,5 +1,12 @@
 # CLAUDE.md — Annapurna
 
+> **What this file is (for forkers):** these are the project's standing
+> instructions for AI coding assistants (e.g. Claude Code) — the product intent,
+> non-negotiable invariants, and working conventions. It's **not** required to run
+> or use Annapurna; for that, see [`README.md`](README.md),
+> [`CONTRIBUTING.md`](CONTRIBUTING.md), and [`docs/`](docs). It's kept in the repo
+> because the invariants below are genuinely useful context for any contributor.
+
 Standing instructions for building Annapurna. Read these before any work.
 
 ## What Annapurna is

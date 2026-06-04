@@ -2,6 +2,10 @@
 
 This gets the whole app live on a **free** stack, on your own subdomain.
 
+> **Forking this for your own use?** Replace the example values below with yours:
+> the repo (`costlyinfra-admin/Annapurna`), the domain (`costlyinfra.com` /
+> `annapurna.costlyinfra.com`), and any branding. The steps are otherwise identical.
+
 **The stack**
 - **Database:** Neon (free managed Postgres)
 - **App (API + website):** Render (free Docker web service) — one service serves both

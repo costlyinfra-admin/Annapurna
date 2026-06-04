@@ -3,6 +3,7 @@ name = "annapurna-backend"
 version = "0.1.0"
 description = "Annapurna backend — connector ingest, attribution, reconciliation, and API layer."
 requires-python = ">=3.9"
+license = { text = "AGPL-3.0-or-later" }
 # Runtime dependencies are added per-milestone. M1: Postgres. M2: API + auth.
 # M3: GitHub connector (httpx) + Claude-backed feature discovery (anthropic).
 dependencies = [

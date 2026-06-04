@@ -152,6 +152,35 @@ Copy [`.env.example`](.env.example) to `.env` and fill in values locally. **Neve
 commit a real `.env`** — `.gitignore` excludes it. All connector credentials are
 the customer's own admin credentials, used read-only and stored encrypted at rest.
 
+## Self-hosting / use it yourself
+
+Annapurna is open source — fork it, run it for your own company, or deploy your
+own instance. Two paths:
+
+- **Try it locally in one command:** `make demo` spins up a throwaway seeded
+  database, starts the app, and prints a login (`demo@acme.com` / `annapurna-demo`).
+  Prereqs: `make install` and PostgreSQL 16.
+- **Deploy your own instance:** follow [`docs/deploy.md`](docs/deploy.md) — a
+  step-by-step on a free stack (Neon + Render + a free GitHub Actions cron),
+  reachable at your own subdomain. The Docker image is host-agnostic, so any
+  container host works.
+
+Forking for your own product? Swap the branding (`Annapurna`, the `annapurna_meter`
+/ `@annapurna/meter` SDK names), the domain/repo references in the docs, and the
+seed data, and you're off. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how the
+repo is laid out and how to run the checks.
+
+## License
+
+Annapurna is licensed under the **GNU Affero General Public License v3.0**
+(AGPL-3.0) — see [`LICENSE`](LICENSE). You're free to use, modify, and self-host
+it; if you run a **modified** version as a network service, the AGPL requires you
+to make your source available to its users. (If you need different terms for a
+commercial/closed deployment, that's a separate licensing conversation with the
+copyright holder.)
+
+© 2026 CostlyInfra.
+
 ## Status
 
 Built milestone-by-milestone per the build plan.

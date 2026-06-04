@@ -3,6 +3,7 @@ name = "annapurna-meter"
 version = "0.1.0"
 description = "Annapurna metering hook — emit per-call LLM usage events for per-feature cost attribution."
 requires-python = ">=3.9"
+license = { text = "AGPL-3.0-or-later" }
 dependencies = []  # stdlib only — keep the customer's footprint tiny
 
 [project.optional-dependencies]
