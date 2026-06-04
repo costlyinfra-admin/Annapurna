@@ -1,0 +1,29 @@
+[project]
+name = "annapurna-meter"
+version = "0.1.0"
+description = "Annapurna metering hook — emit per-call LLM usage events for per-feature cost attribution."
+requires-python = ">=3.9"
+dependencies = []  # stdlib only — keep the customer's footprint tiny
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["annapurna_meter*"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = ["UP045"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -8,7 +8,7 @@ VENV := $(BACKEND)/.venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-.PHONY: help install install-backend install-web test test-backend test-web \
+.PHONY: help install install-backend install-web test test-backend test-web test-sdk \
         lint lint-backend lint-web format db-migrate db-seed api web clean
 
 help:
@@ -42,6 +42,12 @@ test-backend:
 
 test-web:
 	cd $(WEB) && npm test
+
+# Metering SDKs (M7): Python uses the backend venv's pytest; Node uses node --test.
+test-sdk:
+	$(VENV)/bin/pip install -q -e "sdk/python[dev]"
+	cd sdk/python && ../../$(VENV)/bin/pytest
+	cd sdk/node && node --test
 
 # ---- lint ----------------------------------------------------------------
 lint: lint-backend lint-web

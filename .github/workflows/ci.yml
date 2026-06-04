@@ -34,6 +34,28 @@ jobs:
       - name: Test (pytest)
         run: pytest
 
+  sdk:
+    name: Metering SDKs (Python + Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Python SDK
+        working-directory: sdk/python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          ruff check .
+          pytest
+      - name: Node SDK
+        working-directory: sdk/node
+        run: node --test
+
   web:
     name: Web (React + TypeScript)
     runs-on: ubuntu-latest
