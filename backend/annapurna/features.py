@@ -18,6 +18,10 @@ class FeatureNotFound(Exception):
     """Raised when a feature id does not exist for the tenant."""
 
 
+# Signals a user can attach by hand to drive cost attribution (design §7.1).
+MANUAL_SIGNAL_TYPES = {"api_key", "service", "repo", "branch"}
+
+
 def _signals(conn: psycopg.Connection, feature_id: str) -> list[dict]:
     rows = conn.execute(
         """
@@ -162,6 +166,30 @@ def merge_features(tenant_id: str, feature_ids: list[str], name: Optional[str] =
         if name is not None:
             conn.execute("UPDATE feature SET name = %s WHERE id = %s", (name, target))
         return _feature(conn, target)
+
+
+def add_signal(
+    tenant_id: str,
+    feature_id: str,
+    signal_type: str,
+    external_ref: str,
+    confidence: Optional[str] = None,
+) -> dict:
+    """Attach an evidence signal (e.g. an api_key -> feature mapping for ingest)."""
+    if signal_type not in MANUAL_SIGNAL_TYPES:
+        raise ValueError(f"Unsupported signal type: {signal_type}")
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        if _feature(conn, feature_id) is None:
+            raise FeatureNotFound(feature_id)
+        conn.execute(
+            """
+            INSERT INTO feature_signal (tenant_id, feature_id, signal_type, external_ref,
+                                        confidence, source)
+            VALUES (%s, %s, %s, %s, %s, 'manual')
+            """,
+            (tenant_id, feature_id, signal_type, external_ref, confidence),
+        )
+        return _feature(conn, feature_id)
 
 
 def confirm_features(tenant_id: str, feature_ids: Optional[list[str]] = None) -> list[dict]:
