@@ -65,6 +65,10 @@ db-migrate:
 db-seed:
 	cd $(BACKEND) && .venv/bin/python -m seed
 
+# Scheduled inference-cost ingest (run on a cadence in production).
+ingest:
+	cd $(BACKEND) && .venv/bin/python -m annapurna.inference
+
 # ---- run -----------------------------------------------------------------
 # Needs DATABASE_URL + APP_SECRET_KEY in the environment (see .env.example).
 api:

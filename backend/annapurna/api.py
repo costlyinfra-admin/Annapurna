@@ -9,6 +9,7 @@ Run locally:  uvicorn --factory annapurna.api:create_app --reload
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 from typing import Annotated, Optional
 
@@ -16,8 +17,9 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, credentials, discovery, features
+from . import auth, credentials, discovery, features, inference
 from .github import GitHubError
+from .providers import ProviderError
 
 
 class SignupRequest(BaseModel):
@@ -67,6 +69,24 @@ class MergeRequest(BaseModel):
 
 class ConfirmRequest(BaseModel):
     feature_ids: Optional[list[str]] = None
+
+
+class SignalRequest(BaseModel):
+    signal_type: str = Field(min_length=1, max_length=20)
+    external_ref: str = Field(min_length=1, max_length=300)
+
+
+class IngestRequest(BaseModel):
+    provider: str = Field(pattern="^(anthropic|openai)$")
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")  # YYYY-MM
+
+
+def _parse_period(value: Optional[str]) -> dt.date:
+    if not value:
+        today = dt.date.today()
+        return today.replace(day=1)
+    year, month = value.split("-")
+    return dt.date(int(year), int(month), 1)
 
 
 def _current_user(request: Request) -> auth.User:
@@ -226,5 +246,49 @@ def create_app() -> FastAPI:
     @app.post("/api/onboarding/confirm")
     def confirm_onboarding(body: ConfirmRequest, user: CurrentUser) -> list[dict]:
         return features.confirm_features(user["tenant_id"], body.feature_ids)
+
+    @app.post("/api/features/{feature_id}/signals")
+    def add_feature_signal(feature_id: str, body: SignalRequest, user: CurrentUser) -> dict:
+        try:
+            return features.add_signal(
+                user["tenant_id"], feature_id, body.signal_type, body.external_ref
+            )
+        except features.FeatureNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # ---- Inference cost ingest (connector path, M4) --------------------
+    @app.post("/api/inference/ingest")
+    def ingest_inference(body: IngestRequest, user: CurrentUser) -> dict:
+        admin_key = credentials.get_secret(user["tenant_id"], body.provider)
+        if not admin_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Connect {body.provider} before ingesting inference cost.",
+            )
+        period = _parse_period(body.period)
+        try:
+            return inference.run_inference_ingest(
+                user["tenant_id"], body.provider, period, admin_key
+            )
+        except ProviderError as exc:
+            if exc.status == 401:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{body.provider} rejected the admin key. Reconnect it.",
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Provider error: {exc}"
+            ) from exc
+
+    @app.get("/api/inference/summary")
+    def inference_summary(
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        return inference.inference_summary(user["tenant_id"], _parse_period(period))
 
     return app
