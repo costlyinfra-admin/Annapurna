@@ -147,12 +147,19 @@ def create_app() -> FastAPI:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
+    # Secure cookies behind HTTPS in production (set ANNAPURNA_SECURE_COOKIES=true).
+    secure_cookies = os.environ.get("ANNAPURNA_SECURE_COOKIES", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
     app = FastAPI(title="Annapurna API", version=__version__)
     app.add_middleware(
         SessionMiddleware,
         secret_key=secret_key,
         same_site="lax",
-        https_only=False,  # set True behind HTTPS in production
+        https_only=secure_cookies,
     )
 
     @app.middleware("http")
@@ -419,4 +426,39 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found"
             ) from exc
 
+    # ---- Serve the built web app (production single-service deploy) -----
+    # When ANNAPURNA_STATIC_DIR points at the built frontend, the API also serves
+    # it: static files where they exist, else index.html (SPA client routing).
+    # Registered last so all /api routes take precedence.
+    _mount_frontend(app)
+
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    static_dir = os.environ.get("ANNAPURNA_STATIC_DIR")
+    if not static_dir or not os.path.isdir(static_dir):
+        return  # no frontend bundled (e.g. tests, API-only) -> nothing to serve
+
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    assets = os.path.join(static_dir, "assets")
+    if os.path.isdir(assets):
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    index_html = os.path.join(static_dir, "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        candidate = os.path.normpath(os.path.join(static_dir, full_path))
+        # Stay within the static dir; serve the file if it exists, else the SPA shell.
+        if (
+            full_path
+            and candidate.startswith(os.path.abspath(static_dir))
+            and os.path.isfile(candidate)
+        ):
+            return FileResponse(candidate)
+        return FileResponse(index_html)

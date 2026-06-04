@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from glob import glob
 
 import psycopg
+import psycopg.conninfo
 
 #: The non-privileged role the application connects as (see migration 0002).
 APP_ROLE = "annapurna_app"
@@ -34,8 +35,26 @@ def admin_dsn() -> str:
 
 
 def app_dsn() -> str:
-    """Connection string for the non-privileged application role."""
-    return os.environ.get("DATABASE_APP_URL") or os.environ["DATABASE_URL"]
+    """Connection string for the non-privileged application role.
+
+    Resolution order:
+      1. DATABASE_APP_URL if set (explicit, used by tests and advanced setups).
+      2. Otherwise, if ANNAPURNA_APP_DB_PASSWORD is set, derive from DATABASE_URL
+         by swapping in the `annapurna_app` role + that password. This is the
+         production default: you set one DB URL and one app-role password, and
+         the app connects as the RLS-enforced role automatically.
+      3. Otherwise fall back to DATABASE_URL (fine for single-user local dev).
+    """
+    explicit = os.environ.get("DATABASE_APP_URL")
+    if explicit:
+        return explicit
+    app_password = os.environ.get("ANNAPURNA_APP_DB_PASSWORD")
+    if app_password:
+        params = psycopg.conninfo.conninfo_to_dict(os.environ["DATABASE_URL"])
+        params["user"] = APP_ROLE
+        params["password"] = app_password
+        return psycopg.conninfo.make_conninfo(**params)
+    return os.environ["DATABASE_URL"]
 
 
 def connect(conninfo: str | None = None, *, autocommit: bool = False) -> psycopg.Connection:

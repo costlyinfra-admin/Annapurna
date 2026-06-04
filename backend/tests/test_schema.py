@@ -50,16 +50,17 @@ def test_every_tenant_table_has_tenant_id(admin_conn):
         assert _column_exists(admin_conn, table, "tenant_id"), f"{table} lacks tenant_id"
 
 
-def test_rls_enabled_and_forced_on_tenant_tables(admin_conn):
+def test_rls_enabled_on_tenant_tables(admin_conn):
+    # RLS is enabled on every tenant table. (FORCE is intentionally relaxed in
+    # migration 0006 so the admin/owner role can run auth+migrations on a managed
+    # Postgres without a superuser; the app role is a non-owner, so policies still
+    # apply to it — see test_tenant_isolation.py.)
     rows = admin_conn.execute(
-        """
-        SELECT relname FROM pg_class
-        WHERE relname = ANY(%s) AND relrowsecurity AND relforcerowsecurity
-        """,
+        "SELECT relname FROM pg_class WHERE relname = ANY(%s) AND relrowsecurity",
         (ALL_TABLES,),
     ).fetchall()
     secured = {r[0] for r in rows}
-    assert secured == set(ALL_TABLES), f"RLS not forced on: {set(ALL_TABLES) - secured}"
+    assert secured == set(ALL_TABLES), f"RLS not enabled on: {set(ALL_TABLES) - secured}"
 
 
 def test_migrations_are_idempotent(admin_conn, admin_conninfo):
