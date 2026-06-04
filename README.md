@@ -157,7 +157,11 @@ Built milestone-by-milestone per the build plan.
   connector; discovery clusters the last 90 days of merged PRs into proposed
   features (Claude when `ANTHROPIC_API_KEY` is set, deterministic heuristic
   otherwise); wizard Step 2 with rename/split/merge/delete/add; confirm writes
-  confirmed features. ← current baseline
+  confirmed features.
+- **M4 — Provider cost ingest (inference).** Read-only Anthropic + OpenAI cost
+  connectors; ingest stores authoritative monthly totals (`source = cost_api`)
+  attributed by key/project to a feature (high/med confidence) or to the
+  **Unattributed** bucket; `make ingest` runs the scheduled job. ← current baseline
 
-Functional milestones (provider cost ingest, build-cost ingest, the three
-screens, the metering hook) follow in order.
+Functional milestones (build-cost ingest, the three screens, the metering hook)
+follow in order.
