@@ -152,7 +152,12 @@ Built milestone-by-milestone per the build plan.
   migrations, RLS-enforced tenant isolation, and a seed script.
 - **M2 — Auth & onboarding shell.** Email/password signup-login-logout over
   signed cookie sessions, a tenant created per signup, encrypted-at-rest
-  connector credentials, and the 3-step onboarding wizard shell. ← current baseline
+  connector credentials, and the 3-step onboarding wizard shell.
+- **M3 — GitHub connector + feature auto-discovery.** Read-only GitHub PR
+  connector; discovery clusters the last 90 days of merged PRs into proposed
+  features (Claude when `ANTHROPIC_API_KEY` is set, deterministic heuristic
+  otherwise); wizard Step 2 with rename/split/merge/delete/add; confirm writes
+  confirmed features. ← current baseline
 
-Functional milestones (GitHub + provider connectors, the three screens,
-the metering hook) follow in order.
+Functional milestones (provider cost ingest, build-cost ingest, the three
+screens, the metering hook) follow in order.
