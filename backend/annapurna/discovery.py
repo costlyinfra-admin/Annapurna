@@ -193,7 +193,8 @@ def run_discovery(tenant_id: str, owner: str, token: str, *, days: int = 90) -> 
     with _make_github_client(token) as gh:
         prs = gh.fetch_merged_prs(owner, since)
     proposals = cluster_prs(prs)
-    _persist_proposals(tenant_id, proposals)
+    author_by_ref = {pr.ref: pr.author for pr in prs}
+    _persist_proposals(tenant_id, proposals, author_by_ref)
     return {
         "owner": owner,
         "prs": len(prs),
@@ -202,7 +203,10 @@ def run_discovery(tenant_id: str, owner: str, token: str, *, days: int = 90) -> 
     }
 
 
-def _persist_proposals(tenant_id: str, proposals: list[Proposal]) -> None:
+def _persist_proposals(
+    tenant_id: str, proposals: list[Proposal], author_by_ref: Optional[dict] = None
+) -> None:
+    author_by_ref = author_by_ref or {}
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         # Re-running discovery regenerates proposals; confirmed features are kept.
         conn.execute("DELETE FROM feature WHERE status = 'proposed'")
@@ -220,17 +224,26 @@ def _persist_proposals(tenant_id: str, proposals: list[Proposal]) -> None:
                     conn, tenant_id, feature_id, "branch", prop.branch_pattern, prop.confidence
                 )
             for ref in prop.pr_refs:
-                _add_signal(conn, tenant_id, feature_id, "pr", ref, prop.confidence)
+                # record the PR author so build-cost allocation (M5) can use it
+                _add_signal(
+                    conn,
+                    tenant_id,
+                    feature_id,
+                    "pr",
+                    ref,
+                    prop.confidence,
+                    actor=author_by_ref.get(ref),
+                )
 
 
-def _add_signal(conn, tenant_id, feature_id, signal_type, external_ref, confidence):
+def _add_signal(conn, tenant_id, feature_id, signal_type, external_ref, confidence, actor=None):
     conn.execute(
         """
         INSERT INTO feature_signal (tenant_id, feature_id, signal_type, external_ref,
-                                    confidence, source)
-        VALUES (%s, %s, %s, %s, %s, 'github')
+                                    confidence, source, actor)
+        VALUES (%s, %s, %s, %s, %s, 'github', %s)
         """,
-        (tenant_id, feature_id, signal_type, external_ref, confidence),
+        (tenant_id, feature_id, signal_type, external_ref, confidence, actor),
     )
 
 
