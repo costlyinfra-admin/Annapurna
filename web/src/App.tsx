@@ -5,6 +5,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { Dashboard } from "./pages/Dashboard";
+import { FeatureDetail } from "./pages/FeatureDetail";
 import { Login } from "./pages/Login";
 import { Onboarding } from "./pages/Onboarding";
 import { Signup } from "./pages/Signup";
@@ -31,6 +32,7 @@ export function App() {
       <Route path="/" element={<RequireAuth><Onboarding /></RequireAuth>} />
       <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
       <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
+      <Route path="/features/:id" element={<RequireAuth><FeatureDetail /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

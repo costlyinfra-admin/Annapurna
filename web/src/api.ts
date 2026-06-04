@@ -46,6 +46,44 @@ export interface SplitGroup {
   signal_ids: string[];
 }
 
+export interface DashboardRow {
+  feature_id: string;
+  name: string;
+  build_cost: number;
+  inference_cost: number;
+  active_users: number | null;
+  cost_per_user: number | null;
+  worth_it: string;
+  confidence: string | null;
+}
+
+export interface Dashboard {
+  period: string;
+  features: DashboardRow[];
+  unattributed: { build_cost: number; inference_cost: number };
+  totals: { build_cost: number; inference_cost: number };
+}
+
+export interface FeatureDetail {
+  feature_id: string;
+  name: string;
+  description: string;
+  status: string;
+  discovery_confidence: string | null;
+  period: string;
+  headline: { build_cost: number; inference_cost: number; active_users: number | null };
+  build_by_developer: { developer_id: string; tool: string; amount: number; confidence: string }[];
+  inference_trend: { period: string; amount: number; source: string }[];
+  evidence: {
+    signal_type: string;
+    external_ref: string;
+    confidence: string | null;
+    actor: string | null;
+    source: string | null;
+  }[];
+  inference_sources: string[];
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -129,5 +167,30 @@ export const api = {
     request<Feature[]>("/onboarding/confirm", {
       method: "POST",
       body: JSON.stringify({ feature_ids: featureIds ?? null }),
+    }),
+
+  // ---- The three screens (M6) ----
+  dashboard: (period?: string) =>
+    request<Dashboard>(`/dashboard${period ? `?period=${period}` : ""}`),
+
+  featureDetail: (id: string, period?: string) =>
+    request<FeatureDetail>(`/features/${id}/detail${period ? `?period=${period}` : ""}`),
+
+  setUsage: (id: string, activeUsers: number, period?: string) =>
+    request<Feature>(`/features/${id}/usage`, {
+      method: "PUT",
+      body: JSON.stringify({ active_users: activeUsers, period }),
+    }),
+
+  ingestInference: (provider: string, period?: string) =>
+    request<{ total: number }>("/inference/ingest", {
+      method: "POST",
+      body: JSON.stringify({ provider, period }),
+    }),
+
+  importBuildCost: (csv: string, tool?: string, period?: string) =>
+    request<{ total: number }>("/build/import", {
+      method: "POST",
+      body: JSON.stringify({ csv, tool, period }),
     }),
 };

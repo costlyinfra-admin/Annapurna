@@ -402,3 +402,206 @@ button.link {
   background: #f1f1f3;
   color: var(--muted);
 }
+
+/* Worth-it badges */
+.badge.worth-healthy {
+  background: #e7f6ee;
+  color: var(--good);
+}
+.badge.worth-watch {
+  background: #fdecea;
+  color: var(--error);
+}
+.badge.worth-unknown {
+  background: #f1f1f3;
+  color: var(--muted);
+}
+
+/* ---- Dashboard ---- */
+.topbar .signout {
+  margin-left: auto;
+}
+
+.dash-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.totals-strip {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.total-card,
+.headline-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 160px;
+}
+
+.total-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.total-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.features-table,
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.features-table th,
+.features-table td,
+.mini-table th,
+.mini-table td {
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.features-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: #fafafb;
+}
+
+.features-table .num,
+.mini-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.feature-row {
+  cursor: pointer;
+}
+
+.feature-row:hover {
+  background: #f7f9ff;
+}
+
+.unattributed-row td {
+  background: #fbfbfc;
+  font-style: italic;
+}
+
+.add-data-toggle {
+  margin-bottom: 1rem;
+}
+
+.data-actions {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.data-action {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.data-action label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.data-action textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+}
+
+.inline {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.legend {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+}
+
+/* ---- Feature drill-down ---- */
+.headline-cards {
+  display: flex;
+  gap: 1rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.detail-cols {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.detail-col {
+  flex: 1;
+  min-width: 280px;
+}
+
+.evidence-trail {
+  margin-top: 1.5rem;
+}
+
+.evidence-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.evidence-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 0.88rem;
+}
+
+.evidence-type {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  color: var(--muted);
+}
+
+.evidence-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
