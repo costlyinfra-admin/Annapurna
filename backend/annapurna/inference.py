@@ -178,7 +178,10 @@ def run_scheduled_ingest(periods: Optional[list[dt.date]] = None) -> list[dict]:
             """
         ).fetchall()
 
+    from . import hook  # local import to avoid a module-load cycle
+
     results: list[dict] = []
+    reconciled: set[tuple] = set()
     for tenant_id, provider in pairs:
         admin_key = credentials.get_secret(str(tenant_id), provider)
         if not admin_key:
@@ -186,6 +189,10 @@ def run_scheduled_ingest(periods: Optional[list[dt.date]] = None) -> list[dict]:
         for period in periods:
             try:
                 results.append(run_inference_ingest(str(tenant_id), provider, period, admin_key))
+                # Keep hook numbers tied to the bill each cycle (no-op if no hook data).
+                if (str(tenant_id), period) not in reconciled:
+                    hook.reconcile(str(tenant_id), period)
+                    reconciled.add((str(tenant_id), period))
             except Exception as exc:  # one tenant/provider failing must not stop the rest
                 results.append(
                     {"tenant_id": str(tenant_id), "provider": provider, "error": str(exc)}

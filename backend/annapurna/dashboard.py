@@ -65,7 +65,7 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
         ).fetchall()
 
         build = _rollup(conn, "build_cost", start)
-        inference = _rollup(conn, "inference_cost", start)
+        inference, inference_unattributed = _inference_rollup(conn, start)
         usage = {
             str(fid): users
             for fid, users in conn.execute(
@@ -95,7 +95,7 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
 
     unattributed = {
         "build_cost": build.get(None, {"amount": 0.0})["amount"],
-        "inference_cost": inference.get(None, {"amount": 0.0})["amount"],
+        "inference_cost": inference_unattributed,
     }
     return {
         "period": start.isoformat(),
@@ -122,6 +122,55 @@ def _rollup(conn, table: str, period: dt.date) -> dict:
         entry["amount"] += float(amount)
         entry["confidence"] = _min_confidence(entry["confidence"], confidence)
     return out
+
+
+def _accum(features: dict, key: str, amount: float, confidence: Optional[str]) -> None:
+    entry = features.setdefault(key, {"amount": 0.0, "confidence": None})
+    entry["amount"] += amount
+    entry["confidence"] = _min_confidence(entry["confidence"], confidence)
+
+
+def _inference_rollup(conn, period: dt.date) -> tuple[dict, float]:
+    """Hook-aware inference per feature + Unattributed amount.
+
+    Where the hook is active for a provider, hook rows give the per-feature truth
+    and the connector (cost_api) total is the bill; the gap (bill - hook) flows to
+    Unattributed. Providers without a hook attribute via their connector rows as
+    before. This prevents double-counting the same spend.
+    """
+    rows = conn.execute(
+        "SELECT feature_id, amount, confidence, source, provider "
+        "FROM inference_cost WHERE period = %s",
+        (period,),
+    ).fetchall()
+    hook_providers = {prov for (_f, _a, _c, src, prov) in rows if src == "hook"}
+
+    features: dict = {}
+    unattributed = 0.0
+    billed: dict = {}
+    hooked: dict = {}
+    for feature_id, amount, confidence, source, provider in rows:
+        amt = float(amount)
+        if source == "hook":
+            hooked[provider] = hooked.get(provider, 0.0) + amt
+            if feature_id is None:
+                unattributed += amt
+            else:
+                _accum(features, str(feature_id), amt, confidence)
+        else:  # cost_api
+            billed[provider] = billed.get(provider, 0.0) + amt
+            if provider in hook_providers:
+                continue  # hook supersedes per-feature display; bill drives reconciliation
+            if feature_id is None:
+                unattributed += amt
+            else:
+                _accum(features, str(feature_id), amt, confidence)
+
+    for provider in hook_providers:
+        gap = billed.get(provider, 0.0) - hooked.get(provider, 0.0)
+        if gap > 0:
+            unattributed += gap  # untagged calls / mispriced models land in Unattributed
+    return features, unattributed
 
 
 def feature_detail(

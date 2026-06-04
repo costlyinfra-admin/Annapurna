@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, build, credentials, dashboard, discovery, features, inference
+from . import auth, build, credentials, dashboard, discovery, features, hook, inference
 from .github import GitHubError
 from .providers import ProviderError
 
@@ -90,6 +90,23 @@ class BuildImportRequest(BaseModel):
 class UsageRequest(BaseModel):
     active_users: int = Field(ge=0)
     events: Optional[int] = Field(default=None, ge=0)
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+
+
+class HookEvent(BaseModel):
+    provider: str
+    model: str = ""
+    tokens_in: int = Field(default=0, ge=0)
+    tokens_out: int = Field(default=0, ge=0)
+    feature_id: Optional[str] = None
+    occurred_at: Optional[str] = None
+
+
+class HookEventsRequest(BaseModel):
+    events: list[HookEvent] = Field(min_length=1, max_length=10000)
+
+
+class ReconcileRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
@@ -302,6 +319,28 @@ def create_app() -> FastAPI:
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
         return inference.inference_summary(user["tenant_id"], _parse_period(period))
+
+    # ---- Metering hook (M7) --------------------------------------------
+    @app.post("/api/hook/token")
+    def create_hook_token(user: CurrentUser) -> dict:
+        # Returned once; only its hash is stored.
+        return {"token": hook.generate_token(user["tenant_id"])}
+
+    @app.post("/api/hook/events")
+    def ingest_hook_events(body: HookEventsRequest, request: Request) -> dict:
+        # Authenticated by the per-tenant ingest token, NOT the session cookie.
+        header = request.headers.get("authorization", "")
+        token = header[7:] if header.lower().startswith("bearer ") else header
+        tenant_id = hook.resolve_tenant(token) if token else None
+        if not tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ingest token"
+            )
+        return hook.ingest_events(tenant_id, [e.model_dump() for e in body.events])
+
+    @app.post("/api/inference/reconcile")
+    def reconcile_inference(body: ReconcileRequest, user: CurrentUser) -> list[dict]:
+        return hook.reconcile(user["tenant_id"], _parse_period(body.period))
 
     # ---- Build cost ingest (coding tools, M5) --------------------------
     @app.post("/api/build/import")
