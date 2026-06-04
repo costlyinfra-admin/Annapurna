@@ -21,6 +21,8 @@ from typing import Optional
 
 import httpx
 
+from .retrying import http_get_with_retry
+
 
 @dataclass
 class CostRecord:
@@ -102,7 +104,9 @@ class _BaseCostClient:
             self._client.close()
 
     def _get(self, path: str, params: dict, headers: dict) -> httpx.Response:
-        resp = self._client.get(f"{self._base}{path}", params=params, headers=headers)
+        resp = http_get_with_retry(
+            self._client, f"{self._base}{path}", params=params, headers=headers
+        )
         if resp.status_code == 401:
             raise ProviderError("Provider rejected the admin key (401).", 401)
         if resp.status_code >= 400:

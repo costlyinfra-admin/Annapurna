@@ -13,6 +13,8 @@ from typing import Optional
 
 import httpx
 
+from .retrying import http_get_with_retry
+
 GITHUB_API = "https://api.github.com"
 _PER_PAGE = 100
 _MAX_PAGES_PER_REPO = 10  # safety cap; 90 days of PRs per repo fits comfortably
@@ -72,7 +74,8 @@ class GitHubClient:
             self._client.close()
 
     def _get(self, path: str, params: Optional[dict] = None) -> httpx.Response:
-        resp = self._client.get(
+        resp = http_get_with_retry(
+            self._client,
             f"{self._base}{path}",
             params=params,
             headers={
