@@ -14,6 +14,9 @@ vi.mock("../api", async (importActual) => {
       connectors: vi.fn(),
       saveCredential: vi.fn(),
       logout: vi.fn(),
+      listFeatures: vi.fn(),
+      runDiscovery: vi.fn(),
+      confirmOnboarding: vi.fn(),
     },
   };
 });
@@ -36,6 +39,7 @@ describe("Onboarding wizard shell", () => {
       { type: "github", name: "GitHub", category: "build_activity", connected: false },
       { type: "anthropic", name: "Anthropic", category: "inference", connected: false },
     ]);
+    vi.mocked(api.listFeatures).mockResolvedValue([]); // empty states in Review/Confirm
   });
 
   it("walks Connect -> Review -> Confirm and back", async () => {
@@ -49,16 +53,18 @@ describe("Onboarding wizard shell", () => {
     // Step 2: Review — empty state.
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("heading", { name: "Review auto-discovered features" })).toBeInTheDocument();
-    expect(screen.getByText("No features discovered yet")).toBeInTheDocument();
+    expect(await screen.findByText("No features discovered yet")).toBeInTheDocument();
 
-    // Step 3: Confirm — go-live empty state.
+    // Step 3: Confirm — go-live step.
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("heading", { name: "Confirm & go live" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Go to dashboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Confirm & go live" })).toBeInTheDocument();
 
     // Back returns to Review.
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("heading", { name: "Review auto-discovered features" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Review auto-discovered features" }),
+    ).toBeInTheDocument();
   });
 
   it("saves a pasted credential through the Connect step", async () => {

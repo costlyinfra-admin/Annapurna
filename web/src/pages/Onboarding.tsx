@@ -9,6 +9,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError, type ConnectorStatus } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { ConfirmStep } from "./onboarding/ConfirmStep";
+import { ReviewStep } from "./onboarding/ReviewStep";
 
 const STEPS = ["Connect sources", "Review features", "Confirm & go live"];
 
@@ -144,35 +146,3 @@ function ConnectorRow({
   );
 }
 
-function ReviewStep() {
-  return (
-    <div>
-      <h2>Review auto-discovered features</h2>
-      <div className="empty-state">
-        <p className="empty-title">No features discovered yet</p>
-        <p className="muted">
-          Once GitHub is connected, Annapurna analyzes your last 90 days of merged pull requests and
-          proposes features here — each with its evidence and a confidence badge. (Feature discovery
-          arrives in the next milestone.)
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function ConfirmStep({ onFinish }: { onFinish: () => void }) {
-  return (
-    <div>
-      <h2>Confirm &amp; go live</h2>
-      <div className="empty-state">
-        <p className="empty-title">You're set up</p>
-        <p className="muted">
-          Your dashboard is empty until your first connectors finish importing. Build cost and
-          inference cost will appear per feature — always separately, each with a confidence level
-          and an evidence trail.
-        </p>
-      </div>
-      <button onClick={onFinish}>Go to dashboard</button>
-    </div>
-  );
-}
