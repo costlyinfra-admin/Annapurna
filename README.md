@@ -101,6 +101,11 @@ onboarding wizard (Connect → Review → Confirm). The web dev server proxies `
 to the backend. Auth uses a signed, http-only session cookie; connector secrets
 you paste are encrypted before they're stored.
 
+**Want to see the dashboard with data immediately?** Run `make db-seed` and log in
+as the demo account it prints (`demo@acme.com` / `annapurna-demo`) — the seeded
+"Acme Security" tenant has features with build + inference cost, usage, and an
+Unattributed bucket already populated.
+
 ## Database
 
 The data model (design doc §6) is six entities — `feature`, `feature_signal`,
@@ -166,6 +171,11 @@ Built milestone-by-milestone per the build plan.
   export and the universal fallback); allocates each developer's spend across
   features by the PRs they authored; writes `build_cost` per feature and per
   developer, broken down by tool, with confidence; unattributable spend → the
-  Unattributed bucket. ← current baseline
+  Unattributed bucket.
+- **M6 — The three screens.** Features dashboard (build vs. inference in separate
+  columns, active users, cost/user, "Worth it?", confidence, Unattributed row),
+  feature drill-down (headlines, build-by-developer, inference trend, evidence
+  trail, connector-vs-hook indicator), and the onboarding wizard wired end to end.
+  **The connector path is complete and shippable here.** ← current baseline
 
-Functional milestones (the three screens, the metering hook) follow in order.
+The metering hook (M7) and hardening (M8) follow.
