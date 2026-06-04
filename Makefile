@@ -9,7 +9,7 @@ PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
 .PHONY: help install install-backend install-web test test-backend test-web \
-        lint lint-backend lint-web format db-migrate db-seed clean
+        lint lint-backend lint-web format db-migrate db-seed api web clean
 
 help:
 	@echo "Annapurna make targets:"
@@ -19,6 +19,8 @@ help:
 	@echo "  make format      - auto-format backend (ruff) + web (prettier)"
 	@echo "  make db-migrate  - apply DB migrations (needs DATABASE_URL + Postgres)"
 	@echo "  make db-seed     - apply migrations and seed one demo tenant"
+	@echo "  make api         - run the backend API (uvicorn, port 8000)"
+	@echo "  make web         - run the web dev server (vite, port 5173)"
 	@echo "  make clean       - remove virtualenv, node_modules, build caches"
 
 # ---- install -------------------------------------------------------------
@@ -62,6 +64,14 @@ db-migrate:
 
 db-seed:
 	cd $(BACKEND) && .venv/bin/python -m seed
+
+# ---- run -----------------------------------------------------------------
+# Needs DATABASE_URL + APP_SECRET_KEY in the environment (see .env.example).
+api:
+	cd $(BACKEND) && .venv/bin/uvicorn --factory annapurna.api:create_app --reload --port 8000
+
+web:
+	cd $(WEB) && npm run dev
 
 # ---- clean ---------------------------------------------------------------
 clean:

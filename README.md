@@ -81,6 +81,26 @@ make clean    # remove venv, node_modules, build caches
 make help     # list all targets
 ```
 
+## Running the app (M2+)
+
+Two processes: the FastAPI backend and the Vite web dev server. You need a
+running Postgres (see Database below) plus two environment variables —
+`DATABASE_URL` and `APP_SECRET_KEY` (used for sessions and credential encryption).
+
+```bash
+export DATABASE_URL=postgresql://localhost:5432/annapurna
+export APP_SECRET_KEY=dev-secret-change-me
+
+make db-migrate     # set up the schema (first time)
+make api            # terminal 1: backend on http://localhost:8000
+make web            # terminal 2: web on http://localhost:5173
+```
+
+Open http://localhost:5173, create an account, and you'll land in the three-step
+onboarding wizard (Connect → Review → Confirm). The web dev server proxies `/api`
+to the backend. Auth uses a signed, http-only session cookie; connector secrets
+you paste are encrypted before they're stored.
+
 ## Database
 
 The data model (design doc §6) is six entities — `feature`, `feature_signal`,
@@ -129,7 +149,10 @@ Built milestone-by-milestone per the build plan.
 
 - **M0 — Repo scaffold & foundations.** Package skeletons, tooling, CI.
 - **M1 — Data model & multi-tenancy.** The six entities + `tenant`, SQL
-  migrations, RLS-enforced tenant isolation, and a seed script. ← current baseline
+  migrations, RLS-enforced tenant isolation, and a seed script.
+- **M2 — Auth & onboarding shell.** Email/password signup-login-logout over
+  signed cookie sessions, a tenant created per signup, encrypted-at-rest
+  connector credentials, and the 3-step onboarding wizard shell. ← current baseline
 
-Functional milestones (auth, GitHub + provider connectors, the three screens,
+Functional milestones (GitHub + provider connectors, the three screens,
 the metering hook) follow in order.
