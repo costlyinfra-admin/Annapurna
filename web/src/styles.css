@@ -1,0 +1,257 @@
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --ink: #1a1f2b;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #1f3a8a;
+  --accent-ink: #ffffff;
+  --good: #0f7a4d;
+  --error: #b42318;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+button {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.secondary {
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+button.link {
+  background: none;
+  color: var(--accent);
+  padding: 0;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--error);
+}
+
+/* ---- Auth pages ---- */
+.auth-card {
+  max-width: 380px;
+  margin: 10vh auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.auth-card h2 {
+  margin-top: 0.25rem;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin: 1.2rem 0;
+}
+
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.auth-card input {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.page-center {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+}
+
+/* ---- Wizard ---- */
+.wizard {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.wizard-header,
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.wizard-header .link,
+.topbar .link {
+  margin-left: auto;
+}
+
+.stepper {
+  list-style: none;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 1.5rem 0;
+}
+
+.stepper li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+
+.stepper li.active {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.step-num {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.stepper li.active .step-num {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.stepper li.done .step-num {
+  background: var(--good);
+  color: var(--accent-ink);
+}
+
+.wizard-body {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.5rem;
+  min-height: 240px;
+}
+
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1.25rem;
+}
+
+/* ---- Connectors ---- */
+.connector-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.connector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.connector-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.connector-category {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.connector-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.connector-form input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.badge {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.badge.connected {
+  background: #e7f6ee;
+  color: var(--good);
+}
+
+/* ---- Empty states ---- */
+.empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.empty-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin-bottom: 0.25rem;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
