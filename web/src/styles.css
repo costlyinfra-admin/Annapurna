@@ -605,3 +605,30 @@ button.link {
 .evidence-ref {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* ---- Hook upsell (optional precision tier) ---- */
+.hook-upsell {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.hook-upsell-body {
+  margin-top: 0.5rem;
+}
+
+.snippet {
+  background: #0f1729;
+  color: #d7e3ff;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.snippet.token {
+  background: #eef4ff;
+  color: var(--ink);
+}

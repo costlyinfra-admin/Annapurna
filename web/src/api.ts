@@ -193,4 +193,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ csv, tool, period }),
     }),
+
+  // ---- Metering hook (M7, optional precision tier) ----
+  createHookToken: () => request<{ token: string }>("/hook/token", { method: "POST" }),
 };

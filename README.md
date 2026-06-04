@@ -176,6 +176,11 @@ Built milestone-by-milestone per the build plan.
   columns, active users, cost/user, "Worth it?", confidence, Unattributed row),
   feature drill-down (headlines, build-by-developer, inference trend, evidence
   trail, connector-vs-hook indicator), and the onboarding wizard wired end to end.
-  **The connector path is complete and shippable here.** ← current baseline
+  **The connector path is complete and shippable here.**
+- **M7 — Metering hook.** Thin, fail-safe SDKs ([Python + Node](sdk)) emit per-call
+  usage; a token-authed ingest endpoint costs tokens from versioned pricing tables
+  and writes `source = hook` rows at High confidence; reconciliation ties hook
+  totals to the provider bill and routes the gap to Unattributed (no
+  double-counting). The hook is optional and never blocks onboarding. ← current baseline
 
-The metering hook (M7) and hardening (M8) follow.
+Hardening & demo readiness (M8) follows.
