@@ -18,6 +18,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install Postgres (server binaries for ephemeral test DB)
+        # Tests spin up a throwaway Postgres via pytest-postgresql; they need
+        # initdb/pg_ctl present, not a running service.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

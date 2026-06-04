@@ -9,15 +9,17 @@ PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
 .PHONY: help install install-backend install-web test test-backend test-web \
-        lint lint-backend lint-web format clean
+        lint lint-backend lint-web format db-migrate db-seed clean
 
 help:
 	@echo "Annapurna make targets:"
-	@echo "  make install   - install backend (venv) + web (npm) dependencies"
-	@echo "  make test      - run backend + web test suites"
-	@echo "  make lint      - lint backend (ruff) + web (eslint)"
-	@echo "  make format    - auto-format backend (ruff) + web (prettier)"
-	@echo "  make clean     - remove virtualenv, node_modules, build caches"
+	@echo "  make install     - install backend (venv) + web (npm) dependencies"
+	@echo "  make test        - run backend + web test suites"
+	@echo "  make lint        - lint backend (ruff) + web (eslint)"
+	@echo "  make format      - auto-format backend (ruff) + web (prettier)"
+	@echo "  make db-migrate  - apply DB migrations (needs DATABASE_URL + Postgres)"
+	@echo "  make db-seed     - apply migrations and seed one demo tenant"
+	@echo "  make clean       - remove virtualenv, node_modules, build caches"
 
 # ---- install -------------------------------------------------------------
 install: install-backend install-web
@@ -52,6 +54,14 @@ lint-web:
 format:
 	cd $(BACKEND) && .venv/bin/ruff format .
 	cd $(WEB) && npm run format
+
+# ---- database ------------------------------------------------------------
+# Both need DATABASE_URL pointing at a Postgres instance (see README).
+db-migrate:
+	cd $(BACKEND) && .venv/bin/python -m annapurna.migrations
+
+db-seed:
+	cd $(BACKEND) && .venv/bin/python -m seed
 
 # ---- clean ---------------------------------------------------------------
 clean:

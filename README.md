@@ -38,6 +38,9 @@ behind every figure.
 - **Python 3.9+** (backend)
 - **Node 18+ and npm** (web)
 - **GNU Make** (orchestration)
+- **PostgreSQL 16** (database). On macOS: `brew install postgresql@16`. The test
+  suite spins up its own throwaway Postgres, so you don't need a running server
+  just to run tests — only the Postgres tools installed.
 
 ## Quick start
 
@@ -78,6 +81,42 @@ make clean    # remove venv, node_modules, build caches
 make help     # list all targets
 ```
 
+## Database
+
+The data model (design doc §6) is six entities — `feature`, `feature_signal`,
+`build_cost`, `inference_cost`, `bill_reconciliation`, `feature_usage` — plus a
+`tenant` table that anchors tenant isolation. Schema lives in
+[`backend/migrations/`](backend/migrations) as plain, readable SQL.
+
+**Tenant isolation is enforced by the database, not just by application code.**
+Every tenant table uses Postgres Row-Level Security (RLS): the app connects as a
+non-privileged role and each request sets `app.current_tenant`, so a query can
+only ever see the current tenant's rows — even if a `WHERE` clause is forgotten.
+Migrations and seeding run as a separate bootstrap role that bypasses RLS.
+
+To run against a real local Postgres (a running server, unlike the tests):
+
+```bash
+# macOS: Postgres 16 is "keg-only", so put its tools on PATH and start the server
+export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+brew services start postgresql@16   # or run pg_ctl manually
+
+# one-time: create a database
+createdb annapurna
+
+# point the app at it, then apply migrations and load a demo tenant
+export DATABASE_URL=postgresql://localhost:5432/annapurna
+make db-migrate    # apply pending SQL migrations
+make db-seed       # apply migrations + seed one demo tenant ("Acme Security")
+```
+
+The tenant-isolation guarantee is covered by tests in
+[`backend/tests/test_tenant_isolation.py`](backend/tests/test_tenant_isolation.py).
+
+> **macOS note:** if starting Postgres manually fails with “postmaster became
+> multithreaded during startup”, set `export LC_ALL=en_US.UTF-8` first. The test
+> suite handles this automatically.
+
 ## Configuration & secrets
 
 Copy [`.env.example`](.env.example) to `.env` and fill in values locally. **Never
@@ -86,7 +125,11 @@ the customer's own admin credentials, used read-only and stored encrypted at res
 
 ## Status
 
-Built milestone-by-milestone per the build plan. **M0 (repo scaffold &
-foundations)** is the current baseline: package skeletons, tooling, CI, and one
-placeholder test per package. Functional milestones (data model, auth, connectors,
-screens, hook) follow in order.
+Built milestone-by-milestone per the build plan.
+
+- **M0 — Repo scaffold & foundations.** Package skeletons, tooling, CI.
+- **M1 — Data model & multi-tenancy.** The six entities + `tenant`, SQL
+  migrations, RLS-enforced tenant isolation, and a seed script. ← current baseline
+
+Functional milestones (auth, GitHub + provider connectors, the three screens,
+the metering hook) follow in order.
