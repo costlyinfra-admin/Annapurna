@@ -237,8 +237,28 @@ def feature_detail(
             (feature_id, start),
         ).fetchone()
 
+        # PRs each developer authored for this feature (from the evidence trail).
+        pr_counts = {
+            actor: count
+            for actor, count in conn.execute(
+                """
+                SELECT actor, COUNT(DISTINCT external_ref)
+                FROM feature_signal
+                WHERE feature_id = %s AND signal_type = 'pr' AND actor IS NOT NULL
+                GROUP BY actor
+                """,
+                (feature_id,),
+            ).fetchall()
+        }
+
         by_developer = [
-            {"developer_id": dev, "tool": tool, "amount": float(amount), "confidence": conf}
+            {
+                "developer_id": dev,
+                "tool": tool,
+                "amount": float(amount),
+                "confidence": conf,
+                "prs": pr_counts.get(dev),  # None when unknown (no matched PR authorship)
+            }
             for dev, tool, amount, conf in conn.execute(
                 """
                 SELECT developer_id, tool, SUM(amount), MIN(confidence)
@@ -248,6 +268,10 @@ def feature_detail(
                 (feature_id,),
             ).fetchall()
         ]
+        build_contributors = conn.execute(
+            "SELECT COUNT(DISTINCT developer_id) FROM build_cost WHERE feature_id = %s",
+            (feature_id,),
+        ).fetchone()[0]
 
         inference_trend = [
             {"period": p.isoformat(), "amount": float(amount), "source": source}
@@ -301,6 +325,8 @@ def feature_detail(
             "inference_cost": float(inference_month),  # separate from build
             "active_users": active_users[0] if active_users else None,
         },
+        "build_total": float(build_total),  # total AI build spend for this feature
+        "build_contributors": build_contributors,
         "build_by_developer": by_developer,
         "inference_trend": inference_trend,
         "evidence": evidence,

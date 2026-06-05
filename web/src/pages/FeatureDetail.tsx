@@ -78,6 +78,18 @@ export function FeatureDetail() {
           <div className="detail-cols">
             <section className="detail-col">
               <h2>Build cost by developer</h2>
+              <div className="build-stats">
+                <span>
+                  <span className="build-stat-value">{money(detail.build_total)}</span>
+                  <span className="build-stat-label">Total AI build spend</span>
+                </span>
+                <span>
+                  <span className="build-stat-value">{num(detail.build_contributors)}</span>
+                  <span className="build-stat-label">
+                    Contributor{detail.build_contributors === 1 ? "" : "s"}
+                  </span>
+                </span>
+              </div>
               {detail.build_by_developer.length === 0 ? (
                 <p className="muted">No build cost imported yet.</p>
               ) : (
@@ -87,6 +99,7 @@ export function FeatureDetail() {
                       <th>Developer</th>
                       <th>Tool</th>
                       <th className="num">Amount</th>
+                      <th className="num">PRs</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -95,6 +108,7 @@ export function FeatureDetail() {
                         <td>{d.developer_id}</td>
                         <td>{d.tool.replace("_", " ")}</td>
                         <td className="num">{money(d.amount)}</td>
+                        <td className="num">{num(d.prs)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -865,6 +865,34 @@ a.exec-value:hover {
   min-width: 300px;
 }
 
+.build-stats {
+  display: flex;
+  gap: 1.75rem;
+  margin: 0.25rem 0 0.9rem;
+}
+
+.build-stats > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.build-stat-value {
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.build-stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 650;
+}
+
 .evidence-trail {
   margin-top: 1.75rem;
 }

@@ -18,8 +18,10 @@ const DETAIL = {
   discovery_confidence: "high",
   period: "2026-05-01",
   headline: { build_cost: 181, inference_cost: 4200, active_users: 540 },
+  build_total: 181,
+  build_contributors: 2,
   build_by_developer: [
-    { developer_id: "dev:alice", tool: "claude_code", amount: 117, confidence: "high" },
+    { developer_id: "alice", tool: "claude_code", amount: 117, confidence: "high", prs: 2 },
   ],
   inference_trend: [{ period: "2026-05-01", amount: 4200, source: "cost_api" }],
   evidence: [
@@ -53,11 +55,13 @@ describe("FeatureDetail", () => {
     expect(await screen.findByRole("heading", { name: "AI threat triage" })).toBeInTheDocument();
 
     // Build and inference headlines are distinct numbers.
-    expect(screen.getByText("$181")).toBeInTheDocument();
+    expect(screen.getAllByText("$181").length).toBeGreaterThan(0); // headline + build total
     expect(screen.getAllByText("$4,200").length).toBeGreaterThan(0); // headline + trend
 
-    // Build-by-developer breakdown.
-    expect(screen.getByText("dev:alice")).toBeInTheDocument();
+    // Build-by-developer breakdown: developer, total spend, contributors, PRs.
+    expect(screen.getByText("alice")).toBeInTheDocument();
+    expect(screen.getByText("Total AI build spend")).toBeInTheDocument();
+    expect(screen.getByText("Contributors")).toBeInTheDocument();
 
     // Evidence trail shows the actual signal behind the number.
     expect(screen.getByText("Evidence trail")).toBeInTheDocument();

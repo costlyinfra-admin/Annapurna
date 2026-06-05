@@ -80,7 +80,15 @@ export interface FeatureDetail {
   discovery_confidence: string | null;
   period: string;
   headline: { build_cost: number; inference_cost: number; active_users: number | null };
-  build_by_developer: { developer_id: string; tool: string; amount: number; confidence: string }[];
+  build_total: number;
+  build_contributors: number;
+  build_by_developer: {
+    developer_id: string;
+    tool: string;
+    amount: number;
+    confidence: string;
+    prs: number | null;
+  }[];
   inference_trend: { period: string; amount: number; source: string }[];
   evidence: {
     signal_type: string;

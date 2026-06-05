@@ -61,8 +61,14 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
     assert detail["headline"]["inference_cost"] == 4200.0
     assert detail["headline"]["active_users"] == 540
 
-    developers = {d["developer_id"] for d in detail["build_by_developer"]}
-    assert developers == {"dev:alice", "dev:bob"}
+    by_dev = {d["developer_id"]: d for d in detail["build_by_developer"]}
+    assert set(by_dev) == {"alice", "bob"}
+    # PRs per developer come from the authored-PR evidence (alice: #1421 + #1432).
+    assert by_dev["alice"]["prs"] == 2
+    assert by_dev["bob"]["prs"] == 1
+    # Total AI build spend + contributors for this feature.
+    assert detail["build_total"] == 181.0
+    assert detail["build_contributors"] == 2
     assert detail["inference_trend"]  # at least one month
 
     # Evidence trail: the actual signals behind the number.

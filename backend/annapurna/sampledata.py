@@ -45,14 +45,14 @@ def _add_feature(
     return row[0]
 
 
-def _add_signal(conn, tenant_id, feature_id, signal_type, external_ref, confidence):
+def _add_signal(conn, tenant_id, feature_id, signal_type, external_ref, confidence, actor=None):
     conn.execute(
         """
         INSERT INTO feature_signal (tenant_id, feature_id, signal_type,
-                                    external_ref, confidence, source)
-        VALUES (%s, %s, %s, %s, %s, %s)
+                                    external_ref, confidence, source, actor)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (tenant_id, feature_id, signal_type, external_ref, confidence, "github"),
+        (tenant_id, feature_id, signal_type, external_ref, confidence, "github", actor),
     )
 
 
@@ -174,25 +174,28 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str) -> dict:
     )
 
     # --- Evidence signals (the trail) -------------------------------------
+    # PR signals carry their author (actor) so build cost attributes per developer.
     _add_signal(conn, tenant_id, triage, "branch", "feature/threat-*", "high")
-    _add_signal(conn, tenant_id, triage, "pr", "acme/core#1421", "high")
-    _add_signal(conn, tenant_id, report, "pr", "acme/core#1455", "high")
+    _add_signal(conn, tenant_id, triage, "pr", "acme/core#1421", "high", actor="alice")
+    _add_signal(conn, tenant_id, triage, "pr", "acme/core#1432", "high", actor="alice")
+    _add_signal(conn, tenant_id, triage, "pr", "acme/core#1440", "high", actor="bob")
+    _add_signal(conn, tenant_id, report, "pr", "acme/core#1455", "high", actor="alice")
     _add_signal(conn, tenant_id, soc, "repo", "acme/soc-copilot", "med")
-    _add_signal(conn, tenant_id, vuln, "pr", "acme/core#1490", "low")
+    _add_signal(conn, tenant_id, soc, "pr", "acme/soc-copilot#12", "med", actor="carol")
+    _add_signal(conn, tenant_id, vuln, "pr", "acme/core#1490", "low", actor="dave")
 
     # --- Build cost (by developer and tool) -------------------------------
+    # developer_id matches the PR author (actor) so per-developer PRs line up.
     _add_build_cost(
-        conn, tenant_id, triage, "dev:alice", "claude_code", "acme/core#1421", 117.00, "high"
+        conn, tenant_id, triage, "alice", "claude_code", "acme/core#1421", 117.00, "high"
     )
-    _add_build_cost(conn, tenant_id, triage, "dev:bob", "cursor", "acme/core#1421", 64.00, "med")
+    _add_build_cost(conn, tenant_id, triage, "bob", "cursor", "acme/core#1440", 64.00, "med")
     _add_build_cost(
-        conn, tenant_id, report, "dev:alice", "claude_code", "acme/core#1455", 88.50, "high"
+        conn, tenant_id, report, "alice", "claude_code", "acme/core#1455", 88.50, "high"
     )
-    _add_build_cost(
-        conn, tenant_id, soc, "dev:carol", "copilot", "acme/soc-copilot#12", 42.25, "med"
-    )
+    _add_build_cost(conn, tenant_id, soc, "carol", "copilot", "acme/soc-copilot#12", 42.25, "med")
     # Unattributed build cost — a developer whose PRs didn't map to a feature.
-    _add_build_cost(conn, tenant_id, None, "dev:dave", "cursor", None, 30.00, "low")
+    _add_build_cost(conn, tenant_id, None, "dave", "cursor", None, 30.00, "low")
 
     # --- Inference cost (connector / cost_api source) ---------------------
     _add_inference_cost(
