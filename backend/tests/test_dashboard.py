@@ -37,6 +37,18 @@ def test_dashboard_keeps_build_and_inference_separate(seeded):
     assert data["unattributed"]["inference_cost"] == 760.0
 
 
+def test_dashboard_executive_highlights(seeded):
+    h = dashboard.dashboard(seeded, PERIOD)["highlights"]
+
+    # Most expensive overall (build + inference): AI threat triage (181 + 4200).
+    assert h["most_expensive"]["name"] == "AI threat triage"
+    # Highest cost/user: Report generator (1850 / 120 ≈ 15.42 > SOC's 15.08).
+    assert h["highest_cost_per_user"]["name"] == "Report generator"
+    # Biggest optimization lever: costliest "watch" feature -> Report generator (1850/mo).
+    assert h["optimization"]["name"] == "Report generator"
+    assert h["optimization"]["worth_it"] == "watch"
+
+
 def test_feature_detail_has_breakdowns_and_evidence(seeded):
     data = dashboard.dashboard(seeded, PERIOD)
     triage = next(f for f in data["features"] if f["name"] == "AI threat triage")

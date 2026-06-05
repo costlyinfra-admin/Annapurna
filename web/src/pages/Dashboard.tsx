@@ -5,9 +5,9 @@
  * Each cost number links to the feature's drill-down, where its evidence trail
  * lives. An Unattributed row carries spend not yet mapped to a feature.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, ApiError, type Dashboard as DashboardData } from "../api";
+import { api, ApiError, type Dashboard as DashboardData, type DashboardRow } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
 import { money, num } from "../format";
@@ -51,6 +51,8 @@ export function Dashboard() {
             {error}
           </p>
         )}
+
+        {data && <ExecutiveSummary data={data} />}
 
         {data && (
           <div className="totals-strip">
@@ -133,6 +135,93 @@ export function Dashboard() {
         </p>
       </main>
     </div>
+  );
+}
+
+/** Executive summary — the headline takeaways a CTO/CFO scans first. */
+function ExecutiveSummary({ data }: { data: DashboardData }) {
+  const { most_expensive, optimization, highest_cost_per_user } = data.highlights;
+  const unattributedTotal = data.unattributed.build_cost + data.unattributed.inference_cost;
+
+  return (
+    <section className="exec-summary">
+      <ExecCard label="Most expensive feature">
+        {most_expensive ? (
+          <>
+            <FeatureLink feature={most_expensive} />
+            {/* build and inference stay separate — never one blended number */}
+            <p className="exec-metric">
+              {money(most_expensive.build_cost)} build · {money(most_expensive.inference_cost)}/mo
+            </p>
+            <span className="exec-sub muted">by total spend</span>
+          </>
+        ) : (
+          <EmptyExec note="No cost yet" />
+        )}
+      </ExecCard>
+
+      <ExecCard label="Largest optimization opportunity">
+        {optimization ? (
+          <>
+            <FeatureLink feature={optimization} />
+            <p className="exec-metric">
+              {money(optimization.inference_cost)}/mo · {money(optimization.cost_per_user)}/user
+            </p>
+            <span className="exec-sub muted">high cost per user — worth a look</span>
+          </>
+        ) : (
+          <EmptyExec note="Nothing flagged" />
+        )}
+      </ExecCard>
+
+      <ExecCard label="Highest cost / user">
+        {highest_cost_per_user ? (
+          <>
+            <FeatureLink feature={highest_cost_per_user} />
+            <p className="exec-metric big">{money(highest_cost_per_user.cost_per_user)}</p>
+            <span className="exec-sub muted">
+              {num(highest_cost_per_user.active_users)} active users
+            </span>
+          </>
+        ) : (
+          <EmptyExec note="No usage data yet" />
+        )}
+      </ExecCard>
+
+      <ExecCard label="Unattributed spend">
+        <p className="exec-metric big">{money(unattributedTotal)}</p>
+        <span className="exec-sub muted">
+          {money(data.unattributed.inference_cost)} inference · {money(data.unattributed.build_cost)}{" "}
+          build
+        </span>
+      </ExecCard>
+    </section>
+  );
+}
+
+function ExecCard({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="exec-card">
+      <span className="exec-label">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function FeatureLink({ feature }: { feature: DashboardRow }) {
+  return (
+    <Link to={`/features/${feature.feature_id}`} className="exec-feature">
+      {feature.name}
+    </Link>
+  );
+}
+
+function EmptyExec({ note }: { note: string }) {
+  return (
+    <>
+      <p className="exec-metric muted">—</p>
+      <span className="exec-sub muted">{note}</span>
+    </>
   );
 }
 

@@ -57,10 +57,17 @@ export interface DashboardRow {
   confidence: string | null;
 }
 
+export interface DashboardHighlights {
+  most_expensive: DashboardRow | null;
+  optimization: DashboardRow | null;
+  highest_cost_per_user: DashboardRow | null;
+}
+
 export interface Dashboard {
   period: string;
   features: DashboardRow[];
   unattributed: { build_cost: number; inference_cost: number };
+  highlights: DashboardHighlights;
   totals: { build_cost: number; inference_cost: number };
 }
 

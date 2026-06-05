@@ -101,11 +101,41 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
         "period": start.isoformat(),
         "features": rows,
         "unattributed": unattributed,
+        "highlights": _highlights(rows),
         "totals": {
             "build_cost": sum(r["build_cost"] for r in rows) + unattributed["build_cost"],
             "inference_cost": sum(r["inference_cost"] for r in rows)
             + unattributed["inference_cost"],
         },
+    }
+
+
+def _highlights(rows: list) -> dict:
+    """Executive-summary picks. Each is a full feature row (or None).
+
+    Build and inference stay separate on each card; ranking uses their sum only to
+    *pick* the row, never to display a blended per-feature number (invariant 2).
+    """
+    most_expensive = max(
+        rows, key=lambda r: r["build_cost"] + r["inference_cost"], default=None
+    )
+    if most_expensive and (most_expensive["build_cost"] + most_expensive["inference_cost"]) == 0:
+        most_expensive = None
+
+    cost_per_user_rows = [r for r in rows if r["cost_per_user"] is not None]
+    highest_cost_per_user = max(
+        cost_per_user_rows, key=lambda r: r["cost_per_user"], default=None
+    )
+
+    # The biggest lever to optimize: the costliest feature flagged as "watch"
+    # (high cost per active user).
+    watch_rows = [r for r in rows if r["worth_it"] == "watch"]
+    optimization = max(watch_rows, key=lambda r: r["inference_cost"], default=None)
+
+    return {
+        "most_expensive": most_expensive,
+        "optimization": optimization,
+        "highest_cost_per_user": highest_cost_per_user,
     }
 
 
