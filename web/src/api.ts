@@ -88,6 +88,8 @@ export interface FeatureDetail {
     amount: number;
     confidence: string;
     prs: number | null;
+    commits: number | null;
+    files_changed: number | null;
   }[];
   inference_trend: { period: string; amount: number; source: string }[];
   evidence: {

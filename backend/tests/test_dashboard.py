@@ -63,9 +63,13 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
 
     by_dev = {d["developer_id"]: d for d in detail["build_by_developer"]}
     assert set(by_dev) == {"alice", "bob"}
-    # PRs per developer come from the authored-PR evidence (alice: #1421 + #1432).
+    # PRs / commits / files per developer come from the authored-PR evidence
+    # (alice: #1421 [9c,21f] + #1432 [5c,16f] -> 2 PRs, 14 commits, 37 files).
     assert by_dev["alice"]["prs"] == 2
+    assert by_dev["alice"]["commits"] == 14
+    assert by_dev["alice"]["files_changed"] == 37
     assert by_dev["bob"]["prs"] == 1
+    assert by_dev["bob"]["commits"] == 7
     # Total AI build spend + contributors for this feature.
     assert detail["build_total"] == 181.0
     assert detail["build_contributors"] == 2

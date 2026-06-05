@@ -21,7 +21,15 @@ const DETAIL = {
   build_total: 181,
   build_contributors: 2,
   build_by_developer: [
-    { developer_id: "alice", tool: "claude_code", amount: 117, confidence: "high", prs: 2 },
+    {
+      developer_id: "alice",
+      tool: "claude_code",
+      amount: 117,
+      confidence: "high",
+      prs: 2,
+      commits: 14,
+      files_changed: 37,
+    },
   ],
   inference_trend: [{ period: "2026-05-01", amount: 4200, source: "cost_api" }],
   evidence: [

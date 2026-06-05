@@ -119,16 +119,12 @@ def _highlights(rows: list) -> dict:
     Build and inference stay separate on each card; ranking uses their sum only to
     *pick* the row, never to display a blended per-feature number (invariant 2).
     """
-    most_expensive = max(
-        rows, key=lambda r: r["build_cost"] + r["inference_cost"], default=None
-    )
+    most_expensive = max(rows, key=lambda r: r["build_cost"] + r["inference_cost"], default=None)
     if most_expensive and (most_expensive["build_cost"] + most_expensive["inference_cost"]) == 0:
         most_expensive = None
 
     cost_per_user_rows = [r for r in rows if r["cost_per_user"] is not None]
-    highest_cost_per_user = max(
-        cost_per_user_rows, key=lambda r: r["cost_per_user"], default=None
-    )
+    highest_cost_per_user = max(cost_per_user_rows, key=lambda r: r["cost_per_user"], default=None)
 
     # The biggest lever to optimize: the costliest feature flagged as "watch"
     # (high cost per active user).
@@ -237,12 +233,15 @@ def feature_detail(
             (feature_id, start),
         ).fetchone()
 
-        # PRs each developer authored for this feature (from the evidence trail).
-        pr_counts = {
-            actor: count
-            for actor, count in conn.execute(
+        # PRs / commits / files each developer authored for this feature (evidence trail).
+        pr_stats = {
+            actor: {"prs": prs, "commits": commits, "files_changed": files}
+            for actor, prs, commits, files in conn.execute(
                 """
-                SELECT actor, COUNT(DISTINCT external_ref)
+                SELECT actor,
+                       COUNT(DISTINCT external_ref),
+                       SUM(commits),
+                       SUM(files_changed)
                 FROM feature_signal
                 WHERE feature_id = %s AND signal_type = 'pr' AND actor IS NOT NULL
                 GROUP BY actor
@@ -257,7 +256,10 @@ def feature_detail(
                 "tool": tool,
                 "amount": float(amount),
                 "confidence": conf,
-                "prs": pr_counts.get(dev),  # None when unknown (no matched PR authorship)
+                # None when unknown (no matched PR authorship / stats not collected).
+                "prs": pr_stats.get(dev, {}).get("prs"),
+                "commits": pr_stats.get(dev, {}).get("commits"),
+                "files_changed": pr_stats.get(dev, {}).get("files_changed"),
             }
             for dev, tool, amount, conf in conn.execute(
                 """

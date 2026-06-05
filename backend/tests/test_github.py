@@ -94,3 +94,25 @@ def test_auth_error_raised_on_401():
     with pytest.raises(GitHubError) as exc:
         _client(handler).fetch_merged_prs("testorg", (NOW - dt.timedelta(days=90)).date())
     assert exc.value.status == 401
+
+
+def test_fetch_pr_stats_from_detail_endpoint():
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        page = int(request.url.params.get("page", "1"))
+        if path == "/orgs/testorg/repos":
+            return httpx.Response(200, json=[{"full_name": "testorg/core"}] if page == 1 else [])
+        if path == "/repos/testorg/core/pulls/1":  # PR detail (check before the list path)
+            return httpx.Response(200, json={"commits": 9, "changed_files": 21})
+        if path == "/repos/testorg/core/pulls":
+            return httpx.Response(200, json=[_pr(1, "feature/x", "alice", 5)] if page == 1 else [])
+        return httpx.Response(200, json=[])
+
+    since = (NOW - dt.timedelta(days=90)).date()
+    prs = _client(handler).fetch_merged_prs("testorg", since)
+    assert prs[0].commits == 9
+    assert prs[0].changed_files == 21
+
+    # with_stats=False skips the detail call -> stats stay None.
+    no_stats = _client(handler).fetch_merged_prs("testorg", since, with_stats=False)
+    assert no_stats[0].commits is None

@@ -38,6 +38,8 @@ class PullRequest:
     author: str
     merged_at: str  # ISO-8601
     url: str
+    commits: Optional[int] = None  # filled from the PR detail endpoint (best-effort)
+    changed_files: Optional[int] = None
 
     @property
     def ref(self) -> str:
@@ -115,14 +117,23 @@ class GitHubClient:
                 return names
             page += 1
 
-    def fetch_merged_prs(self, owner: str, since: dt.date) -> list[PullRequest]:
-        """All PRs across the owner's repos merged on/after ``since``."""
+    def fetch_merged_prs(
+        self, owner: str, since: dt.date, *, with_stats: bool = True
+    ) -> list[PullRequest]:
+        """All PRs across the owner's repos merged on/after ``since``.
+
+        When ``with_stats`` is set, each PR's commit and changed-file counts are
+        fetched from its detail endpoint (one extra GET per PR; best-effort, so a
+        failure leaves those counts as None rather than breaking discovery).
+        """
         prs: list[PullRequest] = []
         for repo in self.list_repos(owner):
-            prs.extend(self._fetch_repo_merged_prs(repo, since))
+            prs.extend(self._fetch_repo_merged_prs(repo, since, with_stats=with_stats))
         return prs
 
-    def _fetch_repo_merged_prs(self, repo: str, since: dt.date) -> list[PullRequest]:
+    def _fetch_repo_merged_prs(
+        self, repo: str, since: dt.date, *, with_stats: bool = True
+    ) -> list[PullRequest]:
         out: list[PullRequest] = []
         for page in range(1, _MAX_PAGES_PER_REPO + 1):
             resp = self._get(
@@ -148,13 +159,27 @@ class GitHubClient:
                     continue
                 if _parse_date(merged_at) < since:
                     continue
-                out.append(_to_pull_request(repo, pr))
+                pull = _to_pull_request(repo, pr)
+                if with_stats:
+                    pull.commits, pull.changed_files = self._fetch_pr_stats(repo, pull.number)
+                out.append(pull)
             # Sorted by updated desc: once an entire page predates the window, stop.
             if page_all_stale:
                 break
             if len(batch) < _PER_PAGE:
                 break
         return out
+
+    def _fetch_pr_stats(self, repo: str, number: int) -> tuple[Optional[int], Optional[int]]:
+        """Commit + changed-file counts from a PR's detail endpoint (best-effort)."""
+        try:
+            data = self._get(f"/repos/{repo}/pulls/{number}").json()
+            if not isinstance(data, dict):
+                return None, None
+            return data.get("commits"), data.get("changed_files")
+        except Exception:
+            # Stats are non-critical; never let them break the connector.
+            return None, None
 
 
 def _parse_date(value: Optional[str]) -> Optional[dt.date]:

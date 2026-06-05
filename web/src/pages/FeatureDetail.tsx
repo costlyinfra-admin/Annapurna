@@ -99,7 +99,9 @@ export function FeatureDetail() {
                       <th>Developer</th>
                       <th>Tool</th>
                       <th className="num">Amount</th>
+                      <th className="num">Commits</th>
                       <th className="num">PRs</th>
+                      <th className="num">Files</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -108,7 +110,9 @@ export function FeatureDetail() {
                         <td>{d.developer_id}</td>
                         <td>{d.tool.replace("_", " ")}</td>
                         <td className="num">{money(d.amount)}</td>
+                        <td className="num">{num(d.commits)}</td>
                         <td className="num">{num(d.prs)}</td>
+                        <td className="num">{num(d.files_changed)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -45,14 +45,34 @@ def _add_feature(
     return row[0]
 
 
-def _add_signal(conn, tenant_id, feature_id, signal_type, external_ref, confidence, actor=None):
+def _add_signal(
+    conn,
+    tenant_id,
+    feature_id,
+    signal_type,
+    external_ref,
+    confidence,
+    actor=None,
+    commits=None,
+    files_changed=None,
+):
     conn.execute(
         """
-        INSERT INTO feature_signal (tenant_id, feature_id, signal_type,
-                                    external_ref, confidence, source, actor)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO feature_signal (tenant_id, feature_id, signal_type, external_ref,
+                                    confidence, source, actor, commits, files_changed)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (tenant_id, feature_id, signal_type, external_ref, confidence, "github", actor),
+        (
+            tenant_id,
+            feature_id,
+            signal_type,
+            external_ref,
+            confidence,
+            "github",
+            actor,
+            commits,
+            files_changed,
+        ),
     )
 
 
@@ -176,13 +196,73 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str) -> dict:
     # --- Evidence signals (the trail) -------------------------------------
     # PR signals carry their author (actor) so build cost attributes per developer.
     _add_signal(conn, tenant_id, triage, "branch", "feature/threat-*", "high")
-    _add_signal(conn, tenant_id, triage, "pr", "acme/core#1421", "high", actor="alice")
-    _add_signal(conn, tenant_id, triage, "pr", "acme/core#1432", "high", actor="alice")
-    _add_signal(conn, tenant_id, triage, "pr", "acme/core#1440", "high", actor="bob")
-    _add_signal(conn, tenant_id, report, "pr", "acme/core#1455", "high", actor="alice")
+    _add_signal(
+        conn,
+        tenant_id,
+        triage,
+        "pr",
+        "acme/core#1421",
+        "high",
+        actor="alice",
+        commits=9,
+        files_changed=21,
+    )
+    _add_signal(
+        conn,
+        tenant_id,
+        triage,
+        "pr",
+        "acme/core#1432",
+        "high",
+        actor="alice",
+        commits=5,
+        files_changed=16,
+    )
+    _add_signal(
+        conn,
+        tenant_id,
+        triage,
+        "pr",
+        "acme/core#1440",
+        "high",
+        actor="bob",
+        commits=7,
+        files_changed=12,
+    )
+    _add_signal(
+        conn,
+        tenant_id,
+        report,
+        "pr",
+        "acme/core#1455",
+        "high",
+        actor="alice",
+        commits=6,
+        files_changed=9,
+    )
     _add_signal(conn, tenant_id, soc, "repo", "acme/soc-copilot", "med")
-    _add_signal(conn, tenant_id, soc, "pr", "acme/soc-copilot#12", "med", actor="carol")
-    _add_signal(conn, tenant_id, vuln, "pr", "acme/core#1490", "low", actor="dave")
+    _add_signal(
+        conn,
+        tenant_id,
+        soc,
+        "pr",
+        "acme/soc-copilot#12",
+        "med",
+        actor="carol",
+        commits=4,
+        files_changed=7,
+    )
+    _add_signal(
+        conn,
+        tenant_id,
+        vuln,
+        "pr",
+        "acme/core#1490",
+        "low",
+        actor="dave",
+        commits=3,
+        files_changed=5,
+    )
 
     # --- Build cost (by developer and tool) -------------------------------
     # developer_id matches the PR author (actor) so per-developer PRs line up.

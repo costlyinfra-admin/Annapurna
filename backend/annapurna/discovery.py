@@ -193,8 +193,8 @@ def run_discovery(tenant_id: str, owner: str, token: str, *, days: int = 90) -> 
     with _make_github_client(token) as gh:
         prs = gh.fetch_merged_prs(owner, since)
     proposals = cluster_prs(prs)
-    author_by_ref = {pr.ref: pr.author for pr in prs}
-    _persist_proposals(tenant_id, proposals, author_by_ref)
+    pr_by_ref = {pr.ref: pr for pr in prs}
+    _persist_proposals(tenant_id, proposals, pr_by_ref)
     return {
         "owner": owner,
         "prs": len(prs),
@@ -204,9 +204,9 @@ def run_discovery(tenant_id: str, owner: str, token: str, *, days: int = 90) -> 
 
 
 def _persist_proposals(
-    tenant_id: str, proposals: list[Proposal], author_by_ref: Optional[dict] = None
+    tenant_id: str, proposals: list[Proposal], pr_by_ref: Optional[dict] = None
 ) -> None:
-    author_by_ref = author_by_ref or {}
+    pr_by_ref = pr_by_ref or {}
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         # Re-running discovery regenerates proposals; confirmed features are kept.
         conn.execute("DELETE FROM feature WHERE status = 'proposed'")
@@ -224,7 +224,8 @@ def _persist_proposals(
                     conn, tenant_id, feature_id, "branch", prop.branch_pattern, prop.confidence
                 )
             for ref in prop.pr_refs:
-                # record the PR author so build-cost allocation (M5) can use it
+                # record the PR author + stats so build cost attributes per developer
+                pr = pr_by_ref.get(ref)
                 _add_signal(
                     conn,
                     tenant_id,
@@ -232,18 +233,39 @@ def _persist_proposals(
                     "pr",
                     ref,
                     prop.confidence,
-                    actor=author_by_ref.get(ref),
+                    actor=getattr(pr, "author", None),
+                    commits=getattr(pr, "commits", None),
+                    files_changed=getattr(pr, "changed_files", None),
                 )
 
 
-def _add_signal(conn, tenant_id, feature_id, signal_type, external_ref, confidence, actor=None):
+def _add_signal(
+    conn,
+    tenant_id,
+    feature_id,
+    signal_type,
+    external_ref,
+    confidence,
+    actor=None,
+    commits=None,
+    files_changed=None,
+):
     conn.execute(
         """
         INSERT INTO feature_signal (tenant_id, feature_id, signal_type, external_ref,
-                                    confidence, source, actor)
-        VALUES (%s, %s, %s, %s, %s, 'github', %s)
+                                    confidence, source, actor, commits, files_changed)
+        VALUES (%s, %s, %s, %s, %s, 'github', %s, %s, %s)
         """,
-        (tenant_id, feature_id, signal_type, external_ref, confidence, actor),
+        (
+            tenant_id,
+            feature_id,
+            signal_type,
+            external_ref,
+            confidence,
+            actor,
+            commits,
+            files_changed,
+        ),
     )
 
 
