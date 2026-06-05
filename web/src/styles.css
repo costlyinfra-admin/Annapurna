@@ -619,11 +619,39 @@ select {
 .exec-item {
   flex: 1 1 190px;
   min-width: 170px;
-  padding: 0.8rem 1.1rem;
+  padding: 0.85rem 1.1rem 0.8rem;
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
   border-right: 1px solid var(--line);
+  position: relative;
+  background: var(--seg-tint, transparent);
+}
+
+/* colored top accent per segment */
+.exec-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--seg-accent, var(--line));
+}
+
+.exec-item--neutral {
+  --seg-accent: var(--accent);
+  --seg-tint: linear-gradient(180deg, #f6f7ff, var(--card) 60%);
+}
+
+.exec-item--warn {
+  --seg-accent: var(--warn);
+  --seg-tint: linear-gradient(180deg, #fff7e9, var(--card) 60%);
+}
+
+.exec-item--good {
+  --seg-accent: var(--good);
+  --seg-tint: linear-gradient(180deg, #eef9f1, var(--card) 60%);
 }
 
 .exec-item:last-child {

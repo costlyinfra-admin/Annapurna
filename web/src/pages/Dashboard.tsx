@@ -145,7 +145,7 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
 
   return (
     <section className="exec-summary" aria-label="Executive summary">
-      <ExecItem label="Most expensive">
+      <ExecItem label="Most expensive" tone="neutral">
         {most_expensive ? (
           <>
             <FeatureValue feature={most_expensive} />
@@ -159,7 +159,7 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
         )}
       </ExecItem>
 
-      <ExecItem label="Optimization">
+      <ExecItem label="Optimization" tone={optimization ? "warn" : "good"}>
         {optimization ? (
           <>
             <FeatureValue feature={optimization} />
@@ -172,7 +172,7 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
         )}
       </ExecItem>
 
-      <ExecItem label="Highest cost / user">
+      <ExecItem label="Highest cost / user" tone={highest_cost_per_user ? "warn" : "neutral"}>
         {highest_cost_per_user ? (
           <>
             <FeatureValue feature={highest_cost_per_user} />
@@ -186,7 +186,7 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
         )}
       </ExecItem>
 
-      <ExecItem label="Unattributed spend">
+      <ExecItem label="Unattributed spend" tone={unattributedTotal > 0 ? "warn" : "good"}>
         <span className="exec-value num">{money(unattributedTotal)}</span>
         <span className="exec-sub">
           {money(data.unattributed.inference_cost)} inf · {money(data.unattributed.build_cost)} build
@@ -196,9 +196,17 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
   );
 }
 
-function ExecItem({ label, children }: { label: string; children: ReactNode }) {
+function ExecItem({
+  label,
+  tone = "neutral",
+  children,
+}: {
+  label: string;
+  tone?: "neutral" | "warn" | "good";
+  children: ReactNode;
+}) {
   return (
-    <div className="exec-item">
+    <div className={`exec-item exec-item--${tone}`}>
       <span className="exec-label">{label}</span>
       {children}
     </div>
