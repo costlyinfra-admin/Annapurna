@@ -30,6 +30,9 @@ describe("App routing", () => {
     vi.mocked(api.me).mockRejectedValue(new ApiError(401, "Not authenticated"));
     renderApp();
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    // Demo callout with the public credentials is shown on the login screen.
+    expect(screen.getByText("demo@annapurna.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View the demo" })).toBeInTheDocument();
   });
 
   it("sends authenticated users into onboarding", async () => {

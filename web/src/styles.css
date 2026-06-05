@@ -838,3 +838,67 @@ select {
   color: var(--ink);
   border: 1px solid #d8def9;
 }
+
+/* ---- Demo affordances ---- */
+.demo-callout {
+  margin-top: 1.4rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--line);
+}
+
+.demo-title {
+  font-weight: 650;
+  margin: 0 0 0.2rem;
+}
+
+.demo-creds {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0.7rem 0;
+}
+
+.demo-creds > div {
+  flex: 1;
+  background: var(--accent-soft);
+  border: 1px solid #dfe4fb;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.7rem;
+}
+
+.demo-creds dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.demo-creds dd {
+  margin: 0.1rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.demo-callout button {
+  width: 100%;
+}
+
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  border: 1px solid #d8def9;
+  border-radius: var(--radius);
+  padding: 0.85rem 1.1rem;
+  margin: 1.25rem 0 0;
+  font-size: 0.92rem;
+}
+
+.demo-banner button {
+  margin-left: auto;
+  white-space: nowrap;
+}

@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError, type ConnectorStatus } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { DEMO_EMAIL } from "../demo";
 import { ConfirmStep } from "./onboarding/ConfirmStep";
 import { ReviewStep } from "./onboarding/ReviewStep";
 
@@ -17,7 +18,8 @@ const STEPS = ["Connect sources", "Review features", "Confirm & go live"];
 export function Onboarding() {
   const [step, setStep] = useState(0);
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+  const isDemo = user?.email === DEMO_EMAIL;
 
   return (
     <div className="wizard">
@@ -27,6 +29,16 @@ export function Onboarding() {
           Sign out
         </button>
       </header>
+
+      {isDemo && (
+        <div className="demo-banner" role="status">
+          <span>
+            👋 You're viewing the <strong>demo</strong>. You don't need to connect sources or
+            review features — the data is already loaded.
+          </span>
+          <button onClick={() => navigate("/dashboard")}>Skip to the demo dashboard →</button>
+        </div>
+      )}
 
       <ol className="stepper">
         {STEPS.map((label, i) => (

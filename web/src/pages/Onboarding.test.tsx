@@ -89,4 +89,17 @@ describe("Onboarding wizard shell", () => {
     renderOnboarding();
     expect(await screen.findByText("Connected")).toBeInTheDocument();
   });
+
+  it("shows a demo banner for the demo account (skip straight to dashboard)", async () => {
+    vi.mocked(api.me).mockResolvedValue({
+      id: "u1",
+      tenant_id: "t1",
+      email: "demo@annapurna.com",
+    });
+    renderOnboarding();
+    expect(await screen.findByText(/You're viewing the/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Skip to the demo dashboard →" }),
+    ).toBeInTheDocument();
+  });
 });

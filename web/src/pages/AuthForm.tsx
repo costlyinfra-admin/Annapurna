@@ -1,5 +1,5 @@
 /** Shared email/password form for the Login and Signup pages. */
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api";
 
@@ -8,9 +8,10 @@ interface AuthFormProps {
   submitLabel: string;
   onSubmit: (email: string, password: string) => Promise<void>;
   footer: { prompt: string; linkLabel: string; to: string };
+  note?: ReactNode;
 }
 
-export function AuthForm({ title, submitLabel, onSubmit, footer }: AuthFormProps) {
+export function AuthForm({ title, submitLabel, onSubmit, footer, note }: AuthFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +64,7 @@ export function AuthForm({ title, submitLabel, onSubmit, footer }: AuthFormProps
       <p className="muted">
         {footer.prompt} <Link to={footer.to}>{footer.linkLabel}</Link>
       </p>
+      {note}
     </div>
   );
 }
