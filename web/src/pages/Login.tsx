@@ -29,16 +29,6 @@ export function Login() {
     <div className="demo-callout">
       <p className="demo-title">Not ready to create an account?</p>
       <p className="muted">See a live demo dashboard — no signup needed.</p>
-      <dl className="demo-creds">
-        <div>
-          <dt>Email</dt>
-          <dd>{DEMO_EMAIL}</dd>
-        </div>
-        <div>
-          <dt>Password</dt>
-          <dd>{DEMO_PASSWORD}</dd>
-        </div>
-      </dl>
       {demoError && (
         <p className="error" role="alert">
           {demoError}
