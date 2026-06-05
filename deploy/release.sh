@@ -11,10 +11,11 @@ python -m annapurna.migrations
 
 if [ -n "${ANNAPURNA_APP_DB_PASSWORD:-}" ]; then
   echo "▶ Ensuring the application role password…"
-  # :'pw' safely quotes the value, whatever characters it contains.
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-    -v pw="$ANNAPURNA_APP_DB_PASSWORD" \
-    -c "ALTER ROLE annapurna_app WITH LOGIN PASSWORD :'pw'"
+  # psql :'pw' interpolation safely quotes any password, but it only works when
+  # the SQL arrives via stdin/file — NOT via `-c` (which sends literal SQL).
+  psql "$DATABASE_URL" --no-psqlrc -v ON_ERROR_STOP=1 -v "pw=$ANNAPURNA_APP_DB_PASSWORD" <<'SQL'
+ALTER ROLE annapurna_app WITH LOGIN PASSWORD :'pw';
+SQL
 fi
 
 echo "✓ Release tasks complete."
