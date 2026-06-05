@@ -98,7 +98,7 @@ It runs daily; you can also trigger it anytime from the **Actions** tab
 - On the dashboard, **Add cost data** to sync inference and import a build-cost CSV.
 
 Want a populated demo instead? You can seed the demo tenant by running, with your
-Neon `DATABASE_URL` exported locally: `make db-seed` (login `demo@acme.com` /
+Neon `DATABASE_URL` exported locally: `make db-seed` (login `demo@annapurna.com` /
 `annapurna-demo`).
 
 ---

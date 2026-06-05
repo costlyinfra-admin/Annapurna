@@ -1,0 +1,42 @@
+name: Seed demo data
+
+# Manually-triggered: seeds the demo "Acme Security" tenant + a login into the
+# production database. Run from the Actions tab -> "Seed demo data" -> Run workflow.
+# Idempotent: re-running does nothing if the demo user already exists.
+# Requires repo secret: DATABASE_URL.
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Demo login email"
+        default: "demo@annapurna.com"
+        required: true
+      password:
+        description: "Demo login password"
+        default: "annapurna-demo"
+        required: true
+
+jobs:
+  seed:
+    name: Seed demo tenant
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Postgres client (psql, for migrations)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Seed
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DEMO_USER_EMAIL: ${{ inputs.email }}
+          DEMO_USER_PASSWORD: ${{ inputs.password }}
+        run: python -m seed

@@ -22,7 +22,7 @@ starts the API (`:8000`) and the web app (`:5173`), and prints the login. Press
 
 Open **http://localhost:5173** and sign in:
 
-> **demo@acme.com** / **annapurna-demo**
+> **demo@annapurna.com** / **annapurna-demo**
 
 ---
 

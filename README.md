@@ -102,7 +102,7 @@ to the backend. Auth uses a signed, http-only session cookie; connector secrets
 you paste are encrypted before they're stored.
 
 **Want to see the dashboard with data immediately?** Run `make db-seed` and log in
-as the demo account it prints (`demo@acme.com` / `annapurna-demo`) — the seeded
+as the demo account it prints (`demo@annapurna.com` / `annapurna-demo`) — the seeded
 "Acme Security" tenant has features with build + inference cost, usage, and an
 Unattributed bucket already populated.
 
@@ -158,7 +158,7 @@ Annapurna is open source — fork it, run it for your own company, or deploy you
 own instance. Two paths:
 
 - **Try it locally in one command:** `make demo` spins up a throwaway seeded
-  database, starts the app, and prints a login (`demo@acme.com` / `annapurna-demo`).
+  database, starts the app, and prints a login (`demo@annapurna.com` / `annapurna-demo`).
   Prereqs: `make install` and PostgreSQL 16.
 - **Deploy your own instance:** follow [`docs/deploy.md`](docs/deploy.md) — a
   step-by-step on a free stack (Neon + Render + a free GitHub Actions cron),

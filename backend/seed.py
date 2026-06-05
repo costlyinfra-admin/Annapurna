@@ -1,23 +1,30 @@
-"""Seed script — one fake tenant with sample data, so the UI has something to render.
+"""Seed script — one demo tenant with sample data, so the UI has something to render.
 
-Usage (with DATABASE_URL / DATABASE_ADMIN_URL set to a Postgres instance):
+Usage (with DATABASE_URL set to a Postgres instance):
 
-    python -m seed            # apply migrations, then seed "Acme Security"
+    python -m seed            # apply migrations, then seed the demo tenant
 
-Runs as the bootstrap/admin role. Idempotent on schema (migrations are tracked);
-re-running creates an additional demo tenant, which is fine for local dev.
+Credentials are configurable via env (defaults shown):
+    DEMO_TENANT_NAME="Acme Security"
+    DEMO_USER_EMAIL="demo@annapurna.com"
+    DEMO_USER_PASSWORD="annapurna-demo"
+
+Runs as the bootstrap/admin role. Idempotent: if the demo user already exists,
+it does nothing (safe to run again).
 """
 
 from __future__ import annotations
+
+import os
 
 from annapurna.auth import hash_password
 from annapurna.db import admin_dsn, connect
 from annapurna.migrations import apply_migrations
 from annapurna.sampledata import create_tenant, insert_sample_data
 
-DEMO_TENANT_NAME = "Acme Security"
-DEMO_USER_EMAIL = "demo@acme.com"
-DEMO_USER_PASSWORD = "annapurna-demo"
+DEMO_TENANT_NAME = os.environ.get("DEMO_TENANT_NAME", "Acme Security")
+DEMO_USER_EMAIL = os.environ.get("DEMO_USER_EMAIL", "demo@annapurna.com").strip().lower()
+DEMO_USER_PASSWORD = os.environ.get("DEMO_USER_PASSWORD", "annapurna-demo")
 
 
 def main() -> None:
@@ -26,6 +33,13 @@ def main() -> None:
         print("Applied migrations:", ", ".join(applied))
 
     with connect(admin_dsn()) as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM app_user WHERE email = %s", (DEMO_USER_EMAIL,)
+        ).fetchone()
+        if existing:
+            print(f"Demo user {DEMO_USER_EMAIL!r} already exists — nothing to seed.")
+            return
+
         with conn.transaction():
             tenant_id = create_tenant(conn, DEMO_TENANT_NAME)
             summary = insert_sample_data(conn, tenant_id)
@@ -34,6 +48,7 @@ def main() -> None:
                 "INSERT INTO app_user (tenant_id, email, password_hash) VALUES (%s, %s, %s)",
                 (tenant_id, DEMO_USER_EMAIL, hash_password(DEMO_USER_PASSWORD)),
             )
+
     print(
         f"Seeded tenant {DEMO_TENANT_NAME!r} ({tenant_id}) "
         f"with {summary['features']} features and sample build/inference costs."
