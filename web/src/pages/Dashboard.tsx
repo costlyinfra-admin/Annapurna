@@ -10,7 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError, type Dashboard as DashboardData, type DashboardRow } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
-import { money, num } from "../format";
+import { compact, money, num } from "../format";
 
 export function Dashboard() {
   const { user, logout } = useAuth();
@@ -98,6 +98,7 @@ export function Dashboard() {
                 <th className="num">Inference / mo</th>
                 <th className="num">Active users</th>
                 <th className="num">Cost / user</th>
+                <th className="num">Requests</th>
                 <th>Worth it?</th>
                 <th>Confidence</th>
               </tr>
@@ -114,6 +115,9 @@ export function Dashboard() {
                   <td className="num">{money(f.inference_cost)}</td>
                   <td className="num">{num(f.active_users)}</td>
                   <td className="num">{money(f.cost_per_user)}</td>
+                  <td className="num" title="AI model calls this feature made">
+                    {compact(f.requests)}
+                  </td>
                   <td><WorthBadge value={f.worth_it} /></td>
                   <td><ConfidenceBadge level={f.confidence} /></td>
                 </tr>
@@ -122,6 +126,7 @@ export function Dashboard() {
                 <td>Unattributed</td>
                 <td className="num">{money(data.unattributed.build_cost)}</td>
                 <td className="num">{money(data.unattributed.inference_cost)}</td>
+                <td className="num">—</td>
                 <td className="num">—</td>
                 <td className="num">—</td>
                 <td colSpan={2} className="muted">spend not yet mapped to a feature</td>

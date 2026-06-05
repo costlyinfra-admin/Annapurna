@@ -20,3 +20,14 @@ export function num(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return new Intl.NumberFormat("en-US").format(value);
 }
+
+const COMPACT = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+/** Compact count, e.g. 320,000 -> "320K". `null` -> em dash (unknown). */
+export function compact(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return COMPACT.format(value);
+}

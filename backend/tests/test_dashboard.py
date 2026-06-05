@@ -32,6 +32,9 @@ def test_dashboard_keeps_build_and_inference_separate(seeded):
     assert triage["active_users"] == 540
     assert abs(triage["cost_per_user"] - 4200.0 / 540) < 1e-6
 
+    # Requests = number of AI model calls the feature made (from inference_cost).
+    assert triage["requests"] == 320_000
+
     # The Unattributed bucket carries both unmapped build and inference spend.
     assert data["unattributed"]["build_cost"] == 30.0
     assert data["unattributed"]["inference_cost"] == 760.0

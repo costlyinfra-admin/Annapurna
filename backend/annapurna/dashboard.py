@@ -77,7 +77,7 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
     for fid, name, _status, _disc in features:
         fid = str(fid)
         b = build.get(fid, {"amount": 0.0, "confidence": None})
-        i = inference.get(fid, {"amount": 0.0, "confidence": None})
+        i = inference.get(fid, {"amount": 0.0, "confidence": None, "requests": None})
         users = usage.get(fid)
         cost_per_user = (i["amount"] / users) if users else None
         rows.append(
@@ -88,6 +88,9 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
                 "inference_cost": i["amount"],  # kept separate from build
                 "active_users": users,
                 "cost_per_user": cost_per_user,
+                # Number of AI model calls this feature made (None when unknown —
+                # e.g. connector-only, no hook, since cost APIs don't report counts).
+                "requests": i.get("requests"),
                 "worth_it": _worth_indicator(i["amount"], users),
                 "confidence": _min_confidence(b["confidence"], i["confidence"]),
             }
@@ -154,10 +157,14 @@ def _rollup(conn, table: str, period: dt.date) -> dict:
     return out
 
 
-def _accum(features: dict, key: str, amount: float, confidence: Optional[str]) -> None:
-    entry = features.setdefault(key, {"amount": 0.0, "confidence": None})
+def _accum(
+    features: dict, key: str, amount: float, confidence: Optional[str], requests=None
+) -> None:
+    entry = features.setdefault(key, {"amount": 0.0, "confidence": None, "requests": None})
     entry["amount"] += amount
     entry["confidence"] = _min_confidence(entry["confidence"], confidence)
+    if requests is not None:
+        entry["requests"] = (entry["requests"] or 0) + int(requests)
 
 
 def _inference_rollup(conn, period: dt.date) -> tuple[dict, float]:
@@ -169,24 +176,24 @@ def _inference_rollup(conn, period: dt.date) -> tuple[dict, float]:
     before. This prevents double-counting the same spend.
     """
     rows = conn.execute(
-        "SELECT feature_id, amount, confidence, source, provider "
+        "SELECT feature_id, amount, confidence, source, provider, request_count "
         "FROM inference_cost WHERE period = %s",
         (period,),
     ).fetchall()
-    hook_providers = {prov for (_f, _a, _c, src, prov) in rows if src == "hook"}
+    hook_providers = {provider for (_f, _a, _c, src, provider, _r) in rows if src == "hook"}
 
     features: dict = {}
     unattributed = 0.0
     billed: dict = {}
     hooked: dict = {}
-    for feature_id, amount, confidence, source, provider in rows:
+    for feature_id, amount, confidence, source, provider, requests in rows:
         amt = float(amount)
         if source == "hook":
             hooked[provider] = hooked.get(provider, 0.0) + amt
             if feature_id is None:
                 unattributed += amt
             else:
-                _accum(features, str(feature_id), amt, confidence)
+                _accum(features, str(feature_id), amt, confidence, requests)
         else:  # cost_api
             billed[provider] = billed.get(provider, 0.0) + amt
             if provider in hook_providers:
@@ -194,7 +201,7 @@ def _inference_rollup(conn, period: dt.date) -> tuple[dict, float]:
             if feature_id is None:
                 unattributed += amt
             else:
-                _accum(features, str(feature_id), amt, confidence)
+                _accum(features, str(feature_id), amt, confidence, requests)
 
     for provider in hook_providers:
         gap = billed.get(provider, 0.0) - hooked.get(provider, 0.0)

@@ -53,6 +53,7 @@ export interface DashboardRow {
   inference_cost: number;
   active_users: number | null;
   cost_per_user: number | null;
+  requests: number | null;
   worth_it: string;
   confidence: string | null;
 }

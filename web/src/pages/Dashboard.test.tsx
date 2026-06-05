@@ -17,6 +17,7 @@ const TRIAGE = {
   inference_cost: 4200,
   active_users: 540,
   cost_per_user: 7.77,
+  requests: 320000,
   worth_it: "healthy",
   confidence: "med",
 };
