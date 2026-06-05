@@ -138,89 +138,86 @@ export function Dashboard() {
   );
 }
 
-/** Executive summary — the headline takeaways a CTO/CFO scans first. */
+/** Executive summary — one compact card; the headlines a CTO/CFO scans first. */
 function ExecutiveSummary({ data }: { data: DashboardData }) {
   const { most_expensive, optimization, highest_cost_per_user } = data.highlights;
   const unattributedTotal = data.unattributed.build_cost + data.unattributed.inference_cost;
 
   return (
-    <section className="exec-summary">
-      <ExecCard label="Most expensive feature">
+    <section className="exec-summary" aria-label="Executive summary">
+      <ExecItem label="Most expensive">
         {most_expensive ? (
           <>
-            <FeatureLink feature={most_expensive} />
+            <FeatureValue feature={most_expensive} />
             {/* build and inference stay separate — never one blended number */}
-            <p className="exec-metric">
+            <span className="exec-sub">
               {money(most_expensive.build_cost)} build · {money(most_expensive.inference_cost)}/mo
-            </p>
-            <span className="exec-sub muted">by total spend</span>
-          </>
-        ) : (
-          <EmptyExec note="No cost yet" />
-        )}
-      </ExecCard>
-
-      <ExecCard label="Largest optimization opportunity">
-        {optimization ? (
-          <>
-            <FeatureLink feature={optimization} />
-            <p className="exec-metric">
-              {money(optimization.inference_cost)}/mo · {money(optimization.cost_per_user)}/user
-            </p>
-            <span className="exec-sub muted">high cost per user — worth a look</span>
-          </>
-        ) : (
-          <EmptyExec note="Nothing flagged" />
-        )}
-      </ExecCard>
-
-      <ExecCard label="Highest cost / user">
-        {highest_cost_per_user ? (
-          <>
-            <FeatureLink feature={highest_cost_per_user} />
-            <p className="exec-metric big">{money(highest_cost_per_user.cost_per_user)}</p>
-            <span className="exec-sub muted">
-              {num(highest_cost_per_user.active_users)} active users
             </span>
           </>
         ) : (
-          <EmptyExec note="No usage data yet" />
+          <ExecEmpty note="No cost yet" />
         )}
-      </ExecCard>
+      </ExecItem>
 
-      <ExecCard label="Unattributed spend">
-        <p className="exec-metric big">{money(unattributedTotal)}</p>
-        <span className="exec-sub muted">
-          {money(data.unattributed.inference_cost)} inference · {money(data.unattributed.build_cost)}{" "}
-          build
+      <ExecItem label="Optimization">
+        {optimization ? (
+          <>
+            <FeatureValue feature={optimization} />
+            <span className="exec-sub">
+              {money(optimization.inference_cost)}/mo · {money(optimization.cost_per_user)}/user
+            </span>
+          </>
+        ) : (
+          <ExecEmpty note="Nothing flagged" />
+        )}
+      </ExecItem>
+
+      <ExecItem label="Highest cost / user">
+        {highest_cost_per_user ? (
+          <>
+            <FeatureValue feature={highest_cost_per_user} />
+            <span className="exec-sub">
+              {money(highest_cost_per_user.cost_per_user)}/user · {num(highest_cost_per_user.active_users)}{" "}
+              users
+            </span>
+          </>
+        ) : (
+          <ExecEmpty note="No usage data" />
+        )}
+      </ExecItem>
+
+      <ExecItem label="Unattributed spend">
+        <span className="exec-value num">{money(unattributedTotal)}</span>
+        <span className="exec-sub">
+          {money(data.unattributed.inference_cost)} inf · {money(data.unattributed.build_cost)} build
         </span>
-      </ExecCard>
+      </ExecItem>
     </section>
   );
 }
 
-function ExecCard({ label, children }: { label: string; children: ReactNode }) {
+function ExecItem({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="exec-card">
+    <div className="exec-item">
       <span className="exec-label">{label}</span>
       {children}
     </div>
   );
 }
 
-function FeatureLink({ feature }: { feature: DashboardRow }) {
+function FeatureValue({ feature }: { feature: DashboardRow }) {
   return (
-    <Link to={`/features/${feature.feature_id}`} className="exec-feature">
+    <Link to={`/features/${feature.feature_id}`} className="exec-value" title={feature.name}>
       {feature.name}
     </Link>
   );
 }
 
-function EmptyExec({ note }: { note: string }) {
+function ExecEmpty({ note }: { note: string }) {
   return (
     <>
-      <p className="exec-metric muted">—</p>
-      <span className="exec-sub muted">{note}</span>
+      <span className="exec-value muted">—</span>
+      <span className="exec-sub">{note}</span>
     </>
   );
 }

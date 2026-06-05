@@ -69,10 +69,10 @@ describe("Dashboard", () => {
     expect(screen.getByText("Healthy")).toBeInTheDocument();
   });
 
-  it("renders the executive summary cards", async () => {
+  it("renders the executive summary", async () => {
     renderDashboard();
-    expect(await screen.findByText("Most expensive feature")).toBeInTheDocument();
-    expect(screen.getByText("Largest optimization opportunity")).toBeInTheDocument();
+    expect(await screen.findByText("Most expensive")).toBeInTheDocument();
+    expect(screen.getByText("Optimization")).toBeInTheDocument();
     expect(screen.getByText("Highest cost / user")).toBeInTheDocument();
     expect(screen.getByText("Unattributed spend")).toBeInTheDocument();
     // Unattributed total = build 30 + inference 760.

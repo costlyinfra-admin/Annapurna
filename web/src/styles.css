@@ -604,70 +604,73 @@ select {
   margin: 1.25rem 0 1rem;
 }
 
-/* ---- Executive summary ---- */
+/* ---- Executive summary (one compact card, 4 segments) ---- */
 .exec-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 1rem;
-  margin: 0.5rem 0 1.5rem;
-}
-
-.exec-card {
+  display: flex;
+  flex-wrap: wrap;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 1rem 1.15rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
   box-shadow: var(--shadow-sm);
-  position: relative;
+  margin: 0.5rem 0 1.25rem;
+  overflow: hidden;
 }
 
-.exec-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 1rem;
-  bottom: 1rem;
-  width: 3px;
-  border-radius: 3px;
-  background: linear-gradient(180deg, var(--accent), #7c75f0);
+.exec-item {
+  flex: 1 1 190px;
+  min-width: 170px;
+  padding: 0.8rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  border-right: 1px solid var(--line);
+}
+
+.exec-item:last-child {
+  border-right: none;
 }
 
 .exec-label {
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
   font-weight: 650;
 }
 
-.exec-feature {
-  font-size: 1.15rem;
+.exec-value {
+  font-size: 1rem;
   font-weight: 700;
+  color: var(--ink);
+  line-height: 1.25;
   letter-spacing: -0.01em;
-  line-height: 1.2;
-  margin-top: 0.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.exec-metric {
-  margin: 0.15rem 0 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--ink-soft);
+.exec-value.num {
   font-variant-numeric: tabular-nums;
 }
 
-.exec-metric.big {
-  font-size: 1.5rem;
-  font-weight: 750;
-  letter-spacing: -0.02em;
-  color: var(--ink);
+a.exec-value:hover {
+  color: var(--accent-hover);
 }
 
 .exec-sub {
-  font-size: 0.8rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .exec-item {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .exec-item:last-child {
+    border-bottom: none;
+  }
 }
 
 .totals-strip,
