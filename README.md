@@ -1,223 +1,367 @@
+<div align="center">
+
 # Annapurna
 
-Annapurna takes a company's blended AI bill and tells them exactly **which
-features consumed it** — what each feature cost to **build** (AI coding tools)
-and to **run** (inference) — so a CTO/CFO can decide whether the AI investment
-was worth it.
+**Know what every feature cost you — to *build* and to *run*.**
 
-The buyer is a CTO/CFO, not a developer. The output is board-grade: one credible,
-defensible number per feature, with a confidence level and an evidence trail
-behind every figure.
+Annapurna takes a company's blended AI bill and shows exactly which **features**
+consumed it: what each feature cost to **build** (AI coding tools) and to **run**
+(LLM inference) — so a CTO/CFO can decide whether the AI investment was worth it.
 
-> **Core invariants** (see [`CLAUDE.md`](CLAUDE.md)): the connector path is the
-> must-ship core and stands alone; build cost and inference cost are never
-> blended; every cost row carries a confidence value with an evidence trail;
-> `feature_id` is the spine and unmapped spend goes to the **Unattributed**
-> bucket; all connectors are read-only with strict per-tenant isolation.
+[![CI](https://github.com/costlyinfra-admin/Annapurna/actions/workflows/ci.yml/badge.svg)](https://github.com/costlyinfra-admin/Annapurna/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+![Node](https://img.shields.io/badge/node-18%2B-green)
+![Postgres](https://img.shields.io/badge/postgres-16-blue)
 
-## Documentation
+[**Live demo**](https://annapurna.costlyinfra.com) · [Design doc](docs/annapurna-design-doc.md) · [Deploy guide](docs/deploy.md) · [Contributing](CONTRIBUTING.md)
 
-- **[`docs/annapurna-design-doc.md`](docs/annapurna-design-doc.md)** — the canonical
-  spec (intent, data model, attribution, screens). Wins on intent.
-- **[`docs/build-plan.md`](docs/build-plan.md)** — ordered milestones M0–M8 with
-  acceptance criteria. Built one at a time, in order.
-- **[`CLAUDE.md`](CLAUDE.md)** — standing instructions and non-negotiable invariants.
+</div>
+
+> **Try it in 5 seconds:** open the [live demo](https://annapurna.costlyinfra.com)
+> and click **“View the demo”** on the login screen — no signup required.
+
+---
+
+## Table of contents
+
+- [The problem](#the-problem)
+- [What Annapurna does](#what-annapurna-does)
+- [Core concepts](#core-concepts)
+- [Screens](#screens)
+- [Architecture](#architecture)
+- [Repository layout](#repository-layout)
+- [Tech stack](#tech-stack)
+- [Quick start (local)](#quick-start-local)
+- [Running the app locally](#running-the-app-locally)
+- [Configuration](#configuration)
+- [The data model](#the-data-model)
+- [Security & multi-tenancy](#security--multi-tenancy)
+- [The metering hook (SDK)](#the-metering-hook-sdk)
+- [Deploy your own instance](#deploy-your-own-instance)
+- [Testing & quality](#testing--quality)
+- [Project status](#project-status)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## The problem
+
+Companies spend real money on AI with **zero attribution**. A typical bill is one
+blended number that mixes:
+
+- **LLM inference** — the product calling Claude / OpenAI in production,
+- **AI coding tools** — Claude Code, Cursor, Copilot, Codex used to *build* features,
+- **hosting/infra** for those AI workloads.
+
+The CTO can't answer the board's simplest question: *“Is the AI money paying off?”*
+They can't tell which features that spend built or runs, so they can't tell which
+were worth shipping. Annapurna answers the one number they actually ask for:
+
+> **“What did it cost to ship — and to run — this feature?”**
+
+Not a dashboard full of vanity metrics. One credible, **defensible** number per
+feature, with enough backup that a CFO trusts it and an auditor can challenge it.
+
+## What Annapurna does
+
+For every **feature** a company ships, Annapurna reports:
+
+1. **Build cost** — AI coding-tool spend attributed to the developers and PRs that built it.
+2. **Inference cost** — LLM API spend the deployed feature consumes in production.
+3. A directional **“worth it?”** signal — usage / cost-per-active-user.
+
+It connects **read-only** to the sources you already have (GitHub, Anthropic/OpenAI
+admin APIs, coding-tool exports), auto-discovers your features from PR history, and
+attributes spend to each one — with a **confidence level** and an **evidence trail**
+on every number. Anything it can't confidently attribute lands in a visible
+**Unattributed** bucket rather than being silently dropped.
+
+The buyer is a **CTO/CFO**, not a developer: onboarding takes under 10 minutes and
+requires no engineering project.
+
+## Core concepts
+
+| Concept | What it means |
+|---|---|
+| **The feature is the spine** | Every dollar attributes to a `feature_id`, or to the **Unattributed** bucket. |
+| **Build vs. inference, never blended** | The two costs answer different questions (*was the build efficient?* vs *is it expensive to keep alive?*) and are always shown and stored separately. |
+| **Connector path first** | Read-only connectors give per-feature cost with zero code changes. This is the must-ship core and stands alone. |
+| **Optional metering hook** | A thin SDK can meter per-call inference for exact, per-feature precision — but it's never required for onboarding or first value. |
+| **Confidence + evidence** | Every cost row carries `high`/`med`/`low` confidence; clicking any number opens the exact signals (PRs, branches, keys, hook tags) behind it. |
+| **Reconcile, don't trust blindly** | Provider cost APIs are authoritative on dollars; hook-metered cost is reconciled against them, and any gap flows to Unattributed. |
+
+## Screens
+
+- **Features dashboard** — a table of features with build cost, monthly inference
+  cost, active users, cost/user, a *“Worth it?”* indicator, a confidence badge per
+  row, and an Unattributed row. The money screen.
+- **Feature drill-down** — three headline numbers, build cost by developer,
+  inference trend over time, and the full **evidence trail** behind every figure.
+- **Onboarding wizard** — Connect → Review (auto-discovered features) → Confirm,
+  in under 10 minutes.
+
+## Architecture
+
+A single deployable image serves the API **and** the web app; data lives in
+Postgres; an optional SDK and a scheduled job feed it.
+
+```
+                 ┌──────────────────────────┐
+                 │  Browser — React SPA     │
+                 └────────────┬─────────────┘
+                              │  HTTPS  (/api + static)
+                              ▼
+   read-only   ┌──────────────────────────────────┐    SQL    ┌───────────────────────┐
+ ┌────────────▶│        FastAPI backend           │──────────▶│  PostgreSQL           │
+ │  GitHub     │  auth · connector ingest ·       │           │  multi-tenant, RLS,   │
+ │  Anthropic  │  feature discovery (Claude) ·    │           │  encrypted creds      │
+ │  OpenAI     │  attribution · reconciliation ·  │           └───────────────────────┘
+ │  coding     │  serves the built web app        │
+ │  tools      └──────────────┬───────────────────┘
+ └─────────────────┐          │ ▲
+                   │          │ │ per-call events (optional)
+   Scheduled ingest│          │ └──────────────  Metering SDK (Python / Node)
+   (GitHub Actions │          │                  in the customer's app
+    cron) ─────────┘          ▼
+                     authoritative $ from provider cost APIs,
+                     reconciled against hook-metered $
+```
+
+- **Connectors are read-only** and use the customer's own admin credentials,
+  stored **encrypted at rest**.
+- **Feature discovery** clusters the last 90 days of merged PRs into proposed
+  features — using Claude when an API key is configured, and a deterministic
+  branch/repo heuristic otherwise (so it always works offline).
 
 ## Repository layout
 
-| Path        | What it is |
-|-------------|------------|
-| `backend/`  | Python services — connector ingest, attribution, reconciliation, API layer. |
-| `web/`      | React + TypeScript single-page app — the dashboard, drill-down, and onboarding wizard. |
-| `sdk/`      | Placeholder for the M7 metering hook (Python first, then Node). |
-| `infra/`    | Infrastructure-as-code (AWS or equivalent). |
-| `docs/`     | Design doc + build plan. |
+| Path | What it is |
+|---|---|
+| [`backend/`](backend) | Python API + ingest/attribution/reconciliation (FastAPI, psycopg). |
+| [`backend/migrations/`](backend/migrations) | Plain SQL migrations, applied in filename order. |
+| [`web/`](web) | React + TypeScript single-page app (Vite, Vitest). |
+| [`sdk/python/`](sdk/python), [`sdk/node/`](sdk/node) | The optional metering-hook SDKs (dependency-free, fail-safe). |
+| [`deploy/`](deploy) | Release + entrypoint scripts for the container. |
+| [`infra/`](infra) | Deployment notes / IaC home. |
+| [`docs/`](docs) | Design doc, build plan, deploy guide, demo script. |
+| [`Dockerfile`](Dockerfile), [`render.yaml`](render.yaml) | Single-image build + a free-tier deploy blueprint. |
+| [`Makefile`](Makefile) | One entry point for install / test / lint / run / deploy helpers. |
+| [`.github/workflows/`](.github/workflows) | CI, the scheduled ingest cron, and a one-click demo seeder. |
 
-## Prerequisites
+## Tech stack
 
-- **Python 3.9+** (backend)
-- **Node 18+ and npm** (web)
-- **GNU Make** (orchestration)
-- **PostgreSQL 16** (database). On macOS: `brew install postgresql@16`. The test
-  suite spins up its own throwaway Postgres, so you don't need a running server
-  just to run tests — only the Postgres tools installed.
+| Layer | Choice |
+|---|---|
+| Backend | Python, **FastAPI**, **psycopg** (Postgres driver), **uvicorn** |
+| Frontend | **React** + **TypeScript**, **Vite**, **React Router** |
+| Database | **PostgreSQL 16** with **Row-Level Security** (multi-tenant isolation) |
+| Auth | Email/password, bcrypt, signed http-only session cookies |
+| Discovery | **Claude** (Anthropic) over PR history, with a heuristic fallback |
+| SDKs | **Python** (stdlib only) + **Node** (global `fetch`) — both thin & fail-safe |
+| Tooling | **ruff** (lint+format), **pytest**, **ESLint**, **Vitest**, **Make** |
+| Deploy | **Docker** (one image), **Render** + **Neon** (free tier), GitHub Actions cron |
 
-## Quick start
+## Quick start (local)
+
+**Prerequisites**
+
+- **Python 3.9+**
+- **Node 18+** and npm
+- **GNU Make**
+- **PostgreSQL 16** — on macOS: `brew install postgresql@16`. (The test suite spins
+  up its own throwaway Postgres, so you don't need a running server just to run tests.)
+
+**Get it running**
 
 ```bash
-# 1. Install dependencies for both packages
-make install
+git clone https://github.com/costlyinfra-admin/Annapurna.git
+cd Annapurna
 
-# 2. Run the full test suite (backend + web)
-make test
+make install     # backend virtualenv + web dependencies
+make demo        # spins up a throwaway seeded DB, starts API + web, prints a login
 ```
 
-`make install` creates a Python virtualenv at `backend/.venv` and runs `npm install`
-in `web/`. `make test` runs `pytest` (backend) and `vitest` (web).
+`make demo` opens the app at **http://localhost:5173** with a fully populated demo
+tenant. Log in with the credentials it prints (or click **“View the demo”**).
+Press **Ctrl-C** to tear everything down — nothing persists.
 
-### Running each package on its own
-
-**Backend (Python):**
+**Run the tests**
 
 ```bash
-make install-backend          # creates backend/.venv and installs dev deps
-cd backend && .venv/bin/pytest # run tests
+make test        # backend (pytest) + web (vitest)
+make lint        # ruff + eslint
+make test-sdk    # the Python + Node SDKs
 ```
 
-**Web (React + TypeScript):**
+## Running the app locally
+
+Prefer to run the two processes yourself (e.g. for development)? You need a running
+Postgres plus two environment variables.
 
 ```bash
-make install-web              # npm install in web/
-cd web && npm run dev         # start the Vite dev server (http://localhost:5173)
-cd web && npm test            # run the Vitest suite
-```
-
-### Other make targets
-
-```bash
-make lint     # ruff (backend) + eslint (web)
-make format   # ruff format (backend) + prettier (web)
-make clean    # remove venv, node_modules, build caches
-make help     # list all targets
-```
-
-## Running the app (M2+)
-
-Two processes: the FastAPI backend and the Vite web dev server. You need a
-running Postgres (see Database below) plus two environment variables —
-`DATABASE_URL` and `APP_SECRET_KEY` (used for sessions and credential encryption).
-
-```bash
-export DATABASE_URL=postgresql://localhost:5432/annapurna
-export APP_SECRET_KEY=dev-secret-change-me
-
-make db-migrate     # set up the schema (first time)
-make api            # terminal 1: backend on http://localhost:8000
-make web            # terminal 2: web on http://localhost:5173
-```
-
-Open http://localhost:5173, create an account, and you'll land in the three-step
-onboarding wizard (Connect → Review → Confirm). The web dev server proxies `/api`
-to the backend. Auth uses a signed, http-only session cookie; connector secrets
-you paste are encrypted before they're stored.
-
-**Want to see the dashboard with data immediately?** Run `make db-seed` and log in
-as the demo account it prints (`demo@annapurna.com` / `annapurna-demo`) — the seeded
-"Acme Security" tenant has features with build + inference cost, usage, and an
-Unattributed bucket already populated.
-
-**Fastest path — one command:** `make demo` spins up a throwaway seeded database,
-starts both servers, and prints the login. See
-[docs/demo-script.md](docs/demo-script.md) for the full demo narrative.
-
-## Database
-
-The data model (design doc §6) is six entities — `feature`, `feature_signal`,
-`build_cost`, `inference_cost`, `bill_reconciliation`, `feature_usage` — plus a
-`tenant` table that anchors tenant isolation. Schema lives in
-[`backend/migrations/`](backend/migrations) as plain, readable SQL.
-
-**Tenant isolation is enforced by the database, not just by application code.**
-Every tenant table uses Postgres Row-Level Security (RLS): the app connects as a
-non-privileged role and each request sets `app.current_tenant`, so a query can
-only ever see the current tenant's rows — even if a `WHERE` clause is forgotten.
-Migrations and seeding run as a separate bootstrap role that bypasses RLS.
-
-To run against a real local Postgres (a running server, unlike the tests):
-
-```bash
-# macOS: Postgres 16 is "keg-only", so put its tools on PATH and start the server
-export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
-brew services start postgresql@16   # or run pg_ctl manually
-
-# one-time: create a database
+# 1. A database
 createdb annapurna
+export DATABASE_URL="postgresql://localhost:5432/annapurna"
+export APP_SECRET_KEY="dev-secret-change-me"   # local only — see Configuration
 
-# point the app at it, then apply migrations and load a demo tenant
-export DATABASE_URL=postgresql://localhost:5432/annapurna
-make db-migrate    # apply pending SQL migrations
-make db-seed       # apply migrations + seed one demo tenant ("Acme Security")
+# 2. Schema + (optional) demo data
+make db-migrate          # apply migrations
+make db-seed             # optional: load the demo tenant + login
+
+# 3. Two terminals
+make api                 # FastAPI on http://localhost:8000
+make web                 # Vite dev server on http://localhost:5173 (proxies /api)
 ```
 
-The tenant-isolation guarantee is covered by tests in
-[`backend/tests/test_tenant_isolation.py`](backend/tests/test_tenant_isolation.py).
-
-> **macOS note:** if starting Postgres manually fails with “postmaster became
-> multithreaded during startup”, set `export LC_ALL=en_US.UTF-8` first. The test
+> **macOS note:** if starting Postgres manually fails with *“postmaster became
+> multithreaded during startup”*, run `export LC_ALL=en_US.UTF-8` first. The test
 > suite handles this automatically.
 
-## Configuration & secrets
+Useful Make targets (`make help` lists them all):
 
-Copy [`.env.example`](.env.example) to `.env` and fill in values locally. **Never
-commit a real `.env`** — `.gitignore` excludes it. All connector credentials are
-the customer's own admin credentials, used read-only and stored encrypted at rest.
+| Target | Does |
+|---|---|
+| `make install` | Install backend (venv) + web (npm) dependencies |
+| `make demo` | One-command seeded local app (throwaway DB + API + web) |
+| `make test` / `make lint` / `make format` | Run / lint / auto-format both packages |
+| `make db-migrate` / `make db-seed` | Apply migrations / load the demo tenant |
+| `make api` / `make web` | Run the backend / web dev server |
+| `make ingest` | Run the scheduled cost-ingest job once |
 
-## Self-hosting / use it yourself
+## Configuration
 
-Annapurna is open source — fork it, run it for your own company, or deploy your
-own instance. Two paths:
+Copy [`.env.example`](.env.example) to `.env` for local development. **Never commit
+a real `.env`** — `.gitignore` excludes it, and production secrets live only in your
+host's secret store (Render env vars / GitHub Actions secrets), never in the repo.
 
-- **Try it locally in one command:** `make demo` spins up a throwaway seeded
-  database, starts the app, and prints a login (`demo@annapurna.com` / `annapurna-demo`).
-  Prereqs: `make install` and PostgreSQL 16.
-- **Deploy your own instance:** follow [`docs/deploy.md`](docs/deploy.md) — a
-  step-by-step on a free stack (Neon + Render + a free GitHub Actions cron),
-  reachable at your own subdomain. The Docker image is host-agnostic, so any
-  container host works.
+| Variable | Required? | Purpose |
+|---|---|---|
+| `DATABASE_URL` | **yes** | Postgres connection for the owner/admin role (migrations, auth, seeding). |
+| `APP_SECRET_KEY` | **yes** (API) | Signs session cookies **and** encrypts stored connector credentials. **Keep it stable** — changing it makes saved credentials undecryptable. |
+| `ANNAPURNA_APP_DB_PASSWORD` | prod | Password for the RLS-enforced app role. When set, the app derives its DB connection from `DATABASE_URL` automatically. |
+| `DATABASE_APP_URL` | optional | Explicit app-role connection (overrides the derivation above). |
+| `ANNAPURNA_SECURE_COOKIES` | prod | Set `true` behind HTTPS to mark the session cookie `Secure`. |
+| `ANNAPURNA_STATIC_DIR` | optional | When set, the API also serves the built web app (the Docker image sets this). |
+| `ANTHROPIC_API_KEY` | optional | Enables Claude-powered feature discovery; falls back to a heuristic if unset. |
+| `ANNAPURNA_LOG_LEVEL` | optional | Backend log level (default `INFO`). |
 
-Forking for your own product? Swap the branding (`Annapurna`, the `annapurna_meter`
-/ `@annapurna/meter` SDK names), the domain/repo references in the docs, and the
-seed data, and you're off. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how the
-repo is laid out and how to run the checks.
+> Connector credentials (GitHub token, provider admin keys, coding-tool exports)
+> are **not** environment variables — customers enter their own in the app, and
+> they're encrypted at rest per tenant.
+
+## The data model
+
+Six core entities, plus a `tenant` anchor, defined as plain SQL in
+[`backend/migrations/`](backend/migrations):
+
+| Table | Purpose |
+|---|---|
+| `feature` | The spine. Auto-proposed from PRs, then confirmed by a human. |
+| `feature_signal` | The evidence trail — PRs, branches, keys, hook tags behind each feature. |
+| `build_cost` | AI coding-tool spend per developer/tool, attributed to a feature (or Unattributed). |
+| `inference_cost` | LLM spend by key/project/model; `source` is `cost_api` (connector) or `hook` (metered). |
+| `bill_reconciliation` | Keeps hook-metered totals honest against the authoritative provider bill. |
+| `feature_usage` | Active users per feature, powering cost-per-user. |
+
+## Security & multi-tenancy
+
+Security is a first-class concern (the first vertical is cybersecurity):
+
+- **Tenant isolation is enforced by the database, not just app code.** Every tenant
+  table uses Postgres **Row-Level Security**: the app connects as a non-privileged
+  role and each request sets `app.current_tenant`, so a query can only ever return
+  the current tenant's rows — even if a `WHERE` clause is forgotten. (Covered by
+  [`backend/tests/test_tenant_isolation.py`](backend/tests/test_tenant_isolation.py).)
+- **All connectors are read-only** and use the customer's own admin credentials.
+- **Credentials are encrypted at rest** (Fernet) before they touch the database;
+  only ciphertext is stored.
+- **Auth** is bcrypt-hashed passwords over signed, http-only session cookies; the
+  metering hook authenticates server-to-server with a per-tenant token (hashed).
+
+## The metering hook (SDK)
+
+The optional precision tier. A thin, **fail-safe** wrapper reports per-call usage
+(`tokens_in`, `tokens_out`, `model`, `feature_id`); cost is computed server-side
+from versioned pricing tables. It's a no-op when unconfigured, so the same code runs
+with or without it.
+
+```python
+# Python — pip install ./sdk/python (or publish it)
+from annapurna_meter import Meter
+meter = Meter(feature_id="feature-threat-triage")   # reads ANNAPURNA_INGEST_URL/TOKEN
+
+resp = anthropic_client.messages.create(model="claude-sonnet-4-6", ...)
+meter.record_anthropic(resp)        # one line — that's the whole hook
+```
+
+Hook totals are **reconciled against the provider's authoritative bill** each
+period; any gap surfaces in Unattributed rather than corrupting a feature's number.
+See [`sdk/`](sdk) for the Python and Node packages.
+
+## Deploy your own instance
+
+Annapurna ships as a **single Docker image** that serves the API and the web app,
+backed by a managed Postgres. The repo includes everything to deploy on a **free**
+stack reachable at your own subdomain:
+
+- **[`docs/deploy.md`](docs/deploy.md)** — a numbered, copy-paste walkthrough:
+  Neon (Postgres) → Render (the app) → your DNS → a free GitHub Actions cron.
+- [`Dockerfile`](Dockerfile) is host-agnostic — any container host works.
+- [`render.yaml`](render.yaml) is a one-click Render Blueprint.
+
+You only provide three secrets (a database URL, an app secret key, and an app-DB
+password) via your host's secret store — never in the repo.
+
+## Testing & quality
+
+- **Backend:** `pytest` against an ephemeral Postgres (real RLS, real SQL).
+- **Web:** `vitest` + Testing Library.
+- **SDKs:** `pytest` (Python) and `node --test` (Node).
+- **Lint/format:** `ruff` (Python), `ESLint` + Prettier (TypeScript).
+- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the backend,
+  web, and SDK suites on every push and PR.
+
+Run it all locally with `make test && make lint && make test-sdk`.
+
+## Project status
+
+Built milestone-by-milestone (see [`docs/build-plan.md`](docs/build-plan.md)).
+**v1 is feature-complete and deployed:**
+
+- **M0–M2** — Repo + tooling, data model & RLS multi-tenancy, auth & onboarding shell.
+- **M3** — GitHub connector + feature auto-discovery.
+- **M4** — Provider (Anthropic/OpenAI) inference-cost ingest + attribution.
+- **M5** — Build-cost ingest from coding tools (CSV / Cursor export) + allocation.
+- **M6** — The three screens (dashboard, drill-down, wizard end to end).
+- **M7** — Optional metering hook: SDKs, ingest, reconciliation.
+- **M8** — Hardening (retries, graceful failures, logging) + one-command demo.
+
+The connector path is the shippable core; the metering hook is additive precision.
+
+## Documentation
+
+- [`docs/annapurna-design-doc.md`](docs/annapurna-design-doc.md) — the canonical spec (intent, data model, attribution, screens).
+- [`docs/build-plan.md`](docs/build-plan.md) — the ordered milestones (M0–M8) with acceptance criteria.
+- [`docs/deploy.md`](docs/deploy.md) — deploy-your-own-instance guide.
+- [`docs/demo-script.md`](docs/demo-script.md) — a start-to-finish demo narrative.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to set up, run, and contribute.
+- [`CLAUDE.md`](CLAUDE.md) — standing instructions / non-negotiable invariants (AI-build guidance; not required to use the app).
+
+## Contributing
+
+Contributions and forks are welcome. Start with **[`CONTRIBUTING.md`](CONTRIBUTING.md)**
+for the dev setup, repo tour, coding conventions, and the invariants to preserve.
+Please run `make test && make lint` before opening a PR.
 
 ## License
 
 Annapurna is licensed under the **GNU Affero General Public License v3.0**
-(AGPL-3.0) — see [`LICENSE`](LICENSE). You're free to use, modify, and self-host
-it; if you run a **modified** version as a network service, the AGPL requires you
-to make your source available to its users. (If you need different terms for a
-commercial/closed deployment, that's a separate licensing conversation with the
-copyright holder.)
+(AGPL-3.0) — see [`LICENSE`](LICENSE). You're free to use, modify, and self-host it;
+if you run a **modified** version as a network service, the AGPL requires you to make
+your source available to its users. For different (commercial/closed) terms, that's a
+separate licensing conversation with the copyright holder.
 
 © 2026 CostlyInfra.
-
-## Status
-
-Built milestone-by-milestone per the build plan.
-
-- **M0 — Repo scaffold & foundations.** Package skeletons, tooling, CI.
-- **M1 — Data model & multi-tenancy.** The six entities + `tenant`, SQL
-  migrations, RLS-enforced tenant isolation, and a seed script.
-- **M2 — Auth & onboarding shell.** Email/password signup-login-logout over
-  signed cookie sessions, a tenant created per signup, encrypted-at-rest
-  connector credentials, and the 3-step onboarding wizard shell.
-- **M3 — GitHub connector + feature auto-discovery.** Read-only GitHub PR
-  connector; discovery clusters the last 90 days of merged PRs into proposed
-  features (Claude when `ANTHROPIC_API_KEY` is set, deterministic heuristic
-  otherwise); wizard Step 2 with rename/split/merge/delete/add; confirm writes
-  confirmed features.
-- **M4 — Provider cost ingest (inference).** Read-only Anthropic + OpenAI cost
-  connectors; ingest stores authoritative monthly totals (`source = cost_api`)
-  attributed by key/project to a feature (high/med confidence) or to the
-  **Unattributed** bucket; `make ingest` runs the scheduled job.
-- **M5 — Build-cost ingest (coding tools).** CSV import (Cursor-for-Teams seat
-  export and the universal fallback); allocates each developer's spend across
-  features by the PRs they authored; writes `build_cost` per feature and per
-  developer, broken down by tool, with confidence; unattributable spend → the
-  Unattributed bucket.
-- **M6 — The three screens.** Features dashboard (build vs. inference in separate
-  columns, active users, cost/user, "Worth it?", confidence, Unattributed row),
-  feature drill-down (headlines, build-by-developer, inference trend, evidence
-  trail, connector-vs-hook indicator), and the onboarding wizard wired end to end.
-  **The connector path is complete and shippable here.**
-- **M7 — Metering hook.** Thin, fail-safe SDKs ([Python + Node](sdk)) emit per-call
-  usage; a token-authed ingest endpoint costs tokens from versioned pricing tables
-  and writes `source = hook` rows at High confidence; reconciliation ties hook
-  totals to the provider bill and routes the gap to Unattributed (no
-  double-counting). The hook is optional and never blocks onboarding.
-- **M8 — Hardening & demo readiness.** Retry/backoff on ingest, graceful connector
-  failures, a React error boundary, request logging, and a one-command demo
-  (`make demo` + [docs/demo-script.md](docs/demo-script.md)). ← **v1 complete**
-
-**v1 is feature-complete:** the connector path (build + inference cost per feature,
-confidence + evidence trail, Unattributed bucket) plus the optional metering hook.
