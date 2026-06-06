@@ -99,7 +99,19 @@ It runs daily; you can also trigger it anytime from the **Actions** tab
 
 Want a populated demo instead? You can seed the demo tenant by running, with your
 Neon `DATABASE_URL` exported locally: `make db-seed` (login `demo@annapurna.com` /
-`annapurna-demo`).
+`annapurna-demo`). The demo tenant ("Acme Security") ships with 8 features and
+~2 years of monthly build/inference history.
+
+**One-click reset (recommended).** Two GitHub Actions handle the demo without a
+local DB — both need the `DATABASE_URL` repo secret:
+
+- **Seed demo data** — creates the demo tenant if it doesn't exist (no-op if it
+  already does). Safe, non-destructive.
+- **Reset demo data** — **wipes** the demo tenant and rebuilds it fresh with the
+  latest dataset. Use this to refresh the demo after dataset changes. It deletes
+  only the demo tenant (via `ON DELETE CASCADE`); no other tenant is touched.
+
+Run either from the repo's **Actions** tab → pick the workflow → **Run workflow**.
 
 ---
 

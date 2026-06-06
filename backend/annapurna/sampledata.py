@@ -157,8 +157,14 @@ def _add_usage(conn, tenant_id, feature_id, active_users, events, period=DEFAULT
     )
 
 
-def insert_sample_data(conn: psycopg.Connection, tenant_id: str) -> dict:
-    """Populate one tenant with sample features and costs. Returns a small summary."""
+def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bool = False) -> dict:
+    """Populate one tenant with sample features and costs. Returns a small summary.
+
+    The base dataset (4 features, a single recent month + a little history) is the
+    stable fixture the tests pin to. Pass ``extended=True`` (the demo seed does) to
+    layer on extra features and ~2 years of monthly history for a fuller live demo;
+    this only *adds* rows, never alters the base ones.
+    """
     # --- Features (the spine) ---------------------------------------------
     triage = _add_feature(
         conn,
@@ -427,4 +433,201 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str) -> dict:
     _add_usage(conn, tenant_id, report, 120, 18_000)
     _add_usage(conn, tenant_id, soc, 65, 9_400)
 
-    return {"features": 4, "tenant_id": tenant_id}
+    feature_count = 4
+    if extended:
+        feature_count += _add_extended_demo(
+            conn, tenant_id, {"triage": triage, "report": report, "soc": soc}
+        )
+
+    return {"features": feature_count, "tenant_id": tenant_id}
+
+
+# ==========================================================================
+# Extended demo data — extra features + ~2 years of monthly history.
+# Only the demo seed turns this on; the test fixture never does.
+# ==========================================================================
+
+# Mild, deterministic month-of-year multipliers (Jan..Dec) so trend lines wobble
+# realistically instead of being a straight ramp.
+_SEASON = [0.98, 0.96, 1.00, 1.03, 1.06, 1.04, 0.98, 0.97, 1.02, 1.07, 1.12, 1.09]
+
+# Each new feature: a couple of models, a few contributors, and monthly usage.
+# (provider, model, api_key_ref, latest_monthly_amount, confidence)
+# build: (developer, tool, pr_ref, amount, confidence, commits, files_changed)
+_NEW_FEATURES = [
+    {
+        "name": "Phishing detection",
+        "desc": "Classifies suspicious emails and URLs in real time.",
+        "status": "confirmed",
+        "conf": "high",
+        "branch": "feature/phishing-*",
+        "users": 820,
+        "events": 2_400_000,
+        "models": [
+            ("openai", "gpt-4o-mini", "key:phishing", 900.00, "high"),
+            ("anthropic", "claude-haiku-4-5", "key:phishing", 520.00, "high"),
+        ],
+        "build": [
+            ("erin", "claude_code", "acme/core#1502", 96.00, "high", 11, 28),
+            ("frank", "cursor", "acme/core#1509", 58.00, "med", 6, 15),
+        ],
+    },
+    {
+        "name": "Malware sandbox analysis",
+        "desc": "Summarizes detonation reports from the malware sandbox.",
+        "status": "confirmed",
+        "conf": "med",
+        "branch": "feature/sandbox-*",
+        "users": 95,
+        "events": 41_000,
+        "models": [
+            ("anthropic", "claude-opus-4-8", "key:sandbox", 540.00, "med"),
+            ("anthropic", "claude-sonnet-4-6", "key:sandbox", 360.00, "med"),
+        ],
+        "build": [
+            ("grace", "claude_code", "acme/core#1521", 134.00, "high", 9, 33),
+        ],
+    },
+    {
+        "name": "Compliance assistant",
+        "desc": "Maps security controls to evidence for audits (SOC 2, ISO 27001).",
+        "status": "confirmed",
+        "conf": "high",
+        "branch": "feature/compliance-*",
+        "users": 210,
+        "events": 22_500,
+        "models": [
+            ("anthropic", "claude-sonnet-4-6", "key:compliance", 380.00, "high"),
+            ("openai", "gpt-4o", "proj:compliance", 240.00, "med"),
+        ],
+        "build": [
+            ("heidi", "copilot", "acme/core#1538", 73.00, "med", 7, 19),
+            ("erin", "claude_code", "acme/core#1544", 41.00, "high", 4, 9),
+        ],
+    },
+    {
+        "name": "Anomaly explainer",
+        "desc": "Explains UEBA anomalies in plain language for analysts.",
+        "status": "proposed",
+        "conf": "med",
+        "branch": "feature/anomaly-*",
+        "users": 140,
+        "events": 12_000,
+        "models": [
+            ("anthropic", "claude-haiku-4-5", "key:anomaly", 380.00, "med"),
+        ],
+        "build": [
+            ("frank", "cursor", "acme/core#1551", 52.00, "low", 5, 12),
+        ],
+    },
+]
+
+
+def _months(start: tuple, count: int) -> list:
+    """`count` first-of-month dates starting at (year, month)."""
+    year, month = start
+    out = []
+    for _ in range(count):
+        out.append(_dt.date(year, month, 1))
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    return out
+
+
+def _ramp(latest: float, i: int, n: int, low: float = 0.4) -> float:
+    """Scale `latest` from `low` (oldest month) up to 1.0 (newest)."""
+    if n <= 1:
+        return latest
+    return latest * (low + (1.0 - low) * (i / (n - 1)))
+
+
+def _hist_inference(conn, tenant_id, feature_id, provider, model, ref, latest, periods, confidence):
+    """Write a growing monthly inference series ending at ~`latest` in the last period."""
+    n = len(periods)
+    for i, period in enumerate(periods):
+        amount = round(_ramp(latest, i, n) * _SEASON[period.month - 1], 2)
+        if amount <= 0:
+            continue
+        _add_inference_cost(
+            conn,
+            tenant_id,
+            feature_id,
+            provider,
+            model,
+            ref,
+            amount,
+            int(amount * 3800),
+            int(amount * 480),
+            int(amount * 55),
+            confidence,
+            period=period,
+        )
+
+
+def _add_extended_demo(conn, tenant_id, base: dict) -> int:
+    """Add multi-year history for the base features + several new features.
+
+    Returns the number of *new* features added.
+    """
+    # 1) Backfill ~21-23 months of history for the existing confirmed features
+    #    (their dominant model), leading up to — but not overwriting — the recent
+    #    months the base data already wrote.
+    _hist_inference(
+        conn,
+        tenant_id,
+        base["triage"],
+        "anthropic",
+        "claude-sonnet-4-6",
+        "key:triage-prod",
+        2300.00,
+        _months((2024, 6), 21),
+        "high",
+    )  # ends Feb 2026 (base has Mar/Apr/May)
+    _hist_inference(
+        conn,
+        tenant_id,
+        base["report"],
+        "openai",
+        "gpt-4o",
+        "proj:reports",
+        720.00,
+        _months((2024, 6), 21),
+        "med",
+    )  # ends Feb 2026 (base has Mar/Apr/May)
+    _hist_inference(
+        conn,
+        tenant_id,
+        base["soc"],
+        "anthropic",
+        "claude-haiku-4-5",
+        "key:shared-prod",
+        940.00,
+        _months((2024, 6), 23),
+        "low",
+    )  # ends Apr 2026 (base has May)
+
+    # 2) New features, each with a full 24-month history (Jun 2024 -> May 2026).
+    full = _months((2024, 6), 24)
+    for f in _NEW_FEATURES:
+        fid = _add_feature(conn, tenant_id, f["name"], f["desc"], f["status"], f["conf"])
+        _add_signal(conn, tenant_id, fid, "branch", f["branch"], "high")
+        for dev, tool, ref, amount, conf, commits, files in f["build"]:
+            _add_signal(
+                conn,
+                tenant_id,
+                fid,
+                "pr",
+                ref,
+                conf,
+                actor=dev,
+                commits=commits,
+                files_changed=files,
+            )
+            _add_build_cost(conn, tenant_id, fid, dev, tool, ref, amount, conf)
+        for provider, model, ref, latest, conf in f["models"]:
+            _hist_inference(conn, tenant_id, fid, provider, model, ref, latest, full, conf)
+        _add_usage(conn, tenant_id, fid, f["users"], f["events"])
+
+    return len(_NEW_FEATURES)

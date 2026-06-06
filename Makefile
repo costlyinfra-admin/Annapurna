@@ -9,7 +9,7 @@ PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
 .PHONY: help install install-backend install-web test test-backend test-web test-sdk \
-        lint lint-backend lint-web format db-migrate db-seed api web clean
+        lint lint-backend lint-web format db-migrate db-seed db-reset api web clean
 
 help:
 	@echo "Annapurna make targets:"
@@ -19,6 +19,7 @@ help:
 	@echo "  make format      - auto-format backend (ruff) + web (prettier)"
 	@echo "  make db-migrate  - apply DB migrations (needs DATABASE_URL + Postgres)"
 	@echo "  make db-seed     - apply migrations and seed one demo tenant"
+	@echo "  make db-reset    - wipe the demo tenant and re-seed it fresh"
 	@echo "  make api         - run the backend API (uvicorn, port 8000)"
 	@echo "  make web         - run the web dev server (vite, port 5173)"
 	@echo "  make demo        - one-command seeded demo (throwaway DB + API + web)"
@@ -71,6 +72,9 @@ db-migrate:
 
 db-seed:
 	cd $(BACKEND) && .venv/bin/python -m seed
+
+db-reset:
+	cd $(BACKEND) && .venv/bin/python -m seed --reset
 
 # Scheduled inference-cost ingest (run on a cadence in production).
 ingest:
