@@ -100,6 +100,65 @@ def test_openai_parses_costs():
     assert records[0].amount == Decimal("1850.00")
 
 
+def test_hosted_oss_uses_reported_dollar_cost():
+    from annapurna.providers import make_cost_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer or-key"
+        assert request.method == "GET"  # read-only
+        assert "openrouter.ai" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "model": "meta-llama-3.1-70b-instruct",
+                        "cost": "123.45",
+                        "requests": 5000,
+                        "api_key": "key:prod",
+                    }
+                ]
+            },
+        )
+
+    client = make_cost_client("openrouter", "or-key")
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = client.fetch_costs(dt.date(2026, 5, 10))
+    assert records[0].amount == Decimal("123.45")  # reported $ wins
+    assert records[0].model == "meta-llama-3.1-70b-instruct"
+    assert records[0].request_count == 5000
+
+
+def test_hosted_oss_prices_tokens_when_no_dollar_cost():
+    from annapurna.providers import HostedUsageCostClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                # No cost field -> price the tokens via our (provider, model) table.
+                # together meta-llama-3.1-70b-instruct = $0.88/M in + out.
+                "data": [
+                    {
+                        "model": "meta-llama-3.1-70b-instruct",
+                        "prompt_tokens": 1_000_000,
+                        "completion_tokens": 1_000_000,
+                    }
+                ]
+            },
+        )
+
+    client = HostedUsageCostClient(
+        "together",
+        "tg-key",
+        "/v1/usage",
+        base_url="https://api.together.xyz",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    records = client.fetch_costs(dt.date(2026, 5, 1))
+    assert records[0].amount == Decimal("1.7600")  # 0.88 + 0.88, computed by us
+
+
 def test_provider_401_raises():
     def handler(_request):
         return httpx.Response(401, json={"error": "bad key"})

@@ -40,8 +40,41 @@ def client(admin_conn, admin_conninfo, app_conninfo, monkeypatch):
     return c
 
 
+class _FakeTogether:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def fetch_costs(self, period):
+        today = dt.date.today()
+        return [
+            CostRecord("together", today, Decimal("900"), api_key_ref="key:phishing"),
+            CostRecord("together", today, Decimal("120"), api_key_ref="key:misc"),
+        ]
+
+
 def test_ingest_requires_provider_connected(client):
     assert client.post("/api/inference/ingest", json={"provider": "anthropic"}).status_code == 400
+
+
+def test_hosted_open_source_connector_ingests(client, monkeypatch):
+    # A hosted open-source aggregator is a first-class inference connector.
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeTogether())
+    client.post("/api/connectors/together/credential", json={"secret": "tg-admin"})
+    feature = client.post("/api/features", json={"name": "Phishing detection"}).json()
+    client.post(
+        f"/api/features/{feature['id']}/signals",
+        json={"signal_type": "api_key", "external_ref": "key:phishing"},
+    )
+
+    summary = client.post("/api/inference/ingest", json={"provider": "together"}).json()
+    assert summary["attributed"] == 900.0
+    assert summary["unattributed"] == 120.0  # unmapped key -> Unattributed
+
+    view = client.get("/api/inference/summary").json()
+    assert view["by_provider"]["together"] == 1020.0
 
 
 def test_connect_map_ingest_summary(client):

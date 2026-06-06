@@ -21,6 +21,7 @@ from typing import Optional
 
 import httpx
 
+from .pricing import price
 from .retrying import http_get_with_retry
 
 
@@ -201,7 +202,7 @@ def _parse_openai(payload: dict, period: dt.date):
 
 
 def _to_decimal(value) -> Optional[Decimal]:
-    if value is None:
+    if value is None or isinstance(value, (dict, list)):
         return None
     try:
         return Decimal(str(value))
@@ -209,9 +210,82 @@ def _to_decimal(value) -> Optional[Decimal]:
         return None
 
 
+# --------------------------------------------------------------------------
+# Hosted open-source aggregators (Together, Fireworks, OpenRouter)
+# --------------------------------------------------------------------------
+# Each fronts many open-weight models behind one API key. Their usage/cost APIs
+# are OpenAI-ish and return per-(model, key) rows for a window. Cost is taken
+# from a reported dollar amount when present, else computed from token counts via
+# our pricing tables (keyed by (provider, model)). As with the Anthropic/OpenAI
+# clients, the exact JSON shapes can't be verified offline — parsing is tolerant
+# and the stable contract is the normalized CostRecord.
+_HOSTED_PROVIDERS = {
+    "openrouter": ("https://openrouter.ai", "/api/v1/activity"),
+    "together": ("https://api.together.xyz", "/v1/usage"),
+    "fireworks": ("https://api.fireworks.ai", "/v1/usage"),
+}
+
+
+class HostedUsageCostClient(_BaseCostClient):
+    """Generic cost client for hosted open-source aggregators."""
+
+    def __init__(self, provider: str, admin_key: str, path: str, **kwargs):
+        super().__init__(admin_key, **kwargs)
+        self.provider = provider
+        self.path = path
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        resp = self._get(
+            self.path,
+            params={"start_date": start.isoformat(), "end_date": end.isoformat()},
+            headers={"Authorization": f"Bearer {self._key}"},
+        )
+        return aggregate(list(_parse_hosted_usage(resp.json(), self.provider, start)))
+
+
+def _parse_hosted_usage(payload: dict, provider: str, period: dt.date):
+    rows = payload.get("data") or payload.get("usage") or payload.get("results") or []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        model = item.get("model") or item.get("model_name")
+        tokens_in = int(
+            item.get("prompt_tokens") or item.get("input_tokens") or item.get("tokens_in") or 0
+        )
+        tokens_out = int(
+            item.get("completion_tokens")
+            or item.get("output_tokens")
+            or item.get("tokens_out")
+            or 0
+        )
+        requests = item.get("requests") or item.get("request_count") or item.get("count")
+        # Prefer a reported dollar cost; otherwise price the tokens ourselves.
+        amount = _to_decimal(
+            item.get("cost") or item.get("amount") or item.get("total_cost") or item.get("usage")
+        )
+        if amount is None:
+            amount = price(model or "", tokens_in, tokens_out, provider)
+        yield CostRecord(
+            provider=provider,
+            period=period,
+            amount=amount,
+            currency=item.get("currency", "USD"),
+            api_key_ref=item.get("api_key_id") or item.get("api_key"),
+            model=model,
+            tokens_in=tokens_in or None,
+            tokens_out=tokens_out or None,
+            request_count=int(requests) if requests is not None else None,
+        )
+
+
 def make_cost_client(provider: str, admin_key: str) -> _BaseCostClient:
     if provider == "anthropic":
         return AnthropicCostClient(admin_key)
     if provider == "openai":
         return OpenAICostClient(admin_key)
+    if provider in _HOSTED_PROVIDERS:
+        base_url, path = _HOSTED_PROVIDERS[provider]
+        return HostedUsageCostClient(provider, admin_key, path, base_url=base_url)
     raise ValueError(f"Unknown inference provider: {provider}")

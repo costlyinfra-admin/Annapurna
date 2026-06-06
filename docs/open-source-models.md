@@ -9,14 +9,30 @@ from**, because open-source splits into two very different cost models.
 
 | Mode | Who meters the $ | Examples | How Annapurna costs it |
 |---|---|---|---|
-| **Priced (hosted)** | The host bills per token | Together, Fireworks, Groq, Bedrock, OpenRouter, DeepInfra | The SDK reports tokens; we price them against **that host's** rates. Same pipeline as OpenAI/Anthropic. |
+| **Priced (hosted)** | The host bills per token | Together, Fireworks, OpenRouter, (Groq, Bedrock, DeepInfra) | **Connector** pulls the host's bill (or we price tokens via its rates), attributed by api_key → feature. |
 | **Pooled (self-hosted)** | Nobody — it's a GPU/infra bill | vLLM, Ollama, TGI on your own GPUs or on-prem | You register the serving deployment + its **monthly infra cost**; we split that pool across features by usage share. |
 
-## Priced (hosted) — just works
+## Priced (hosted) — two ways in
 
 The same open weights cost different amounts depending on who serves them
 (Llama-3.1-70B is ~$0.88/M on Together but ~$0.59/M on Groq), so prices are keyed
-by **(provider, model)**. Wrap your calls with the SDK:
+by **(provider, model)**.
+
+**1. Connector (the primary path — no code changes).** Together, Fireworks, and
+OpenRouter are first-class **inference connectors**: store the admin key under
+*Add cost data → Sync inference* (or onboarding), and Annapurna pulls the bill
+per period and attributes it by **api_key → feature** — exactly like
+Anthropic/OpenAI. The host's reported dollar cost is used when present; otherwise
+we price the reported tokens via its `(provider, model)` rates.
+
+> Not every host has a usable cost API: **Groq** exposes no cost endpoint (use the
+> SDK below), and **Bedrock** cost lives in AWS Cost Explorer — that's the planned
+> cloud-cost connector, not a per-host one.
+
+**2. SDK (the precision tier).** For exact, per-call attribution — or for hosts
+without a connector — wrap calls with the metering SDK. Reuses the same
+server-side pricing and reconciles against the connector bill when both are
+present:
 
 ```python
 resp = client.chat.completions.create(model="meta-llama-3.1-70b-instruct", ...)

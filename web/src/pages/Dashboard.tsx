@@ -409,6 +409,9 @@ function DataActions({
           <select value={provider} onChange={(e) => setProvider(e.target.value)}>
             <option value="anthropic">Anthropic</option>
             <option value="openai">OpenAI</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="together">Together AI</option>
+            <option value="fireworks">Fireworks AI</option>
           </select>
           <button onClick={syncInference} disabled={busy}>
             Sync
