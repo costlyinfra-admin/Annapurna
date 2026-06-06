@@ -95,22 +95,54 @@ class GitHubClient:
         return resp
 
     def list_repos(self, owner: str) -> list[str]:
-        """Return full names ("owner/name") of an org's (or user's) repos."""
-        # Try the org endpoint first; fall back to the user endpoint on 404.
+        """Full names ("owner/name") of ``owner``'s repos the token can see.
+
+        Prefer the authenticated-user endpoint (/user/repos), which returns the
+        token's accessible repos INCLUDING private ones (own + org member) — so a
+        private repo under a personal account or a new org is found. Filter those
+        to ``owner``. Fall back to the public org/user listing for an owner the
+        token isn't a member of (e.g. a public org you don't belong to).
+        """
+        target = owner.lower()
+        accessible = [
+            full
+            for full in self._list_accessible_repos()
+            if full.split("/", 1)[0].lower() == target
+        ]
+        if accessible:
+            return accessible
+
         for path in (f"/orgs/{owner}/repos", f"/users/{owner}/repos"):
             try:
-                return self._paginate_full_names(path)
+                return self._paginate_full_names(path, {"type": "all"})
             except GitHubError as exc:
                 if exc.status == 404:
                     continue
                 raise
-        raise GitHubError(f"GitHub owner '{owner}' not found.", 404)
+        raise GitHubError(
+            f"GitHub owner '{owner}' not found, or no repositories are accessible "
+            "with this token (private repos need a token with repo access).",
+            404,
+        )
 
-    def _paginate_full_names(self, path: str) -> list[str]:
+    def _list_accessible_repos(self) -> list[str]:
+        """Every repo the token can access (own + org member), incl. private."""
+        try:
+            return self._paginate_full_names(
+                "/user/repos", {"affiliation": "owner,organization_member"}
+            )
+        except GitHubError:
+            # Some token types can't call /user/repos; fall back to public listing.
+            return []
+
+    def _paginate_full_names(self, path: str, extra_params: Optional[dict] = None) -> list[str]:
         names: list[str] = []
         page = 1
         while True:
-            resp = self._get(path, {"per_page": _PER_PAGE, "page": page, "type": "all"})
+            params = {"per_page": _PER_PAGE, "page": page}
+            if extra_params:
+                params.update(extra_params)
+            resp = self._get(path, params)
             batch = resp.json()
             names.extend(repo["full_name"] for repo in batch)
             if len(batch) < _PER_PAGE:

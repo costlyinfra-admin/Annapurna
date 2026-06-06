@@ -87,6 +87,26 @@ def test_falls_back_to_user_endpoint_when_org_missing():
     assert [pr.ref for pr in prs] == ["someuser/proj#7"]
 
 
+def test_lists_private_repos_via_authenticated_endpoint():
+    # A private repo whose org/user public endpoints 404, but the token sees it
+    # via /user/repos. Owner is matched case-insensitively.
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        page = int(request.url.params.get("page", "1"))
+        if path == "/user/repos":
+            repos = [{"full_name": "Cloudoku-training/cloudoku-training"}] if page == 1 else []
+            return httpx.Response(200, json=repos)
+        if path == "/repos/Cloudoku-training/cloudoku-training/pulls":
+            return httpx.Response(
+                200, json=[_pr(5, "feature/lesson-plan", "dev", 4)] if page == 1 else []
+            )
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    since = (NOW - dt.timedelta(days=90)).date()
+    prs = _client(handler).fetch_merged_prs("cloudoku-training", since)  # different case
+    assert [pr.ref for pr in prs] == ["Cloudoku-training/cloudoku-training#5"]
+
+
 def test_auth_error_raised_on_401():
     def handler(_request):
         return httpx.Response(401, json={"message": "Bad credentials"})
