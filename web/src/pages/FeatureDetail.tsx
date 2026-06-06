@@ -117,6 +117,9 @@ export function FeatureDetail() {
             hookMetered={hookMetered}
           />
 
+          {/* ---- Optimization opportunities ---- */}
+          <OptimizationSection optimization={detail.optimization} />
+
           {/* ---- Evidence trail ---- */}
           <section className="evidence-trail">
             <h2>Evidence trail</h2>
@@ -140,6 +143,53 @@ export function FeatureDetail() {
         </main>
       ) : null}
     </div>
+  );
+}
+
+function OptimizationSection({ optimization }: { optimization: Detail["optimization"] }) {
+  const { opportunities, monthly_savings, annual_savings } = optimization;
+  return (
+    <section className="detail-section">
+      <div className="section-head">
+        <div>
+          <h2>Optimization opportunities</h2>
+          <span className="section-sub muted">
+            Directional estimates from this feature&apos;s usage — not guaranteed savings.
+          </span>
+        </div>
+        {monthly_savings > 0 && (
+          <div className="savings-headline">
+            <span className="savings-label">Potential savings</span>
+            <span className="savings-month">{money(monthly_savings)}/mo</span>
+            <span className="savings-year muted">{money(annual_savings)}/yr</span>
+          </div>
+        )}
+      </div>
+      {opportunities.length === 0 ? (
+        <p className="muted">No optimization opportunities identified for this period.</p>
+      ) : (
+        <table className="mini-table">
+          <thead>
+            <tr>
+              <th>Opportunity</th>
+              <th className="num">Potential savings</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {opportunities.map((o) => (
+              <tr key={o.opportunity}>
+                <td title={o.rationale}>{o.opportunity}</td>
+                <td className="num">{money(o.savings)}/mo</td>
+                <td>
+                  <ConfidenceBadge level={o.confidence} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }
 

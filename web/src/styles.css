@@ -940,6 +940,33 @@ a.exec-value:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Optimization: potential-savings headline */
+.savings-headline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.savings-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.savings-month {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--success, #15803d);
+  font-variant-numeric: tabular-nums;
+}
+
+.savings-year {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Window filter (Month / Quarter / Year) */
 .window-filter {
   display: inline-flex;

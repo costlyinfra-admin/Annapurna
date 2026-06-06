@@ -79,6 +79,18 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
     assert "pr" in signal_types and "branch" in signal_types
     assert detail["inference_sources"] == ["cost_api"]  # connector, not hook (yet)
 
+    # Optimization opportunities: heuristic, derived from this month's inference.
+    opt = detail["optimization"]
+    names = {o["opportunity"] for o in opt["opportunities"]}
+    # Triage runs on premium models (sonnet + opus), input-heavy, high volume.
+    assert {"Model downgrade", "Prompt caching"} <= names
+    assert opt["monthly_savings"] > 0
+    assert opt["annual_savings"] == round(opt["monthly_savings"] * 12, 2)
+    # Conservative: combined estimate stays well under the $4,200 bill.
+    assert opt["monthly_savings"] < 4200.0 * 0.6
+    for o in opt["opportunities"]:
+        assert o["confidence"] in {"high", "med", "low"} and o["rationale"]
+
 
 def test_feature_inference_breakdown_and_window(seeded):
     data = dashboard.dashboard(seeded, PERIOD)

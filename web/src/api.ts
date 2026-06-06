@@ -99,6 +99,16 @@ export interface FeatureDetail {
     source: string | null;
   }[];
   inference_sources: string[];
+  optimization: {
+    opportunities: {
+      opportunity: string;
+      savings: number;
+      confidence: string;
+      rationale: string;
+    }[];
+    monthly_savings: number;
+    annual_savings: number;
+  };
 }
 
 export interface FeatureInference {

@@ -38,6 +38,24 @@ const DETAIL = {
     { signal_type: "pr", external_ref: "acme/core#1421", confidence: "high", actor: "alice", source: "github" },
   ],
   inference_sources: ["cost_api"],
+  optimization: {
+    opportunities: [
+      {
+        opportunity: "Prompt caching",
+        savings: 504,
+        confidence: "high",
+        rationale: "Cache repeated prompt prefixes.",
+      },
+      {
+        opportunity: "Model downgrade",
+        savings: 420,
+        confidence: "med",
+        rationale: "Route to a cheaper model.",
+      },
+    ],
+    monthly_savings: 924,
+    annual_savings: 11088,
+  },
 };
 
 const INFERENCE = {
@@ -92,6 +110,13 @@ describe("FeatureDetail", () => {
     expect(await screen.findByText("gpt-4o")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Inference cost by model" })).toBeInTheDocument();
     expect(screen.getByText("May")).toBeInTheDocument(); // trend bar label
+
+    // Optimization opportunities section.
+    expect(screen.getByText("Optimization opportunities")).toBeInTheDocument();
+    expect(screen.getByText("Prompt caching")).toBeInTheDocument();
+    expect(screen.getByText("Model downgrade")).toBeInTheDocument();
+    expect(screen.getByText("$924/mo")).toBeInTheDocument(); // monthly savings headline
+    expect(screen.getByText("$11,088/yr")).toBeInTheDocument(); // annual savings
   });
 
   it("refetches the breakdown when the window changes", async () => {
