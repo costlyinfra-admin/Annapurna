@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from annapurna import discovery, features
 from annapurna.github import PullRequest
 
@@ -55,6 +57,51 @@ def test_proposals_from_json_filters_unknown_refs():
     proposals = discovery._proposals_from_json(text, FIXTURE_PRS)
     assert proposals[0].pr_refs == ["acme/core#1"]  # unknown ref dropped
     assert proposals[1].confidence == "low"  # invalid confidence normalized
+
+
+def test_openai_compatible_cluster_parses(monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("ANNAPURNA_DISCOVERY_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("ANNAPURNA_DISCOVERY_API_KEY", "gsk_free")
+    monkeypatch.setenv("ANNAPURNA_DISCOVERY_MODEL", "llama-3.3-70b-versatile")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).endswith("/chat/completions")
+        assert request.headers["Authorization"] == "Bearer gsk_free"
+        sent = json.loads(request.content)
+        assert sent["model"] == "llama-3.3-70b-versatile"
+        content = json.dumps(
+            [
+                {
+                    "name": "Threat triage",
+                    "description": "Classifies alerts.",
+                    "confidence": "high",
+                    "pr_refs": ["acme/core#1", "acme/core#2"],
+                    "branch_pattern": "feature/threat-*",
+                }
+            ]
+        )
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    proposals = discovery.openai_compatible_cluster(
+        FIXTURE_PRS, client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    assert proposals[0].name == "Threat triage"
+    assert set(proposals[0].pr_refs) == {"acme/core#1", "acme/core#2"}
+
+
+def test_llm_backend_selection(monkeypatch):
+    monkeypatch.delenv("ANNAPURNA_DISCOVERY_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert discovery._llm_backend() is None  # nothing configured -> heuristic
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    assert discovery._llm_backend() is discovery.claude_cluster
+
+    # An explicit OpenAI-compatible endpoint (free model) takes precedence.
+    monkeypatch.setenv("ANNAPURNA_DISCOVERY_BASE_URL", "http://localhost:11434/v1")
+    assert discovery._llm_backend() is discovery.openai_compatible_cluster
 
 
 class _FakeGitHub:

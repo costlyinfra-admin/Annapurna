@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import httpx
+
 from .db import app_dsn, connect, tenant_tx
 from .github import GitHubClient, PullRequest
 
@@ -104,9 +106,9 @@ def heuristic_cluster(prs: list[PullRequest]) -> list[Proposal]:
 
 
 # --------------------------------------------------------------------------
-# Claude clusterer
+# LLM clusterers (Claude, or any OpenAI-compatible endpoint)
 # --------------------------------------------------------------------------
-_CLAUDE_SYSTEM = """You group a software team's merged pull requests into the \
+_DISCOVERY_SYSTEM = """You group a software team's merged pull requests into the \
 product FEATURES they built. A feature is a unit of shipped product work (e.g. \
 "AI threat triage", "Report generator"), not a chore or refactor.
 
@@ -120,19 +122,62 @@ Return ONLY a JSON array of features, each an object with:
 Every PR ref should appear in exactly one feature. Output JSON only, no prose."""
 
 
+def _pr_payload(prs: list[PullRequest]) -> str:
+    return json.dumps(
+        [{"ref": p.ref, "title": p.title, "branch": p.branch, "repo": p.repo} for p in prs]
+    )
+
+
 def claude_cluster(prs: list[PullRequest]) -> list[Proposal]:
     from anthropic import Anthropic  # imported lazily so the dep is optional at runtime
 
     model = os.environ.get("ANNAPURNA_DISCOVERY_MODEL", "claude-sonnet-4-6")
-    payload = [{"ref": p.ref, "title": p.title, "branch": p.branch, "repo": p.repo} for p in prs]
     client = Anthropic()  # reads ANTHROPIC_API_KEY
     message = client.messages.create(
         model=model,
         max_tokens=2000,
-        system=_CLAUDE_SYSTEM,
-        messages=[{"role": "user", "content": json.dumps(payload)}],
+        system=_DISCOVERY_SYSTEM,
+        messages=[{"role": "user", "content": _pr_payload(prs)}],
     )
     text = "".join(block.text for block in message.content if block.type == "text")
+    return _proposals_from_json(text, prs)
+
+
+def openai_compatible_cluster(
+    prs: list[PullRequest], *, client: Optional[httpx.Client] = None
+) -> list[Proposal]:
+    """Cluster via any OpenAI-compatible /chat/completions endpoint.
+
+    Lets discovery run on a FREE model — Groq's free tier, a local Ollama, an
+    OpenRouter ``:free`` model, etc. — configured by env:
+        ANNAPURNA_DISCOVERY_BASE_URL  e.g. https://api.groq.com/openai/v1
+        ANNAPURNA_DISCOVERY_API_KEY   the provider key ("ollama" for local Ollama)
+        ANNAPURNA_DISCOVERY_MODEL     e.g. llama-3.3-70b-versatile
+    Only PR metadata (ref/title/branch/repo) is sent — never source code.
+    """
+    base = os.environ["ANNAPURNA_DISCOVERY_BASE_URL"].rstrip("/")
+    api_key = os.environ.get("ANNAPURNA_DISCOVERY_API_KEY", "")
+    model = os.environ.get("ANNAPURNA_DISCOVERY_MODEL", "llama-3.3-70b-versatile")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    body = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": _DISCOVERY_SYSTEM},
+            {"role": "user", "content": _pr_payload(prs)},
+        ],
+    }
+    owns = client is None
+    client = client or httpx.Client(timeout=60.0)
+    try:
+        resp = client.post(f"{base}/chat/completions", json=body, headers=headers)
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"]
+    finally:
+        if owns:
+            client.close()
     return _proposals_from_json(text, prs)
 
 
@@ -168,14 +213,28 @@ def _proposals_from_json(text: str, prs: list[PullRequest]) -> list[Proposal]:
 # --------------------------------------------------------------------------
 # Selection + orchestration
 # --------------------------------------------------------------------------
+def _llm_backend() -> Optional[Callable[[list[PullRequest]], list[Proposal]]]:
+    """Pick the configured LLM clusterer, if any.
+
+    An explicit OpenAI-compatible endpoint (free models: Groq, Ollama, OpenRouter)
+    takes precedence; then Anthropic; otherwise None -> the heuristic.
+    """
+    if os.environ.get("ANNAPURNA_DISCOVERY_BASE_URL"):
+        return openai_compatible_cluster
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return claude_cluster
+    return None
+
+
 def cluster_prs(prs: list[PullRequest]) -> list[Proposal]:
-    """Cluster with Claude when configured; fall back to the heuristic on any issue."""
+    """Cluster with the configured LLM; fall back to the heuristic on any issue."""
     if not prs:
         return []
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    backend = _llm_backend()
+    if backend is None:
         return heuristic_cluster(prs)
     try:
-        proposals = claude_cluster(prs)
+        proposals = backend(prs)
         return proposals or heuristic_cluster(prs)
     except Exception:
         # Never let a discovery LLM hiccup break onboarding — degrade to heuristic.
