@@ -146,6 +146,34 @@ def _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, p
     )
 
 
+def record_training_cost(
+    tenant_id: str,
+    feature_id: str,
+    amount,
+    label: str,
+    period: dt.date,
+    run_ref: Optional[str] = None,
+) -> dict:
+    """Record a one-time fine-tuning / training run as BUILD cost on a feature.
+
+    Fine-tuning an open-source model is part of what it cost to *build* the
+    feature, so it lives on the build side (never blended with inference). It is
+    directly attributed (the customer names the feature), so confidence is high.
+    """
+    start = month_start(period)
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        conn.execute(
+            """
+            INSERT INTO build_cost
+                (tenant_id, feature_id, developer_id, tool, pr_ref, amount, period,
+                 confidence, source)
+            VALUES (%s, %s, %s, 'fine_tune', %s, %s, %s, 'high', 'fine_tune')
+            """,
+            (tenant_id, feature_id, label, run_ref, Decimal(str(amount)), start),
+        )
+    return build_summary(tenant_id, period)
+
+
 def build_summary(tenant_id: str, period: dt.date) -> dict:
     """Build cost per feature and per developer, broken down by tool."""
     start = month_start(period)

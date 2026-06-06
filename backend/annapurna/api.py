@@ -125,6 +125,14 @@ class ReconcileRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
+class TrainingCostRequest(BaseModel):
+    feature_id: str
+    amount: float = Field(ge=0)
+    label: str = Field(min_length=1, max_length=120)
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+    run_ref: Optional[str] = None
+
+
 class ComputePoolRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     provider_label: str = Field(min_length=1, max_length=60)
@@ -414,6 +422,17 @@ def create_app() -> FastAPI:
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
         return build.build_summary(user["tenant_id"], _parse_period(period))
+
+    @app.post("/api/build/training")
+    def record_training_cost(body: TrainingCostRequest, user: CurrentUser) -> dict:
+        return build.record_training_cost(
+            user["tenant_id"],
+            body.feature_id,
+            body.amount,
+            body.label,
+            _parse_period(body.period),
+            body.run_ref,
+        )
 
     # ---- Self-hosted compute pools (open-source inference) --------------
     @app.get("/api/compute/pools")

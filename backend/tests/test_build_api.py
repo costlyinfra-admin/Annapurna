@@ -67,3 +67,23 @@ def test_import_csv_and_summary(client):
 def test_bad_csv_returns_400(client):
     resp = client.post("/api/build/import", json={"csv": "not,really,a,spend,file\n"})
     assert resp.status_code == 400
+
+
+def test_record_fine_tune_training_cost(client):
+    feature = client.post("/api/features", json={"name": "Log triage"}).json()
+    summary = client.post(
+        "/api/build/training",
+        json={
+            "feature_id": feature["id"],
+            "amount": 4200,
+            "label": "Llama-3.1-70B tuning",
+            "period": "2026-05",
+            "run_ref": "run:ft-2026-04",
+        },
+    ).json()
+
+    feat = next(f for f in summary["features"] if f["name"] == "Log triage")
+    assert feat["amount"] == 4200.0
+    # A fine-tuning run is BUILD cost (the tool bucket), never inference.
+    assert feat["by_tool"] == {"fine_tune": 4200.0}
+    assert feat["confidence"] == "high"  # directly attributed

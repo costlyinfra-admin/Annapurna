@@ -630,4 +630,99 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
             _hist_inference(conn, tenant_id, fid, provider, model, ref, latest, full, conf)
         _add_usage(conn, tenant_id, fid, f["users"], f["events"])
 
-    return len(_NEW_FEATURES)
+    # 3) A self-hosted / open-source feature: Llama-3.1-70B on the company's own
+    #    GPUs. Its run cost is a $6,500/mo infra pool allocated by usage (med
+    #    confidence), and it carries a one-time fine-tuning run as BUILD cost.
+    _add_self_hosted_demo(conn, tenant_id)
+
+    return len(_NEW_FEATURES) + 1
+
+
+def _add_self_hosted_demo(conn, tenant_id) -> None:
+    feature = _add_feature(
+        conn,
+        tenant_id,
+        "Log triage (self-hosted)",
+        "Fine-tuned Llama-3.1-70B on our own GPUs triages raw log noise.",
+        "confirmed",
+        "med",
+    )
+    _add_signal(conn, tenant_id, feature, "branch", "feature/logtriage-*", "high")
+    _add_signal(
+        conn,
+        tenant_id,
+        feature,
+        "pr",
+        "acme/core#1566",
+        "high",
+        actor="grace",
+        commits=8,
+        files_changed=22,
+    )
+    _add_build_cost(
+        conn, tenant_id, feature, "grace", "claude_code", "acme/core#1566", 78.00, "high"
+    )
+
+    # Fine-tuning run -> one-time BUILD cost (separate from inference, invariant 2).
+    conn.execute(
+        """
+        INSERT INTO build_cost
+            (tenant_id, feature_id, developer_id, tool, pr_ref, amount, period, confidence, source)
+        VALUES (%s, %s, %s, 'fine_tune', %s, %s, %s, 'high', 'fine_tune')
+        """,
+        (tenant_id, feature, "Llama-3.1-70B tuning", "run:ft-2026-04", 4200.00, DEFAULT_PERIOD),
+    )
+
+    # The GPU serving pool ($6,500/mo infra bill) + per-feature usage weights.
+    pool_id = conn.execute(
+        """
+        INSERT INTO compute_pool (tenant_id, name, provider_label, monthly_cost)
+        VALUES (%s, %s, %s, %s) RETURNING id
+        """,
+        (tenant_id, "Llama-3.1-70B GPU pool", "self_hosted", 6500.00),
+    ).fetchone()[0]
+    # 580M tokens tagged to the feature, 70M untagged (-> Unattributed share).
+    for feat, model, tin, tout, reqs in (
+        (feature, "llama-3.1-70b", 520_000_000, 60_000_000, 410_000),
+        (None, "llama-3.1-70b", 60_000_000, 10_000_000, 55_000),
+    ):
+        conn.execute(
+            """
+            INSERT INTO pool_usage
+                (tenant_id, pool_id, feature_id, model, period,
+                 tokens_in, tokens_out, request_count)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (tenant_id, pool_id, feat, model, DEFAULT_PERIOD, tin, tout, reqs),
+        )
+    # Allocated self-hosted inference (what `compute.allocate` would write):
+    # $6,500 split 580/70 -> $5,800 to the feature, $700 Unattributed.
+    _add_inference_cost(
+        conn,
+        tenant_id,
+        feature,
+        "self_hosted",
+        "Llama-3.1-70B GPU pool",
+        "pool:self_hosted",
+        5800.00,
+        520_000_000,
+        60_000_000,
+        410_000,
+        "med",
+        source="self_host",
+    )
+    _add_inference_cost(
+        conn,
+        tenant_id,
+        None,
+        "self_hosted",
+        "Llama-3.1-70B GPU pool",
+        "pool:self_hosted",
+        700.00,
+        60_000_000,
+        10_000_000,
+        55_000,
+        "med",
+        source="self_host",
+    )
+    _add_usage(conn, tenant_id, feature, 75, 210_000)

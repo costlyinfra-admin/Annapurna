@@ -25,11 +25,11 @@ def test_seed_loads_extended_demo_tenant(postgresql, admin_conninfo, monkeypatch
         tenant = _tenant_id(conn, seed.DEMO_TENANT_NAME)
         assert tenant is not None, "demo tenant was not created"
 
-        # Extended demo: 4 base + 4 new features.
+        # Extended demo: 4 base + 4 new + 1 self-hosted feature.
         feature_count = conn.execute(
             "SELECT count(*) FROM feature WHERE tenant_id = %s", (tenant[0],)
         ).fetchone()[0]
-        assert feature_count == 8
+        assert feature_count == 9
 
         # ~2 years of monthly history -> many distinct periods, spanning 2024-2026.
         periods = conn.execute(
@@ -47,6 +47,29 @@ def test_seed_loads_extended_demo_tenant(postgresql, admin_conninfo, monkeypatch
             (tenant[0],),
         ).fetchone()[0]
         assert unattributed >= 1
+
+        # Open-source coverage: a self-hosted GPU pool with allocated (self_host)
+        # inference cost, plus a fine-tuning run recorded as build cost.
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM compute_pool WHERE tenant_id = %s", (tenant[0],)
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM inference_cost WHERE tenant_id = %s AND source = 'self_host'",
+                (tenant[0],),
+            ).fetchone()[0]
+            >= 1
+        )
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM build_cost WHERE tenant_id = %s AND tool = 'fine_tune'",
+                (tenant[0],),
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_seed_is_idempotent_without_reset(postgresql, admin_conninfo, monkeypatch):
@@ -93,4 +116,4 @@ def test_seed_reset_rebuilds_demo_tenant(postgresql, admin_conninfo, monkeypatch
         features = conn.execute(
             "SELECT count(*) FROM feature WHERE tenant_id = %s", (rebuilt,)
         ).fetchone()[0]
-        assert features == 8
+        assert features == 9

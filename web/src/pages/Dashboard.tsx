@@ -77,7 +77,7 @@ export function Dashboard() {
           </div>
         )}
 
-        <DataActions period={data?.period} onChanged={load} />
+        <DataActions period={data?.period} features={data?.features ?? []} onChanged={load} />
 
         {data &&
           data.features.length > 0 &&
@@ -271,7 +271,15 @@ function ExecEmpty({ note }: { note: string }) {
   );
 }
 
-function DataActions({ period, onChanged }: { period?: string; onChanged: () => Promise<void> }) {
+function DataActions({
+  period,
+  features,
+  onChanged,
+}: {
+  period?: string;
+  features: DashboardRow[];
+  onChanged: () => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const [csv, setCsv] = useState("");
   const [tool, setTool] = useState("cursor");
@@ -282,7 +290,31 @@ function DataActions({ period, onChanged }: { period?: string; onChanged: () => 
   const [poolLabel, setPoolLabel] = useState("self_hosted");
   const [poolCost, setPoolCost] = useState("");
   const [pools, setPools] = useState<ComputePool[]>([]);
+  const [ftFeature, setFtFeature] = useState("");
+  const [ftAmount, setFtAmount] = useState("");
+  const [ftLabel, setFtLabel] = useState("");
   const monthParam = period?.slice(0, 7);
+
+  async function recordTraining() {
+    const amount = parseFloat(ftAmount);
+    if (!ftFeature || !ftLabel.trim() || Number.isNaN(amount)) {
+      setNote("Pick a feature, and enter a run label and amount.");
+      return;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.recordTrainingCost(ftFeature, amount, ftLabel.trim(), monthParam);
+      setFtAmount("");
+      setFtLabel("");
+      setNote("Recorded fine-tuning run as build cost.");
+      await onChanged();
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Could not record training cost.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (open)
@@ -431,6 +463,33 @@ function DataActions({ period, onChanged }: { period?: string; onChanged: () => 
             </button>
           </span>
         )}
+      </div>
+      <div className="data-action">
+        <label>Fine-tune / training cost (one-time, counts as build)</label>
+        <span className="inline">
+          <select value={ftFeature} onChange={(e) => setFtFeature(e.target.value)}>
+            <option value="">Select feature…</option>
+            {features.map((f) => (
+              <option key={f.feature_id} value={f.feature_id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+          <input
+            placeholder="Run label (e.g. Llama-3.1-70B tuning)"
+            value={ftLabel}
+            onChange={(e) => setFtLabel(e.target.value)}
+          />
+          <input
+            placeholder="$ amount"
+            inputMode="decimal"
+            value={ftAmount}
+            onChange={(e) => setFtAmount(e.target.value)}
+          />
+          <button onClick={recordTraining} disabled={busy}>
+            Add training cost
+          </button>
+        </span>
       </div>
       {note && <p className="muted">{note}</p>}
       <button className="link" onClick={() => setOpen(false)}>

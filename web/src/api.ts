@@ -251,6 +251,12 @@ export const api = {
       body: JSON.stringify({ csv, tool, period }),
     }),
 
+  recordTrainingCost: (featureId: string, amount: number, label: string, period?: string) =>
+    request<{ total: number }>("/build/training", {
+      method: "POST",
+      body: JSON.stringify({ feature_id: featureId, amount, label, period }),
+    }),
+
   // ---- Self-hosted compute pools (open-source inference) ----
   listComputePools: () => request<ComputePool[]>("/compute/pools"),
 
