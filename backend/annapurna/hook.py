@@ -15,6 +15,7 @@ import secrets
 from decimal import Decimal
 from typing import Optional
 
+from . import compute
 from .db import admin_dsn, app_dsn, connect, tenant_tx
 from .pricing import PRICED_PROVIDERS, price
 from .providers import month_start
@@ -69,11 +70,14 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
     accepted = 0
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         valid_features = {str(r[0]) for r in conn.execute("SELECT id FROM feature").fetchall()}
+        pools = compute.pool_labels(conn)  # provider_label -> pool_id (self-hosted)
         accumulator: dict[tuple, dict] = {}
+        pool_acc: dict[tuple, dict] = {}
         for event in events:
             provider = event.get("provider")
-            if provider not in PRICED_PROVIDERS:
-                continue  # unknown/unpriced provider -> skip (kept out of accepted count)
+            is_pool = provider in pools
+            if not is_pool and provider not in PRICED_PROVIDERS:
+                continue  # unknown provider (no price, no pool) -> skip
             model = event.get("model") or ""
             tokens_in = int(event.get("tokens_in") or 0)
             tokens_out = int(event.get("tokens_out") or 0)
@@ -81,8 +85,19 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
             if feature_id is not None and str(feature_id) not in valid_features:
                 feature_id = None  # unknown/foreign feature -> Unattributed
             period = _period_of(event.get("occurred_at"))
-            cost = price(model, tokens_in, tokens_out, provider)
 
+            if is_pool:
+                # Self-hosted: no per-token price. Record usage; cost is allocated
+                # later from the pool's infra bill (compute.allocate).
+                key = (pools[provider], feature_id, model or None, period)
+                entry = pool_acc.setdefault(key, {"tin": 0, "tout": 0, "count": 0})
+                entry["tin"] += tokens_in
+                entry["tout"] += tokens_out
+                entry["count"] += 1
+                accepted += 1
+                continue
+
+            cost = price(model, tokens_in, tokens_out, provider)
             key = (feature_id, provider, model, period)
             entry = accumulator.setdefault(
                 key, {"amount": Decimal("0"), "tin": 0, "tout": 0, "count": 0}
@@ -96,6 +111,19 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
         for (feature_id, provider, model, period), entry in accumulator.items():
             _upsert_hook_row(conn, tenant_id, feature_id, provider, model, period, entry)
             total += entry["amount"]
+
+        for (pool_id, feature_id, model, period), entry in pool_acc.items():
+            compute.record_usage(
+                conn,
+                tenant_id,
+                pool_id,
+                feature_id,
+                model,
+                period,
+                entry["tin"],
+                entry["tout"],
+                entry["count"],
+            )
 
     return {"accepted": accepted, "cost": float(total)}
 
