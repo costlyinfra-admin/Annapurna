@@ -616,6 +616,60 @@ select {
   overflow: hidden;
 }
 
+/* Key insights — auto-generated narrative under the exec summary */
+.insights {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 0.9rem 1.2rem 1rem;
+  margin: 0 0 1.25rem;
+}
+
+.insights-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.insight-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.insight-item {
+  position: relative;
+  padding-left: 1rem;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.insight-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.insight--governance::before {
+  background: var(--warn);
+}
+
+.insight--efficiency::before {
+  background: var(--good);
+}
+
 .exec-item {
   flex: 1 1 190px;
   min-width: 170px;

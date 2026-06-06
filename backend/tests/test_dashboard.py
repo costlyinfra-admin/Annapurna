@@ -52,6 +52,17 @@ def test_dashboard_executive_highlights(seeded):
     assert h["optimization"]["worth_it"] == "watch"
 
 
+def test_dashboard_generates_executive_insights(seeded):
+    texts = [i["text"] for i in dashboard.dashboard(seeded, PERIOD)["insights"]]
+
+    # Concentration: triage (4200 + 181) is 54% of all AI spend (8131.75).
+    assert "AI threat triage represents 54% of all AI spend." in texts
+    # Efficiency: report cost/user (15.42) is ~2x triage's (7.78), the widest gap.
+    assert "Report generator costs 2x more per user than AI threat triage." in texts
+    # Governance: unattributed (790) is 9.7% of total AI costs.
+    assert "Unattributed spend represents 9.7% of total AI costs." in texts
+
+
 def test_feature_detail_has_breakdowns_and_evidence(seeded):
     data = dashboard.dashboard(seeded, PERIOD)
     triage = next(f for f in data["features"] if f["name"] == "AI threat triage")

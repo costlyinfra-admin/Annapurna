@@ -31,6 +31,10 @@ const DATA = {
     optimization: null,
     highest_cost_per_user: TRIAGE,
   },
+  insights: [
+    { kind: "concentration", text: "AI threat triage represents 54% of all AI spend." },
+    { kind: "governance", text: "Unattributed spend represents 9.7% of total AI costs." },
+  ],
   totals: { build_cost: 211, inference_cost: 4960 },
 };
 
@@ -80,5 +84,16 @@ describe("Dashboard", () => {
     expect(screen.getByText("$790")).toBeInTheDocument();
     // "optimization" is null in the mock -> graceful empty state.
     expect(screen.getByText("Nothing flagged")).toBeInTheDocument();
+  });
+
+  it("renders auto-generated key insights", async () => {
+    renderDashboard();
+    expect(await screen.findByText("Key insights")).toBeInTheDocument();
+    expect(
+      screen.getByText("AI threat triage represents 54% of all AI spend."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Unattributed spend represents 9.7% of total AI costs."),
+    ).toBeInTheDocument();
   });
 });

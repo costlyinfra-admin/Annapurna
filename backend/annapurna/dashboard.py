@@ -101,17 +101,92 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
         "build_cost": build.get(None, {"amount": 0.0})["amount"],
         "inference_cost": inference_unattributed,
     }
+    totals = {
+        "build_cost": sum(r["build_cost"] for r in rows) + unattributed["build_cost"],
+        "inference_cost": sum(r["inference_cost"] for r in rows) + unattributed["inference_cost"],
+    }
     return {
         "period": start.isoformat(),
         "features": rows,
         "unattributed": unattributed,
         "highlights": _highlights(rows),
-        "totals": {
-            "build_cost": sum(r["build_cost"] for r in rows) + unattributed["build_cost"],
-            "inference_cost": sum(r["inference_cost"] for r in rows)
-            + unattributed["inference_cost"],
-        },
+        "insights": _insights(rows, unattributed, totals),
+        "totals": totals,
     }
+
+
+def _fmt_pct(p: float) -> str:
+    """Whole percent when >= 10 (54%), one decimal when smaller (9.7%)."""
+    return f"{round(p)}%" if p >= 10 else f"{p:.1f}%"
+
+
+def _fmt_ratio(r: float) -> str:
+    """1.98 -> '2x', 2.34 -> '2.3x'."""
+    return f"{r:.1f}".rstrip("0").rstrip(".") + "x"
+
+
+def _insights(rows: list, unattributed: dict, totals: dict) -> list:
+    """Auto-generated, plain-language executive insights (deterministic).
+
+    Every sentence is derived directly from the dashboard numbers — no model,
+    no black box. Each insight names the feature(s) and basis behind it.
+    """
+    insights: list = []
+    total_ai = totals["build_cost"] + totals["inference_cost"]
+    if total_ai <= 0:
+        return insights
+
+    # 1. Concentration — the single largest slice of all AI spend.
+    combos = [(r, r["build_cost"] + r["inference_cost"]) for r in rows]
+    top = max(combos, key=lambda c: c[1], default=None)
+    if top and top[1] > 0:
+        insights.append(
+            {
+                "kind": "concentration",
+                "text": f"{top[0]['name']} represents "
+                f"{_fmt_pct(top[1] / total_ai * 100)} of all AI spend.",
+            }
+        )
+
+    # 2. Efficiency — widest gap in cost per active user between two features.
+    cpu = [r for r in rows if r["cost_per_user"]]
+    if len(cpu) >= 2:
+        high = max(cpu, key=lambda r: r["cost_per_user"])
+        low = min(cpu, key=lambda r: r["cost_per_user"])
+        ratio = high["cost_per_user"] / low["cost_per_user"]
+        if ratio >= 1.5:
+            insights.append(
+                {
+                    "kind": "efficiency",
+                    "text": f"{high['name']} costs {_fmt_ratio(ratio)} more per user "
+                    f"than {low['name']}.",
+                }
+            )
+
+    # 3. Governance — how much spend isn't mapped to a feature yet.
+    unatt = unattributed["build_cost"] + unattributed["inference_cost"]
+    if unatt > 0:
+        insights.append(
+            {
+                "kind": "governance",
+                "text": f"Unattributed spend represents "
+                f"{_fmt_pct(unatt / total_ai * 100)} of total AI costs.",
+            }
+        )
+
+    # 4. Build-vs-run split (kept separate per invariant 2, shown as shares).
+    if totals["build_cost"] > 0 and totals["inference_cost"] > 0:
+        run = totals["inference_cost"] / total_ai * 100
+        build = totals["build_cost"] / total_ai * 100
+        insights.append(
+            {
+                "kind": "split",
+                "text": f"Running these features is {_fmt_pct(run)} of AI spend; "
+                f"building them is {_fmt_pct(build)}.",
+            }
+        )
+
+    return insights
 
 
 def _highlights(rows: list) -> dict:

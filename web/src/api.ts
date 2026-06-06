@@ -64,11 +64,17 @@ export interface DashboardHighlights {
   highest_cost_per_user: DashboardRow | null;
 }
 
+export interface Insight {
+  kind: string;
+  text: string;
+}
+
 export interface Dashboard {
   period: string;
   features: DashboardRow[];
   unattributed: { build_cost: number; inference_cost: number };
   highlights: DashboardHighlights;
+  insights: Insight[];
   totals: { build_cost: number; inference_cost: number };
 }
 

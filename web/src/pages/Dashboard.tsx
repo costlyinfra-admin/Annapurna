@@ -54,6 +54,8 @@ export function Dashboard() {
 
         {data && <ExecutiveSummary data={data} />}
 
+        {data && <KeyInsights insights={data.insights} />}
+
         {data && (
           <div className="totals-strip">
             <div className="total-card">
@@ -197,6 +199,23 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
           {money(data.unattributed.inference_cost)} inf · {money(data.unattributed.build_cost)} build
         </span>
       </ExecItem>
+    </section>
+  );
+}
+
+/** Auto-generated plain-language insights — the story behind the numbers. */
+function KeyInsights({ insights }: { insights: DashboardData["insights"] }) {
+  if (insights.length === 0) return null;
+  return (
+    <section className="insights" aria-label="Key insights">
+      <span className="insights-title">Key insights</span>
+      <ul className="insight-list">
+        {insights.map((ins, i) => (
+          <li key={i} className={`insight-item insight--${ins.kind}`}>
+            {ins.text}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
