@@ -275,37 +275,6 @@ def feature_detail(
             (feature_id,),
         ).fetchone()[0]
 
-        inference_trend = [
-            {"period": p.isoformat(), "amount": float(amount), "source": source}
-            for p, amount, source in conn.execute(
-                """
-                SELECT period, SUM(amount), MIN(source)
-                FROM inference_cost WHERE feature_id = %s
-                GROUP BY period ORDER BY period
-                """,
-                (feature_id,),
-            ).fetchall()
-        ]
-
-        # Inference breakdown by model for the period (cost, share %, requests).
-        inference_total = float(inference_month) or 0.0
-        inference_by_model = [
-            {
-                "model": model or "unknown",
-                "amount": float(amount),
-                "pct": (float(amount) / inference_total * 100.0) if inference_total else 0.0,
-                "requests": int(requests) if requests is not None else None,
-            }
-            for model, amount, requests in conn.execute(
-                """
-                SELECT model, SUM(amount), SUM(request_count)
-                FROM inference_cost WHERE feature_id = %s AND period = %s
-                GROUP BY model ORDER BY SUM(amount) DESC
-                """,
-                (feature_id, start),
-            ).fetchall()
-        ]
-
         evidence = [
             {
                 "signal_type": st,
@@ -349,8 +318,65 @@ def feature_detail(
         "build_total": float(build_total),  # total AI build spend for this feature
         "build_contributors": build_contributors,
         "build_by_developer": by_developer,
-        "inference_trend": inference_trend,
-        "inference_by_model": inference_by_model,
         "evidence": evidence,
         "inference_sources": sources,  # ["cost_api"] now; "hook" arrives in M7
     }
+
+
+def _months_back(day: dt.date, n: int) -> dt.date:
+    """First-of-month n months before ``day`` (month-aligned)."""
+    month = day.month - n
+    year = day.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    return dt.date(year, month, 1)
+
+
+_WINDOW_MONTHS = {"month": 1, "quarter": 3, "year": 12}
+
+
+def feature_inference(tenant_id: str, feature_id: str, window: str = "month") -> dict:
+    """Inference cost for a feature over a window: per-model breakdown + monthly trend.
+
+    ``window`` is month (the latest month), quarter (last 3 months), or year (12).
+    Per-model amounts sum to the windowed total (used for the % share + pie).
+    """
+    months = _WINDOW_MONTHS.get(window, 1)
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        latest = _resolve_period(conn, None)
+        start = _months_back(latest, months - 1)
+
+        model_rows = conn.execute(
+            """
+            SELECT model, SUM(amount), SUM(request_count)
+            FROM inference_cost
+            WHERE feature_id = %s AND period BETWEEN %s AND %s
+            GROUP BY model ORDER BY SUM(amount) DESC
+            """,
+            (feature_id, start, latest),
+        ).fetchall()
+        total = sum(float(amount) for _model, amount, _req in model_rows) or 0.0
+        by_model = [
+            {
+                "model": model or "unknown",
+                "amount": float(amount),
+                "pct": (float(amount) / total * 100.0) if total else 0.0,
+                "requests": int(req) if req is not None else None,
+            }
+            for model, amount, req in model_rows
+        ]
+        trend = [
+            {"period": p.isoformat(), "amount": float(amount)}
+            for p, amount in conn.execute(
+                """
+                SELECT period, SUM(amount)
+                FROM inference_cost
+                WHERE feature_id = %s AND period BETWEEN %s AND %s
+                GROUP BY period ORDER BY period
+                """,
+                (feature_id, start, latest),
+            ).fetchall()
+        ]
+
+    return {"window": window, "total": total, "by_model": by_model, "trend": trend}

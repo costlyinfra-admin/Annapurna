@@ -293,21 +293,57 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str) -> dict:
     )
     # Same feature, a second model — so the model breakdown/pie has >1 slice.
     _add_inference_cost(
-        conn, tenant_id, triage, "anthropic", "claude-opus-4-8", "key:triage-prod",
-        700.00, 3_000_000, 400_000, 60_000, "high",
+        conn,
+        tenant_id,
+        triage,
+        "anthropic",
+        "claude-opus-4-8",
+        "key:triage-prod",
+        700.00,
+        3_000_000,
+        400_000,
+        60_000,
+        "high",
     )
     # Report generator spans three models (the pie's showcase): gpt-4o dominant.
     _add_inference_cost(
-        conn, tenant_id, report, "openai", "gpt-4o", "proj:reports",
-        1250.00, 6_000_000, 750_000, 60_000, "med",
+        conn,
+        tenant_id,
+        report,
+        "openai",
+        "gpt-4o",
+        "proj:reports",
+        1250.00,
+        6_000_000,
+        750_000,
+        60_000,
+        "med",
     )
     _add_inference_cost(
-        conn, tenant_id, report, "anthropic", "claude-sonnet-4-6", "proj:reports",
-        400.00, 1_800_000, 250_000, 20_000, "med",
+        conn,
+        tenant_id,
+        report,
+        "anthropic",
+        "claude-sonnet-4-6",
+        "proj:reports",
+        400.00,
+        1_800_000,
+        250_000,
+        20_000,
+        "med",
     )
     _add_inference_cost(
-        conn, tenant_id, report, "anthropic", "claude-haiku-4-5", "proj:reports",
-        200.00, 1_200_000, 100_000, 8_000, "med",
+        conn,
+        tenant_id,
+        report,
+        "anthropic",
+        "claude-haiku-4-5",
+        "proj:reports",
+        200.00,
+        1_200_000,
+        100_000,
+        8_000,
+        "med",
     )
     _add_inference_cost(
         conn,
@@ -336,6 +372,45 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str) -> dict:
         300_000,
         "low",
     )
+
+    # Prior months of inference for triage + report, so the trend chart and the
+    # month/quarter/year filter on the drill-down have real history to show.
+    _mar = _dt.date(2026, 3, 1)
+    _apr = _dt.date(2026, 4, 1)
+    for feat, model, mar_amt, apr_amt in (
+        (triage, "claude-sonnet-4-6", 2400.00, 3000.00),
+        (triage, "claude-opus-4-8", 400.00, 500.00),
+        (report, "gpt-4o", 800.00, 1000.00),
+    ):
+        provider = "openai" if model.startswith("gpt") else "anthropic"
+        _add_inference_cost(
+            conn,
+            tenant_id,
+            feat,
+            provider,
+            model,
+            "key:hist",
+            mar_amt,
+            0,
+            0,
+            int(mar_amt * 60),
+            "med",
+            period=_mar,
+        )
+        _add_inference_cost(
+            conn,
+            tenant_id,
+            feat,
+            provider,
+            model,
+            "key:hist",
+            apr_amt,
+            0,
+            0,
+            int(apr_amt * 60),
+            "med",
+            period=_apr,
+        )
 
     # --- Bill reconciliation (connector totals; hook reconciliation is M7) -
     conn.execute(

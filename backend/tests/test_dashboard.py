@@ -73,7 +73,6 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
     # Total AI build spend + contributors for this feature.
     assert detail["build_total"] == 181.0
     assert detail["build_contributors"] == 2
-    assert detail["inference_trend"]  # at least one month
 
     # Evidence trail: the actual signals behind the number.
     signal_types = {s["signal_type"] for s in detail["evidence"]}
@@ -81,18 +80,25 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
     assert detail["inference_sources"] == ["cost_api"]  # connector, not hook (yet)
 
 
-def test_inference_breakdown_by_model(seeded):
+def test_feature_inference_breakdown_and_window(seeded):
     data = dashboard.dashboard(seeded, PERIOD)
-    report = next(f for f in data["features"] if f["name"] == "Report generator")
+    report_id = next(f for f in data["features"] if f["name"] == "Report generator")["feature_id"]
 
-    models = dashboard.feature_detail(seeded, report["feature_id"], PERIOD)["inference_by_model"]
-    # Three models, summing to the feature's monthly inference ($1,850), gpt-4o on top.
-    by_model = {m["model"]: m for m in models}
+    # Month window: three models summing to the month's $1,850, gpt-4o on top.
+    month = dashboard.feature_inference(seeded, report_id, "month")
+    by_model = {m["model"]: m for m in month["by_model"]}
     assert set(by_model) == {"gpt-4o", "claude-sonnet-4-6", "claude-haiku-4-5"}
     assert by_model["gpt-4o"]["amount"] == 1250.0
     assert by_model["gpt-4o"]["requests"] == 60_000
-    assert abs(sum(m["pct"] for m in models) - 100.0) < 1e-6
+    assert abs(sum(m["pct"] for m in month["by_model"]) - 100.0) < 1e-6
     assert round(by_model["gpt-4o"]["pct"]) == 68  # 1250 / 1850
+    assert len(month["trend"]) == 1  # just the latest month
+
+    # Quarter window pulls in the prior months: gpt-4o 1250 + 1000 + 800, 3 trend points.
+    quarter = dashboard.feature_inference(seeded, report_id, "quarter")
+    q_by_model = {m["model"]: m for m in quarter["by_model"]}
+    assert q_by_model["gpt-4o"]["amount"] == 3050.0
+    assert len(quarter["trend"]) == 3
 
 
 def test_detail_missing_feature_returns_none(seeded):

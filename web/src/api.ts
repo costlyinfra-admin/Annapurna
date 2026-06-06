@@ -91,8 +91,6 @@ export interface FeatureDetail {
     commits: number | null;
     files_changed: number | null;
   }[];
-  inference_trend: { period: string; amount: number; source: string }[];
-  inference_by_model: { model: string; amount: number; pct: number; requests: number | null }[];
   evidence: {
     signal_type: string;
     external_ref: string;
@@ -101,6 +99,13 @@ export interface FeatureDetail {
     source: string | null;
   }[];
   inference_sources: string[];
+}
+
+export interface FeatureInference {
+  window: string;
+  total: number;
+  by_model: { model: string; amount: number; pct: number; requests: number | null }[];
+  trend: { period: string; amount: number }[];
 }
 
 export class ApiError extends Error {
@@ -194,6 +199,9 @@ export const api = {
 
   featureDetail: (id: string, period?: string) =>
     request<FeatureDetail>(`/features/${id}/detail${period ? `?period=${period}` : ""}`),
+
+  featureInference: (id: string, window: "month" | "quarter" | "year") =>
+    request<FeatureInference>(`/features/${id}/inference?window=${window}`),
 
   setUsage: (id: string, activeUsers: number, period?: string) =>
     request<Feature>(`/features/${id}/usage`, {

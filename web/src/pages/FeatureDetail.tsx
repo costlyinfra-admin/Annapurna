@@ -1,17 +1,19 @@
 /**
- * Feature drill-down (design §9.3): three headline numbers (build / inference /
- * users, kept separate), build cost by developer, inference trend over time, and
- * the evidence trail — the actual signals behind every number. An indicator
- * shows whether inference is connector-derived or hook-metered (M7).
+ * Feature drill-down (design §9.3), organized into two clear sections:
+ *   - Developer cost: total build spend, contributors, and per-developer breakdown.
+ *   - Inference cost: a trend chart + an interactive by-model donut, with a
+ *     month / quarter / year window filter.
+ * Plus the evidence trail — the actual signals behind every number.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, type FeatureDetail as Detail } from "../api";
+import { api, ApiError, type FeatureDetail as Detail, type FeatureInference } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge } from "../components/badges";
 import { compact, money, num } from "../format";
 
 const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function FeatureDetail() {
   const { id = "" } = useParams();
@@ -32,7 +34,7 @@ export function FeatureDetail() {
     load();
   }, [load]);
 
-  const hookMetered = detail?.inference_sources.includes("hook");
+  const hookMetered = detail?.inference_sources.includes("hook") ?? false;
 
   return (
     <div className="page">
@@ -57,102 +59,65 @@ export function FeatureDetail() {
         <main>
           <h1>{detail.name}</h1>
           {detail.description && <p className="muted">{detail.description}</p>}
+          <p className="detail-meta">
+            <span className="badge">{detail.status}</span>
+            {detail.headline.active_users != null && (
+              <span className="muted">{num(detail.headline.active_users)} active users this period</span>
+            )}
+          </p>
 
-          {/* Three headline numbers — build and inference always separate. */}
-          <div className="headline-cards">
-            <div className="headline-card">
-              <span className="total-label">Build cost</span>
-              <span className="total-value">{money(detail.headline.build_cost)}</span>
-              <span className="muted">to build (cumulative)</span>
-            </div>
-            <div className="headline-card">
-              <span className="total-label">Inference / mo</span>
-              <span className="total-value">{money(detail.headline.inference_cost)}</span>
-              <span className="muted">{hookMetered ? "hook-metered" : "connector-derived"}</span>
-            </div>
-            <div className="headline-card">
-              <span className="total-label">Active users</span>
-              <span className="total-value">{num(detail.headline.active_users)}</span>
-              <span className="muted">this period</span>
-            </div>
-          </div>
-
-          <div className="detail-cols">
-            <section className="detail-col">
-              <h2>Build cost by developer</h2>
-              <div className="build-stats">
+          {/* ---- Developer cost ---- */}
+          <section className="detail-section">
+            <div className="section-head">
+              <h2>Developer cost</h2>
+              <div className="section-stats">
                 <span>
-                  <span className="build-stat-value">{money(detail.build_total)}</span>
-                  <span className="build-stat-label">Total AI build spend</span>
+                  <strong>{money(detail.build_total)}</strong> total
                 </span>
                 <span>
-                  <span className="build-stat-value">{num(detail.build_contributors)}</span>
-                  <span className="build-stat-label">
-                    Contributor{detail.build_contributors === 1 ? "" : "s"}
-                  </span>
+                  <strong>{num(detail.build_contributors)}</strong>{" "}
+                  contributor{detail.build_contributors === 1 ? "" : "s"}
                 </span>
               </div>
-              {detail.build_by_developer.length === 0 ? (
-                <p className="muted">No build cost imported yet.</p>
-              ) : (
-                <table className="mini-table">
-                  <thead>
-                    <tr>
-                      <th>Developer</th>
-                      <th>Tool</th>
-                      <th className="num">Amount</th>
-                      <th className="num">Commits</th>
-                      <th className="num">PRs</th>
-                      <th className="num">Files</th>
+            </div>
+            {detail.build_by_developer.length === 0 ? (
+              <p className="muted">No build cost imported yet.</p>
+            ) : (
+              <table className="mini-table">
+                <thead>
+                  <tr>
+                    <th>Developer</th>
+                    <th>Tool</th>
+                    <th className="num">Amount</th>
+                    <th className="num">Commits</th>
+                    <th className="num">PRs</th>
+                    <th className="num">Files</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.build_by_developer.map((d, i) => (
+                    <tr key={i}>
+                      <td>{d.developer_id}</td>
+                      <td>{d.tool.replace("_", " ")}</td>
+                      <td className="num">{money(d.amount)}</td>
+                      <td className="num">{num(d.commits)}</td>
+                      <td className="num">{num(d.prs)}</td>
+                      <td className="num">{num(d.files_changed)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {detail.build_by_developer.map((d, i) => (
-                      <tr key={i}>
-                        <td>{d.developer_id}</td>
-                        <td>{d.tool.replace("_", " ")}</td>
-                        <td className="num">{money(d.amount)}</td>
-                        <td className="num">{num(d.commits)}</td>
-                        <td className="num">{num(d.prs)}</td>
-                        <td className="num">{num(d.files_changed)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </section>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
 
-            <section className="detail-col">
-              <h2>Inference trend</h2>
-              {detail.inference_trend.length === 0 ? (
-                <p className="muted">No inference cost yet.</p>
-              ) : (
-                <table className="mini-table">
-                  <thead>
-                    <tr>
-                      <th>Month</th>
-                      <th className="num">Inference</th>
-                      <th>Source</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.inference_trend.map((t) => (
-                      <tr key={t.period}>
-                        <td>{t.period.slice(0, 7)}</td>
-                        <td className="num">{money(t.amount)}</td>
-                        <td>{t.source === "hook" ? "hook" : "connector"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </section>
-          </div>
+          {/* ---- Inference cost ---- */}
+          <InferenceSection
+            featureId={detail.feature_id}
+            monthlyInference={detail.headline.inference_cost}
+            hookMetered={hookMetered}
+          />
 
-          {detail.inference_by_model.length > 0 && (
-            <InferenceByModel models={detail.inference_by_model} />
-          )}
-
+          {/* ---- Evidence trail ---- */}
           <section className="evidence-trail">
             <h2>Evidence trail</h2>
             <p className="muted">Every number above traces back to these signals.</p>
@@ -178,53 +143,151 @@ export function FeatureDetail() {
   );
 }
 
-/** Inference cost split by model, with a dependency-free CSS pie (conic-gradient). */
-function InferenceByModel({ models }: { models: Detail["inference_by_model"] }) {
-  let acc = 0;
-  const stops = models.map((m, i) => {
-    const start = acc;
-    acc += m.pct;
-    return `${MODEL_COLORS[i % MODEL_COLORS.length]} ${start}% ${acc}%`;
-  });
-  const pie = stops.length ? `conic-gradient(${stops.join(", ")})` : "var(--line)";
+const WINDOWS = ["month", "quarter", "year"] as const;
+type Window = (typeof WINDOWS)[number];
+
+function InferenceSection({
+  featureId,
+  monthlyInference,
+  hookMetered,
+}: {
+  featureId: string;
+  monthlyInference: number;
+  hookMetered: boolean;
+}) {
+  const [window, setWindow] = useState<Window>("month");
+  const [data, setData] = useState<FeatureInference | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .featureInference(featureId, window)
+      .then((d) => active && setData(d))
+      .catch(() => active && setData({ window, total: 0, by_model: [], trend: [] }));
+    return () => {
+      active = false;
+    };
+  }, [featureId, window]);
 
   return (
-    <section className="model-breakdown">
-      <h2>Inference by model</h2>
-      <div className="breakdown-body">
-        <div
-          className="pie"
-          style={{ background: pie }}
-          role="img"
-          aria-label="Inference cost by model"
-        />
-        <table className="mini-table breakdown-table">
-          <thead>
-            <tr>
-              <th>Model</th>
-              <th className="num">Monthly cost</th>
-              <th className="num">%</th>
-              <th className="num">Requests</th>
-            </tr>
-          </thead>
-          <tbody>
-            {models.map((m, i) => (
-              <tr key={m.model}>
-                <td>
-                  <span
-                    className="swatch"
-                    style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }}
-                  />
-                  {m.model}
-                </td>
-                <td className="num">{money(m.amount)}</td>
-                <td className="num">{Math.round(m.pct)}%</td>
-                <td className="num">{compact(m.requests)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <section className="detail-section">
+      <div className="section-head">
+        <div>
+          <h2>Inference cost</h2>
+          <span className="section-sub muted">
+            {money(monthlyInference)}/mo · {hookMetered ? "hook-metered" : "connector-derived"}
+          </span>
+        </div>
+        <div className="window-filter" role="group" aria-label="Time window">
+          {WINDOWS.map((w) => (
+            <button
+              key={w}
+              className={w === window ? "active" : ""}
+              onClick={() => {
+                setHover(null);
+                setWindow(w);
+              }}
+            >
+              {w[0].toUpperCase() + w.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {data === null ? (
+        <p className="muted">Loading…</p>
+      ) : (
+        <div className="inference-body">
+          <div className="inference-col">
+            <span className="chart-title">Trend</span>
+            <TrendChart trend={data.trend} />
+          </div>
+          <div className="inference-col">
+            <span className="chart-title">By model</span>
+            {data.by_model.length === 0 ? (
+              <p className="muted">No inference cost in this window.</p>
+            ) : (
+              <div className="pie-wrap">
+                <DonutPie models={data.by_model} hover={hover} setHover={setHover} />
+                <PieCaption models={data.by_model} index={hover ?? 0} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </section>
+  );
+}
+
+function TrendChart({ trend }: { trend: FeatureInference["trend"] }) {
+  if (trend.length === 0) return <p className="muted">No inference cost yet.</p>;
+  const max = Math.max(...trend.map((t) => t.amount), 1);
+  return (
+    <div className="trend-chart">
+      {trend.map((t) => {
+        const month = Number(t.period.slice(5, 7)) - 1;
+        return (
+          <div className="trend-bar-wrap" key={t.period} title={`${MONTHS[month]} · ${money(t.amount)}`}>
+            <div className="trend-bar" style={{ height: `${Math.max(3, (t.amount / max) * 100)}%` }} />
+            <span className="trend-label">{MONTHS[month]}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DonutPie({
+  models,
+  hover,
+  setHover,
+}: {
+  models: FeatureInference["by_model"];
+  hover: number | null;
+  setHover: (i: number | null) => void;
+}) {
+  let filled = 0;
+  return (
+    <svg viewBox="0 0 36 36" className="donut" role="img" aria-label="Inference cost by model">
+      {models.map((m, i) => {
+        const offset = 25 - filled; // start at 12 o'clock, then continue clockwise
+        filled += m.pct;
+        return (
+          <circle
+            key={m.model}
+            cx="18"
+            cy="18"
+            r="15.9155"
+            fill="none"
+            stroke={MODEL_COLORS[i % MODEL_COLORS.length]}
+            strokeWidth={hover === i ? 5 : 3.5}
+            strokeDasharray={`${m.pct} ${100 - m.pct}`}
+            strokeDashoffset={offset}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+            style={{ cursor: "pointer", transition: "stroke-width 0.1s" }}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function PieCaption({ models, index }: { models: FeatureInference["by_model"]; index: number }) {
+  const m = models[Math.min(index, models.length - 1)];
+  if (!m) return null;
+  const color = MODEL_COLORS[Math.min(index, models.length - 1) % MODEL_COLORS.length];
+  return (
+    <div className="pie-caption">
+      <span className="pie-cap-model">
+        <span className="swatch" style={{ background: color }} />
+        {m.model}
+      </span>
+      <span className="pie-cap-cost">
+        {money(m.amount)} · {Math.round(m.pct)}%
+      </span>
+      <span className="muted">{compact(m.requests)} requests</span>
+    </div>
   );
 }

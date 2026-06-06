@@ -893,32 +893,171 @@ a.exec-value:hover {
   font-weight: 650;
 }
 
-/* ---- Inference by model (table + CSS pie) ---- */
-.model-breakdown {
-  margin-top: 1.75rem;
-}
-
-.breakdown-body {
+/* ---- Drill-down sections ---- */
+.detail-meta {
   display: flex;
   align-items: center;
+  gap: 0.75rem;
+  margin: 0.4rem 0 0.5rem;
+}
+
+.detail-section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.1rem 1.3rem 1.3rem;
+  margin: 1.25rem 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.section-head h2 {
+  margin: 0;
+}
+
+.section-sub {
+  font-size: 0.85rem;
+}
+
+.section-stats {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.section-stats strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Window filter (Month / Quarter / Year) */
+.window-filter {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.window-filter button {
+  background: var(--card);
+  color: var(--muted);
+  border: none;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.window-filter button:last-child {
+  border-right: none;
+}
+
+.window-filter button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.window-filter button:hover:not(.active) {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+/* Inference section body: trend chart + donut */
+.inference-body {
+  display: flex;
   gap: 2rem;
   flex-wrap: wrap;
 }
 
-.pie {
-  width: 150px;
-  height: 150px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow: var(--shadow-sm);
-  /* donut hole */
-  -webkit-mask: radial-gradient(circle 42px at center, transparent 98%, #000 100%);
-  mask: radial-gradient(circle 42px at center, transparent 98%, #000 100%);
+.inference-col {
+  flex: 1;
+  min-width: 260px;
 }
 
-.breakdown-table {
+.chart-title {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 650;
+  margin-bottom: 0.6rem;
+}
+
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  height: 150px;
+  padding-top: 0.5rem;
+}
+
+.trend-bar-wrap {
   flex: 1;
-  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 0.35rem;
+}
+
+.trend-bar {
+  width: 100%;
+  max-width: 46px;
+  border-radius: 6px 6px 0 0;
+  background: linear-gradient(180deg, var(--accent), #7c75f0);
+  transition: opacity 0.12s;
+}
+
+.trend-bar-wrap:hover .trend-bar {
+  opacity: 0.82;
+}
+
+.trend-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.pie-wrap {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.donut {
+  width: 130px;
+  height: 130px;
+  flex-shrink: 0;
+}
+
+.pie-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.pie-cap-model {
+  font-weight: 650;
+  font-size: 0.95rem;
+}
+
+.pie-cap-cost {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .swatch {

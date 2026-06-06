@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -7,7 +7,10 @@ import { FeatureDetail } from "./FeatureDetail";
 
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { me: vi.fn(), featureDetail: vi.fn(), logout: vi.fn() } };
+  return {
+    ...actual,
+    api: { me: vi.fn(), featureDetail: vi.fn(), featureInference: vi.fn(), logout: vi.fn() },
+  };
 });
 
 const DETAIL = {
@@ -31,16 +34,21 @@ const DETAIL = {
       files_changed: 37,
     },
   ],
-  inference_trend: [{ period: "2026-05-01", amount: 4200, source: "cost_api" }],
-  inference_by_model: [
-    { model: "gpt-4o", amount: 1250, pct: 67.6, requests: 60000 },
-    { model: "claude-sonnet-4-6", amount: 400, pct: 21.6, requests: 20000 },
-    { model: "claude-haiku-4-5", amount: 200, pct: 10.8, requests: 8000 },
-  ],
   evidence: [
     { signal_type: "pr", external_ref: "acme/core#1421", confidence: "high", actor: "alice", source: "github" },
   ],
   inference_sources: ["cost_api"],
+};
+
+const INFERENCE = {
+  window: "month",
+  total: 1850,
+  by_model: [
+    { model: "gpt-4o", amount: 1250, pct: 67.6, requests: 60000 },
+    { model: "claude-sonnet-4-6", amount: 400, pct: 21.6, requests: 20000 },
+    { model: "claude-haiku-4-5", amount: 200, pct: 10.8, requests: 8000 },
+  ],
+  trend: [{ period: "2026-05-01", amount: 1850 }],
 };
 
 function renderDetail() {
@@ -60,33 +68,38 @@ describe("FeatureDetail", () => {
     vi.clearAllMocks();
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
     vi.mocked(api.featureDetail).mockResolvedValue(DETAIL);
+    vi.mocked(api.featureInference).mockResolvedValue(INFERENCE);
   });
 
-  it("shows separate headlines, breakdowns, and the evidence trail", async () => {
+  it("organizes into Developer cost and Inference cost sections", async () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "AI threat triage" })).toBeInTheDocument();
 
-    // Build and inference headlines are distinct numbers.
-    expect(screen.getAllByText("$181").length).toBeGreaterThan(0); // headline + build total
-    expect(screen.getAllByText("$4,200").length).toBeGreaterThan(0); // headline + trend
-
-    // Build-by-developer breakdown: developer, total spend, contributors, PRs.
+    // Developer cost section: total spend + per-developer breakdown.
+    expect(screen.getByText("Developer cost")).toBeInTheDocument();
+    expect(screen.getByText("$181")).toBeInTheDocument(); // total build spend
     expect(screen.getByText("alice")).toBeInTheDocument();
-    expect(screen.getByText("Total AI build spend")).toBeInTheDocument();
-    expect(screen.getByText("Contributors")).toBeInTheDocument();
 
-    // Evidence trail shows the actual signal behind the number.
-    expect(screen.getByText("Evidence trail")).toBeInTheDocument();
-    expect(screen.getByText("acme/core#1421")).toBeInTheDocument();
+    // Inference cost section: window filter + connector indicator.
+    expect(screen.getByText("Inference cost")).toBeInTheDocument();
+    expect(screen.getByText(/connector-derived/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Month" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quarter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Year" })).toBeInTheDocument();
 
-    // Connector-vs-hook indicator (connector for now).
-    expect(screen.getByText("connector-derived")).toBeInTheDocument();
-
-    // Inference-by-model breakdown.
-    expect(screen.getByText("Inference by model")).toBeInTheDocument();
-    expect(screen.getByText("gpt-4o")).toBeInTheDocument();
-    expect(screen.getByText("68%")).toBeInTheDocument(); // 67.6 rounded
+    // Pie (by model) + trend chart load from the inference endpoint.
+    expect(await screen.findByText("gpt-4o")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Inference cost by model" })).toBeInTheDocument();
+    expect(screen.getByText("May")).toBeInTheDocument(); // trend bar label
+  });
+
+  it("refetches the breakdown when the window changes", async () => {
+    renderDetail();
+    await screen.findByText("gpt-4o");
+    expect(api.featureInference).toHaveBeenCalledWith("f1", "month");
+
+    fireEvent.click(screen.getByRole("button", { name: "Quarter" }));
+    await waitFor(() => expect(api.featureInference).toHaveBeenCalledWith("f1", "quarter"));
   });
 });
