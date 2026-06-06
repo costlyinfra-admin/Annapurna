@@ -189,6 +189,59 @@ def test_hosted_oss_prices_tokens_when_no_dollar_cost():
     assert records[0].amount == Decimal("1.7600")  # 0.88 + 0.88, computed by us
 
 
+def test_bedrock_reads_cost_explorer_by_tag():
+    import json
+
+    from annapurna.providers import BedrockCostClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"  # Cost Explorer is a POST API
+        assert "ce.us-east-1.amazonaws.com" in str(request.url)
+        assert request.headers["Authorization"].startswith("AWS4-HMAC-SHA256")
+        assert request.headers["X-Amz-Target"].endswith("GetCostAndUsage")
+        return httpx.Response(
+            200,
+            json={
+                "ResultsByTime": [
+                    {
+                        "Groups": [
+                            {
+                                "Keys": ["feature$triage"],
+                                "Metrics": {"UnblendedCost": {"Amount": "4200.00", "Unit": "USD"}},
+                            },
+                            {  # untagged Bedrock spend -> Unattributed
+                                "Keys": ["feature$"],
+                                "Metrics": {"UnblendedCost": {"Amount": "300.00", "Unit": "USD"}},
+                            },
+                        ]
+                    }
+                ]
+            },
+        )
+
+    creds = json.dumps(
+        {
+            "access_key_id": "AKIA",
+            "secret_access_key": "secret",
+            "region": "us-east-1",
+            "tag": "feature",
+        }
+    )
+    client = BedrockCostClient(creds, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    records = client.fetch_costs(dt.date(2026, 5, 1))
+    by_tag = {r.api_key_ref: r for r in records}
+    assert by_tag["triage"].amount == Decimal("4200.00")
+    assert by_tag["triage"].provider == "bedrock"
+    assert by_tag[None].amount == Decimal("300.00")  # untagged -> no key -> Unattributed
+
+
+def test_bedrock_requires_json_credentials():
+    from annapurna.providers import BedrockCostClient, ProviderError
+
+    with pytest.raises(ProviderError):
+        BedrockCostClient("not-json")
+
+
 def test_provider_401_raises():
     def handler(_request):
         return httpx.Response(401, json={"error": "bad key"})

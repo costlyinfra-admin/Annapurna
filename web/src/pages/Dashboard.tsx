@@ -413,6 +413,7 @@ function DataActions({
             <option value="openrouter">OpenRouter</option>
             <option value="together">Together AI</option>
             <option value="fireworks">Fireworks AI</option>
+            <option value="bedrock">Amazon Bedrock</option>
           </select>
           <button onClick={syncInference} disabled={busy}>
             Sync

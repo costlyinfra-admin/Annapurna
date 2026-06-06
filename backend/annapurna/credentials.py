@@ -29,6 +29,8 @@ KNOWN_CONNECTORS = [
     {"type": "openrouter", "name": "OpenRouter", "category": "inference"},
     {"type": "together", "name": "Together AI", "category": "inference"},
     {"type": "fireworks", "name": "Fireworks AI", "category": "inference"},
+    # Cloud-cost connector: Amazon Bedrock spend via AWS Cost Explorer.
+    {"type": "bedrock", "name": "Amazon Bedrock (AWS cost)", "category": "inference"},
     {"type": "cursor", "name": "Cursor for Teams", "category": "build_activity"},
 ]
 _KNOWN_TYPES = {c["type"] for c in KNOWN_CONNECTORS}

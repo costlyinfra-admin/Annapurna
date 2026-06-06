@@ -25,9 +25,12 @@ per period and attributes it by **api_key → feature** — exactly like
 Anthropic/OpenAI. The host's reported dollar cost is used when present; otherwise
 we price the reported tokens via its `(provider, model)` rates.
 
-> Not every host has a usable cost API: **Groq** exposes no cost endpoint (use the
-> SDK below), and **Bedrock** cost lives in AWS Cost Explorer — that's the planned
-> cloud-cost connector, not a per-host one.
+> Not every host has a usable per-key cost API: **Groq** exposes no cost endpoint
+> (use the SDK below). **Amazon Bedrock** has a dedicated **cloud-cost connector**
+> instead — it reads AWS Cost Explorer (filtered to Bedrock) and attributes by a
+> cost-allocation **tag → feature** (the AWS-standard way to split shared cloud
+> spend); untagged Bedrock spend → Unattributed. AWS key/secret/region/tag are
+> stored as one encrypted JSON blob, signed with SigV4 (no boto3 dependency).
 
 **2. SDK (the precision tier).** For exact, per-call attribution — or for hosts
 without a connector — wrap calls with the metering SDK. Reuses the same
