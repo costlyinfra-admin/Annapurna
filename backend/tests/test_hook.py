@@ -51,6 +51,29 @@ def test_hook_events_write_high_confidence_rows(tenant_id):
     assert detail["inference_sources"] == ["hook"]  # connector-vs-hook indicator
 
 
+def test_hook_prices_hosted_open_source_provider(tenant_id):
+    # A hosted open-source provider (Together) is metered and priced per its rates.
+    phishing = features.add_feature(tenant_id, "Phishing detection")
+    summary = hook.ingest_events(
+        tenant_id,
+        [
+            {
+                "provider": "together",
+                "model": "meta-llama-3.1-70b-instruct",  # $0.88/M in + out
+                "tokens_in": 1_000_000,
+                "tokens_out": 1_000_000,
+                "feature_id": phishing["id"],
+                "occurred_at": "2026-06-10T12:00:00Z",
+            }
+        ],
+    )
+    assert summary["accepted"] == 1
+    assert summary["cost"] == 1.76  # 0.88 + 0.88
+
+    detail = dashboard.feature_detail(tenant_id, phishing["id"], PERIOD)
+    assert detail["headline"]["inference_cost"] == 1.76
+
+
 def test_reconciliation_routes_gap_to_unattributed(tenant_id):
     triage = features.add_feature(tenant_id, "AI threat triage")
 

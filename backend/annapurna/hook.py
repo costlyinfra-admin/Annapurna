@@ -16,10 +16,9 @@ from decimal import Decimal
 from typing import Optional
 
 from .db import admin_dsn, app_dsn, connect, tenant_tx
-from .pricing import price
+from .pricing import PRICED_PROVIDERS, price
 from .providers import month_start
 
-_PROVIDERS = {"anthropic", "openai"}
 _DEFAULT_TOLERANCE = Decimal("0.50")
 
 
@@ -73,8 +72,8 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
         accumulator: dict[tuple, dict] = {}
         for event in events:
             provider = event.get("provider")
-            if provider not in _PROVIDERS:
-                continue  # unknown provider -> skip (kept out of accepted count)
+            if provider not in PRICED_PROVIDERS:
+                continue  # unknown/unpriced provider -> skip (kept out of accepted count)
             model = event.get("model") or ""
             tokens_in = int(event.get("tokens_in") or 0)
             tokens_out = int(event.get("tokens_out") or 0)
@@ -82,7 +81,7 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
             if feature_id is not None and str(feature_id) not in valid_features:
                 feature_id = None  # unknown/foreign feature -> Unattributed
             period = _period_of(event.get("occurred_at"))
-            cost = price(model, tokens_in, tokens_out)
+            cost = price(model, tokens_in, tokens_out, provider)
 
             key = (feature_id, provider, model, period)
             entry = accumulator.setdefault(

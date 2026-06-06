@@ -97,6 +97,29 @@ class Meter:
             feature_id=feature_id,
         )
 
+    def record_openai_compatible(
+        self,
+        response: Any,
+        *,
+        provider: str,
+        feature_id: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Optional[threading.Thread]:
+        """Record from any OpenAI-compatible response (hosted open-source models).
+
+        Together, Fireworks, Groq, OpenRouter, DeepInfra, etc. all return the
+        OpenAI usage shape (prompt_tokens/completion_tokens). Pass the provider
+        name so Annapurna prices it against that host's rates.
+        """
+        tin, tout = _usage(response, ("prompt_tokens", "completion_tokens"))
+        return self.record(
+            provider=provider,
+            model=model or _attr(response, "model", ""),
+            tokens_in=tin,
+            tokens_out=tout,
+            feature_id=feature_id,
+        )
+
     def _send(self, events: list) -> Optional[threading.Thread]:
         if not self.enabled:
             return None  # not configured -> no-op

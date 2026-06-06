@@ -17,3 +17,23 @@ def test_known_model_costs_tokens():
 def test_unknown_model_is_zero():
     assert pricing.price("mystery-model", 1_000_000, 1_000_000) == Decimal("0")
     assert not pricing.is_priced("mystery-model")
+
+
+def test_hosted_open_source_is_priced_per_provider():
+    # Same open weights, different host -> different price; keyed by (provider, model).
+    assert pricing.price(
+        "meta-llama-3.1-70b-instruct", 1_000_000, 0, provider="together"
+    ) == Decimal("0.8800")
+    assert pricing.price("llama-3.1-70b-versatile", 0, 1_000_000, provider="groq") == Decimal(
+        "0.7900"
+    )
+    assert pricing.is_priced("meta-llama-3.1-70b-instruct", provider="together")
+
+    # Hosted-OSS providers are recognized as priced.
+    assert {"together", "fireworks", "groq", "bedrock"} <= pricing.PRICED_PROVIDERS
+
+
+def test_open_source_model_without_provider_is_unknown():
+    # The bare model name (no host) has no canonical price -> 0, not a guess.
+    assert pricing.price("meta-llama-3.1-70b-instruct", 1_000_000, 0) == Decimal("0")
+    assert not pricing.is_priced("meta-llama-3.1-70b-instruct")

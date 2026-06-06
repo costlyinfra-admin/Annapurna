@@ -65,6 +65,25 @@ def test_record_openai_maps_usage():
     assert event["tokens_out"] == 20
 
 
+def test_record_openai_compatible_tags_hosted_oss_provider():
+    cap = _Capture()
+    m = _meter(cap)
+    # A Together response uses the OpenAI usage shape; provider drives pricing.
+    resp = {
+        "model": "meta-llama-3.1-70b-instruct",
+        "usage": {"prompt_tokens": 1200, "completion_tokens": 300},
+    }
+    m.record_openai_compatible(resp, provider="together", feature_id="f9").join()
+    event = cap.calls[0]["events"][0]
+    assert event == {
+        "provider": "together",
+        "model": "meta-llama-3.1-70b-instruct",
+        "tokens_in": 1200,
+        "tokens_out": 300,
+        "feature_id": "f9",
+    }
+
+
 def test_unconfigured_meter_is_a_noop():
     cap = _Capture()
     m = Meter(transport=cap)  # no url/token
