@@ -81,5 +81,19 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
     assert detail["inference_sources"] == ["cost_api"]  # connector, not hook (yet)
 
 
+def test_inference_breakdown_by_model(seeded):
+    data = dashboard.dashboard(seeded, PERIOD)
+    report = next(f for f in data["features"] if f["name"] == "Report generator")
+
+    models = dashboard.feature_detail(seeded, report["feature_id"], PERIOD)["inference_by_model"]
+    # Three models, summing to the feature's monthly inference ($1,850), gpt-4o on top.
+    by_model = {m["model"]: m for m in models}
+    assert set(by_model) == {"gpt-4o", "claude-sonnet-4-6", "claude-haiku-4-5"}
+    assert by_model["gpt-4o"]["amount"] == 1250.0
+    assert by_model["gpt-4o"]["requests"] == 60_000
+    assert abs(sum(m["pct"] for m in models) - 100.0) < 1e-6
+    assert round(by_model["gpt-4o"]["pct"]) == 68  # 1250 / 1850
+
+
 def test_detail_missing_feature_returns_none(seeded):
     assert dashboard.feature_detail(seeded, "00000000-0000-0000-0000-000000000000", PERIOD) is None

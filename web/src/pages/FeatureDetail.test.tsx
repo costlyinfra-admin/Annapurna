@@ -32,6 +32,11 @@ const DETAIL = {
     },
   ],
   inference_trend: [{ period: "2026-05-01", amount: 4200, source: "cost_api" }],
+  inference_by_model: [
+    { model: "gpt-4o", amount: 1250, pct: 67.6, requests: 60000 },
+    { model: "claude-sonnet-4-6", amount: 400, pct: 21.6, requests: 20000 },
+    { model: "claude-haiku-4-5", amount: 200, pct: 10.8, requests: 8000 },
+  ],
   evidence: [
     { signal_type: "pr", external_ref: "acme/core#1421", confidence: "high", actor: "alice", source: "github" },
   ],
@@ -77,5 +82,11 @@ describe("FeatureDetail", () => {
 
     // Connector-vs-hook indicator (connector for now).
     expect(screen.getByText("connector-derived")).toBeInTheDocument();
+
+    // Inference-by-model breakdown.
+    expect(screen.getByText("Inference by model")).toBeInTheDocument();
+    expect(screen.getByText("gpt-4o")).toBeInTheDocument();
+    expect(screen.getByText("68%")).toBeInTheDocument(); // 67.6 rounded
+    expect(screen.getByRole("img", { name: "Inference cost by model" })).toBeInTheDocument();
   });
 });

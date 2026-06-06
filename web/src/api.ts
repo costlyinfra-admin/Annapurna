@@ -92,6 +92,7 @@ export interface FeatureDetail {
     files_changed: number | null;
   }[];
   inference_trend: { period: string; amount: number; source: string }[];
+  inference_by_model: { model: string; amount: number; pct: number; requests: number | null }[];
   evidence: {
     signal_type: string;
     external_ref: string;

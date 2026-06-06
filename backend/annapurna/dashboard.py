@@ -287,6 +287,25 @@ def feature_detail(
             ).fetchall()
         ]
 
+        # Inference breakdown by model for the period (cost, share %, requests).
+        inference_total = float(inference_month) or 0.0
+        inference_by_model = [
+            {
+                "model": model or "unknown",
+                "amount": float(amount),
+                "pct": (float(amount) / inference_total * 100.0) if inference_total else 0.0,
+                "requests": int(requests) if requests is not None else None,
+            }
+            for model, amount, requests in conn.execute(
+                """
+                SELECT model, SUM(amount), SUM(request_count)
+                FROM inference_cost WHERE feature_id = %s AND period = %s
+                GROUP BY model ORDER BY SUM(amount) DESC
+                """,
+                (feature_id, start),
+            ).fetchall()
+        ]
+
         evidence = [
             {
                 "signal_type": st,
@@ -331,6 +350,7 @@ def feature_detail(
         "build_contributors": build_contributors,
         "build_by_developer": by_developer,
         "inference_trend": inference_trend,
+        "inference_by_model": inference_by_model,
         "evidence": evidence,
         "inference_sources": sources,  # ["cost_api"] now; "hook" arrives in M7
     }

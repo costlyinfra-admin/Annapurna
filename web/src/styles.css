@@ -893,6 +893,43 @@ a.exec-value:hover {
   font-weight: 650;
 }
 
+/* ---- Inference by model (table + CSS pie) ---- */
+.model-breakdown {
+  margin-top: 1.75rem;
+}
+
+.breakdown-body {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.pie {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+  /* donut hole */
+  -webkit-mask: radial-gradient(circle 42px at center, transparent 98%, #000 100%);
+  mask: radial-gradient(circle 42px at center, transparent 98%, #000 100%);
+}
+
+.breakdown-table {
+  flex: 1;
+  min-width: 280px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 3px;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+
 .evidence-trail {
   margin-top: 1.75rem;
 }

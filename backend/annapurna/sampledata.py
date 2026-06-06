@@ -285,24 +285,29 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str) -> dict:
         "anthropic",
         "claude-sonnet-4-6",
         "key:triage-prod",
-        4200.00,
-        18_000_000,
-        2_400_000,
-        320_000,
+        3500.00,
+        15_000_000,
+        2_000_000,
+        260_000,
         "high",
     )
+    # Same feature, a second model — so the model breakdown/pie has >1 slice.
     _add_inference_cost(
-        conn,
-        tenant_id,
-        report,
-        "openai",
-        "gpt-4o",
-        "proj:reports",
-        1850.00,
-        9_000_000,
-        1_100_000,
-        88_000,
-        "med",
+        conn, tenant_id, triage, "anthropic", "claude-opus-4-8", "key:triage-prod",
+        700.00, 3_000_000, 400_000, 60_000, "high",
+    )
+    # Report generator spans three models (the pie's showcase): gpt-4o dominant.
+    _add_inference_cost(
+        conn, tenant_id, report, "openai", "gpt-4o", "proj:reports",
+        1250.00, 6_000_000, 750_000, 60_000, "med",
+    )
+    _add_inference_cost(
+        conn, tenant_id, report, "anthropic", "claude-sonnet-4-6", "proj:reports",
+        400.00, 1_800_000, 250_000, 20_000, "med",
+    )
+    _add_inference_cost(
+        conn, tenant_id, report, "anthropic", "claude-haiku-4-5", "proj:reports",
+        200.00, 1_200_000, 100_000, 8_000, "med",
     )
     _add_inference_cost(
         conn,

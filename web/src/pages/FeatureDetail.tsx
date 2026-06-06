@@ -9,7 +9,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, type FeatureDetail as Detail } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge } from "../components/badges";
-import { money, num } from "../format";
+import { compact, money, num } from "../format";
+
+const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
 
 export function FeatureDetail() {
   const { id = "" } = useParams();
@@ -147,6 +149,10 @@ export function FeatureDetail() {
             </section>
           </div>
 
+          {detail.inference_by_model.length > 0 && (
+            <InferenceByModel models={detail.inference_by_model} />
+          )}
+
           <section className="evidence-trail">
             <h2>Evidence trail</h2>
             <p className="muted">Every number above traces back to these signals.</p>
@@ -169,5 +175,56 @@ export function FeatureDetail() {
         </main>
       ) : null}
     </div>
+  );
+}
+
+/** Inference cost split by model, with a dependency-free CSS pie (conic-gradient). */
+function InferenceByModel({ models }: { models: Detail["inference_by_model"] }) {
+  let acc = 0;
+  const stops = models.map((m, i) => {
+    const start = acc;
+    acc += m.pct;
+    return `${MODEL_COLORS[i % MODEL_COLORS.length]} ${start}% ${acc}%`;
+  });
+  const pie = stops.length ? `conic-gradient(${stops.join(", ")})` : "var(--line)";
+
+  return (
+    <section className="model-breakdown">
+      <h2>Inference by model</h2>
+      <div className="breakdown-body">
+        <div
+          className="pie"
+          style={{ background: pie }}
+          role="img"
+          aria-label="Inference cost by model"
+        />
+        <table className="mini-table breakdown-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th className="num">Monthly cost</th>
+              <th className="num">%</th>
+              <th className="num">Requests</th>
+            </tr>
+          </thead>
+          <tbody>
+            {models.map((m, i) => (
+              <tr key={m.model}>
+                <td>
+                  <span
+                    className="swatch"
+                    style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }}
+                  />
+                  {m.model}
+                </td>
+                <td className="num">{money(m.amount)}</td>
+                <td className="num">{Math.round(m.pct)}%</td>
+                <td className="num">{compact(m.requests)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
