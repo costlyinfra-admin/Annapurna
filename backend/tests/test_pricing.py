@@ -33,6 +33,14 @@ def test_hosted_open_source_is_priced_per_provider():
     assert {"together", "fireworks", "groq", "bedrock"} <= pricing.PRICED_PROVIDERS
 
 
+def test_gemini_is_priced():
+    # gemini-2.5-flash: $0.30/M input, $2.50/M output
+    assert pricing.price("gemini-2.5-flash", 1_000_000, 0) == Decimal("0.3000")
+    assert pricing.price("gemini-2.5-flash", 0, 1_000_000) == Decimal("2.5000")
+    assert pricing.is_priced("gemini-2.5-pro")
+    assert "google" in pricing.PRICED_PROVIDERS
+
+
 def test_open_source_model_without_provider_is_unknown():
     # The bare model name (no host) has no canonical price -> 0, not a guess.
     assert pricing.price("meta-llama-3.1-70b-instruct", 1_000_000, 0) == Decimal("0")

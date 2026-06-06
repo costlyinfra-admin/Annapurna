@@ -100,6 +100,36 @@ def test_openai_parses_costs():
     assert records[0].amount == Decimal("1850.00")
 
 
+def test_google_gemini_parses_cost_by_project():
+    from annapurna.providers import GoogleCostClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer goog-token"
+        assert request.method == "GET"  # read-only
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"project_id": "proj_triage", "model": "gemini-2.5-pro", "cost": "300.00"},
+                    # No cost -> price the tokens (flash: $0.30/M in).
+                    {
+                        "project_id": "proj_reports",
+                        "model": "gemini-2.5-flash",
+                        "prompt_tokens": 1_000_000,
+                        "completion_tokens": 0,
+                    },
+                ]
+            },
+        )
+
+    client = GoogleCostClient(
+        "goog-token", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    by_project = {r.project: r for r in client.fetch_costs(dt.date(2026, 5, 1))}
+    assert by_project["proj_triage"].amount == Decimal("300.00")  # reported $
+    assert by_project["proj_reports"].amount == Decimal("0.3000")  # priced by us
+
+
 def test_hosted_oss_uses_reported_dollar_cost():
     from annapurna.providers import make_cost_client
 

@@ -161,6 +161,54 @@ class OpenAICostClient(_BaseCostClient):
         return aggregate(list(_parse_openai(resp.json(), start)))
 
 
+class GoogleCostClient(_BaseCostClient):
+    """Google Cloud Billing for Gemini / Vertex spend. Auth via OAuth bearer token.
+
+    Google has no per-API-key cost endpoint like Anthropic/OpenAI — spend lives in
+    Cloud Billing, broken down by project + SKU/model. We attribute by GCP project
+    (map project -> feature, like the OpenAI project path). The shape follows the
+    documented Cloud Billing reports and is parsed tolerantly; cost is the reported
+    dollar amount, or computed from tokens when only usage is returned.
+    """
+
+    base_url = "https://cloudbilling.googleapis.com"
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        resp = self._get(
+            "/v1/cost",
+            params={"start_date": start.isoformat(), "end_date": end.isoformat()},
+            headers={"Authorization": f"Bearer {self._key}"},
+        )
+        return aggregate(list(_parse_google(resp.json(), start)))
+
+
+def _parse_google(payload: dict, period: dt.date):
+    rows = payload.get("data") or payload.get("costs") or payload.get("results") or []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        model = item.get("model") or item.get("sku") or item.get("service")
+        tokens_in = int(item.get("prompt_tokens") or item.get("input_tokens") or 0)
+        tokens_out = int(item.get("completion_tokens") or item.get("output_tokens") or 0)
+        requests = item.get("requests") or item.get("request_count")
+        amount = _to_decimal(item.get("cost") or item.get("amount"))
+        if amount is None:
+            amount = price(model or "", tokens_in, tokens_out, "google")
+        yield CostRecord(
+            provider="google",
+            period=period,
+            amount=amount,
+            currency=item.get("currency", "USD"),
+            project=item.get("project_id") or item.get("project"),
+            model=model,
+            tokens_in=tokens_in or None,
+            tokens_out=tokens_out or None,
+            request_count=int(requests) if requests is not None else None,
+        )
+
+
 def _parse_anthropic(payload: dict, period: dt.date):
     for bucket in payload.get("data", []):
         for item in bucket.get("results", []) or bucket.get("items", []):
@@ -285,6 +333,8 @@ def make_cost_client(provider: str, admin_key: str) -> _BaseCostClient:
         return AnthropicCostClient(admin_key)
     if provider == "openai":
         return OpenAICostClient(admin_key)
+    if provider == "google":
+        return GoogleCostClient(admin_key)
     if provider in _HOSTED_PROVIDERS:
         base_url, path = _HOSTED_PROVIDERS[provider]
         return HostedUsageCostClient(provider, admin_key, path, base_url=base_url)

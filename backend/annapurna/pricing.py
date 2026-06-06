@@ -21,6 +21,7 @@ PRICING_VERSION = "2026-06-01"
 PRICED_PROVIDERS = {
     "anthropic",
     "openai",
+    "google",
     "together",
     "fireworks",
     "groq",
@@ -39,6 +40,11 @@ _PRICES: dict[str, tuple[str, str]] = {
     # OpenAI
     "gpt-4o": ("2.5", "10"),
     "gpt-4o-mini": ("0.15", "0.60"),
+    # Google Gemini (standard-context list prices)
+    "gemini-2.5-pro": ("1.25", "10"),
+    "gemini-2.5-flash": ("0.30", "2.50"),
+    "gemini-2.5-flash-lite": ("0.10", "0.40"),
+    "gemini-2.0-flash": ("0.10", "0.40"),
 }
 
 # Hosted open-source: the SAME open weights cost different amounts depending on

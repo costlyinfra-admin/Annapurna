@@ -92,7 +92,7 @@ class SignalRequest(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    provider: str = Field(pattern="^(anthropic|openai|openrouter|together|fireworks)$")
+    provider: str = Field(pattern="^(anthropic|openai|google|openrouter|together|fireworks)$")
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")  # YYYY-MM
 
 

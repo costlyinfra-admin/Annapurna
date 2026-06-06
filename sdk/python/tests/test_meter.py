@@ -65,6 +65,28 @@ def test_record_openai_maps_usage():
     assert event["tokens_out"] == 20
 
 
+def test_record_gemini_maps_usage_metadata():
+    cap = _Capture()
+    m = _meter(cap)
+    resp = type(
+        "R",
+        (),
+        {
+            "model_version": "gemini-2.5-flash",
+            "usage_metadata": {"prompt_token_count": 800, "candidates_token_count": 120},
+        },
+    )()
+    m.record_gemini(resp, feature_id="f7").join()
+    event = cap.calls[0]["events"][0]
+    assert event == {
+        "provider": "google",
+        "model": "gemini-2.5-flash",
+        "tokens_in": 800,
+        "tokens_out": 120,
+        "feature_id": "f7",
+    }
+
+
 def test_record_openai_compatible_tags_hosted_oss_provider():
     cap = _Capture()
     m = _meter(cap)

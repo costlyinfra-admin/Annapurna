@@ -97,6 +97,21 @@ class Meter:
             feature_id=feature_id,
         )
 
+    def record_gemini(
+        self, response: Any, *, feature_id: Optional[str] = None, model: Optional[str] = None
+    ) -> Optional[threading.Thread]:
+        """Record from a Google Gemini response (usage_metadata token counts)."""
+        usage = _attr(response, "usage_metadata", {}) or {}
+        tin = int(_attr(usage, "prompt_token_count", 0) or 0)
+        tout = int(_attr(usage, "candidates_token_count", 0) or 0)
+        return self.record(
+            provider="google",
+            model=model or _attr(response, "model_version", "") or _attr(response, "model", ""),
+            tokens_in=tin,
+            tokens_out=tout,
+            feature_id=feature_id,
+        )
+
     def record_openai_compatible(
         self,
         response: Any,

@@ -409,6 +409,7 @@ function DataActions({
           <select value={provider} onChange={(e) => setProvider(e.target.value)}>
             <option value="anthropic">Anthropic</option>
             <option value="openai">OpenAI</option>
+            <option value="google">Google Gemini</option>
             <option value="openrouter">OpenRouter</option>
             <option value="together">Together AI</option>
             <option value="fireworks">Fireworks AI</option>

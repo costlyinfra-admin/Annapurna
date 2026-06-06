@@ -24,6 +24,7 @@ KNOWN_CONNECTORS = [
     {"type": "github", "name": "GitHub", "category": "build_activity"},
     {"type": "anthropic", "name": "Anthropic", "category": "inference"},
     {"type": "openai", "name": "OpenAI", "category": "inference"},
+    {"type": "google", "name": "Google Gemini", "category": "inference"},
     # Hosted open-source aggregators (per-token billing, OpenAI-compatible).
     {"type": "openrouter", "name": "OpenRouter", "category": "inference"},
     {"type": "together", "name": "Together AI", "category": "inference"},
