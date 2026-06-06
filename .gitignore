@@ -5,6 +5,10 @@
 *.pem
 *.key
 credentials.json
+# Local secret notes / scratch files (e.g. "Annapurna secrets.rtf")
+*secret*.rtf
+*secrets*
+*.rtf
 
 # --- Python ---
 backend/.venv/
