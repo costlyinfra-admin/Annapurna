@@ -19,7 +19,18 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, auth, build, credentials, dashboard, discovery, features, hook, inference
+from . import (
+    __version__,
+    auth,
+    build,
+    compute,
+    credentials,
+    dashboard,
+    discovery,
+    features,
+    hook,
+    inference,
+)
 from .github import GitHubError
 from .providers import ProviderError
 
@@ -112,6 +123,17 @@ class HookEventsRequest(BaseModel):
 
 class ReconcileRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+
+
+class ComputePoolRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    provider_label: str = Field(min_length=1, max_length=60)
+    monthly_cost: float = Field(ge=0)
+
+
+class AllocateRequest(BaseModel):
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+    pool_id: Optional[str] = None
 
 
 def _parse_period(value: Optional[str]) -> dt.date:
@@ -392,6 +414,21 @@ def create_app() -> FastAPI:
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
         return build.build_summary(user["tenant_id"], _parse_period(period))
+
+    # ---- Self-hosted compute pools (open-source inference) --------------
+    @app.get("/api/compute/pools")
+    def list_compute_pools(user: CurrentUser) -> list[dict]:
+        return compute.list_pools(user["tenant_id"])
+
+    @app.post("/api/compute/pools", status_code=status.HTTP_201_CREATED)
+    def register_compute_pool(body: ComputePoolRequest, user: CurrentUser) -> dict:
+        return compute.register_pool(
+            user["tenant_id"], body.name, body.provider_label, body.monthly_cost
+        )
+
+    @app.post("/api/compute/allocate")
+    def allocate_compute(body: AllocateRequest, user: CurrentUser) -> list[dict]:
+        return compute.allocate(user["tenant_id"], _parse_period(body.period), body.pool_id)
 
     # ---- The three screens (M6) ----------------------------------------
     @app.get("/api/dashboard")

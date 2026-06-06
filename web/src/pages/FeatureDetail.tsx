@@ -34,7 +34,12 @@ export function FeatureDetail() {
     load();
   }, [load]);
 
-  const hookMetered = detail?.inference_sources.includes("hook") ?? false;
+  const sources = detail?.inference_sources ?? [];
+  const inferenceLabel = sources.includes("self_host")
+    ? "self-hosted (allocated)"
+    : sources.includes("hook")
+      ? "hook-metered"
+      : "connector-derived";
 
   return (
     <div className="page">
@@ -62,7 +67,9 @@ export function FeatureDetail() {
           <p className="detail-meta">
             <span className="badge">{detail.status}</span>
             {detail.headline.active_users != null && (
-              <span className="muted">{num(detail.headline.active_users)} active users this period</span>
+              <span className="muted">
+                {num(detail.headline.active_users)} active users this period
+              </span>
             )}
           </p>
 
@@ -75,8 +82,8 @@ export function FeatureDetail() {
                   <strong>{money(detail.build_total)}</strong> total
                 </span>
                 <span>
-                  <strong>{num(detail.build_contributors)}</strong>{" "}
-                  contributor{detail.build_contributors === 1 ? "" : "s"}
+                  <strong>{num(detail.build_contributors)}</strong> contributor
+                  {detail.build_contributors === 1 ? "" : "s"}
                 </span>
               </div>
             </div>
@@ -114,7 +121,7 @@ export function FeatureDetail() {
           <InferenceSection
             featureId={detail.feature_id}
             monthlyInference={detail.headline.inference_cost}
-            hookMetered={hookMetered}
+            sourceLabel={inferenceLabel}
           />
 
           {/* ---- Optimization opportunities ---- */}
@@ -199,11 +206,11 @@ type Window = (typeof WINDOWS)[number];
 function InferenceSection({
   featureId,
   monthlyInference,
-  hookMetered,
+  sourceLabel,
 }: {
   featureId: string;
   monthlyInference: number;
-  hookMetered: boolean;
+  sourceLabel: string;
 }) {
   const [window, setWindow] = useState<Window>("month");
   const [data, setData] = useState<FeatureInference | null>(null);
@@ -226,7 +233,7 @@ function InferenceSection({
         <div>
           <h2>Inference cost</h2>
           <span className="section-sub muted">
-            {money(monthlyInference)}/mo · {hookMetered ? "hook-metered" : "connector-derived"}
+            {money(monthlyInference)}/mo · {sourceLabel}
           </span>
         </div>
         <div className="window-filter" role="group" aria-label="Time window">
@@ -278,8 +285,15 @@ function TrendChart({ trend }: { trend: FeatureInference["trend"] }) {
       {trend.map((t) => {
         const month = Number(t.period.slice(5, 7)) - 1;
         return (
-          <div className="trend-bar-wrap" key={t.period} title={`${MONTHS[month]} · ${money(t.amount)}`}>
-            <div className="trend-bar" style={{ height: `${Math.max(3, (t.amount / max) * 100)}%` }} />
+          <div
+            className="trend-bar-wrap"
+            key={t.period}
+            title={`${MONTHS[month]} · ${money(t.amount)}`}
+          >
+            <div
+              className="trend-bar"
+              style={{ height: `${Math.max(3, (t.amount / max) * 100)}%` }}
+            />
             <span className="trend-label">{MONTHS[month]}</span>
           </div>
         );

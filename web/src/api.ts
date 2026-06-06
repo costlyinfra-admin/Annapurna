@@ -124,6 +124,20 @@ export interface FeatureInference {
   trend: { period: string; amount: number }[];
 }
 
+export interface ComputePool {
+  id: string;
+  name: string;
+  provider_label: string;
+  monthly_cost: number;
+}
+
+export interface PoolAllocation {
+  pool: string;
+  provider_label: string;
+  allocated: number;
+  unattributed: number;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -235,6 +249,21 @@ export const api = {
     request<{ total: number }>("/build/import", {
       method: "POST",
       body: JSON.stringify({ csv, tool, period }),
+    }),
+
+  // ---- Self-hosted compute pools (open-source inference) ----
+  listComputePools: () => request<ComputePool[]>("/compute/pools"),
+
+  createComputePool: (name: string, providerLabel: string, monthlyCost: number) =>
+    request<ComputePool>("/compute/pools", {
+      method: "POST",
+      body: JSON.stringify({ name, provider_label: providerLabel, monthly_cost: monthlyCost }),
+    }),
+
+  allocateCompute: (period?: string, poolId?: string) =>
+    request<PoolAllocation[]>("/compute/allocate", {
+      method: "POST",
+      body: JSON.stringify({ period, pool_id: poolId }),
     }),
 
   // ---- Metering hook (M7, optional precision tier) ----

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -7,7 +7,17 @@ import { Dashboard } from "./Dashboard";
 
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { me: vi.fn(), dashboard: vi.fn(), logout: vi.fn() } };
+  return {
+    ...actual,
+    api: {
+      me: vi.fn(),
+      dashboard: vi.fn(),
+      logout: vi.fn(),
+      listComputePools: vi.fn(),
+      createComputePool: vi.fn(),
+      allocateCompute: vi.fn(),
+    },
+  };
 });
 
 const TRIAGE = {
@@ -95,5 +105,30 @@ describe("Dashboard", () => {
     expect(
       screen.getByText("Unattributed spend represents 9.7% of total AI costs."),
     ).toBeInTheDocument();
+  });
+
+  it("registers a self-hosted compute pool", async () => {
+    vi.mocked(api.listComputePools).mockResolvedValue([]);
+    vi.mocked(api.createComputePool).mockResolvedValue({
+      id: "p1",
+      name: "Llama-3.1-70B",
+      provider_label: "self_hosted",
+      monthly_cost: 18000,
+    });
+    renderDashboard();
+    await screen.findAllByRole("link", { name: "AI threat triage" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add cost data" }));
+    expect(await screen.findByText(/Self-hosted models/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Pool name/), {
+      target: { value: "Llama-3.1-70B" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("$ / month"), { target: { value: "18000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save pool" }));
+
+    await waitFor(() =>
+      expect(api.createComputePool).toHaveBeenCalledWith("Llama-3.1-70B", "self_hosted", 18000),
+    );
   });
 });

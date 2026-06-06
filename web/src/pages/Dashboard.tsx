@@ -7,7 +7,13 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, ApiError, type Dashboard as DashboardData, type DashboardRow } from "../api";
+import {
+  api,
+  ApiError,
+  type ComputePool,
+  type Dashboard as DashboardData,
+  type DashboardRow,
+} from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
 import { compact, money, num } from "../format";
@@ -78,8 +84,8 @@ export function Dashboard() {
           data.totals.build_cost === 0 &&
           data.totals.inference_cost === 0 && (
             <p className="hint" role="status">
-              Your features are confirmed, but no cost is synced yet. Use <strong>Add cost data</strong>{" "}
-              above to sync inference and import build cost.
+              Your features are confirmed, but no cost is synced yet. Use{" "}
+              <strong>Add cost data</strong> above to sync inference and import build cost.
             </p>
           )}
 
@@ -107,7 +113,11 @@ export function Dashboard() {
             </thead>
             <tbody>
               {data.features.map((f) => (
-                <tr key={f.feature_id} className="feature-row" onClick={() => navigate(`/features/${f.feature_id}`)}>
+                <tr
+                  key={f.feature_id}
+                  className="feature-row"
+                  onClick={() => navigate(`/features/${f.feature_id}`)}
+                >
                   <td>
                     <Link to={`/features/${f.feature_id}`} onClick={(e) => e.stopPropagation()}>
                       {f.name}
@@ -120,8 +130,12 @@ export function Dashboard() {
                   <td className="num" title="AI model calls this feature made">
                     {compact(f.requests)}
                   </td>
-                  <td><WorthBadge value={f.worth_it} /></td>
-                  <td><ConfidenceBadge level={f.confidence} /></td>
+                  <td>
+                    <WorthBadge value={f.worth_it} />
+                  </td>
+                  <td>
+                    <ConfidenceBadge level={f.confidence} />
+                  </td>
                 </tr>
               ))}
               <tr className="unattributed-row">
@@ -131,7 +145,9 @@ export function Dashboard() {
                 <td className="num">—</td>
                 <td className="num">—</td>
                 <td className="num">—</td>
-                <td colSpan={2} className="muted">spend not yet mapped to a feature</td>
+                <td colSpan={2} className="muted">
+                  spend not yet mapped to a feature
+                </td>
               </tr>
             </tbody>
           </table>
@@ -184,8 +200,8 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
           <>
             <FeatureValue feature={highest_cost_per_user} />
             <span className="exec-sub">
-              {money(highest_cost_per_user.cost_per_user)}/user · {num(highest_cost_per_user.active_users)}{" "}
-              users
+              {money(highest_cost_per_user.cost_per_user)}/user ·{" "}
+              {num(highest_cost_per_user.active_users)} users
             </span>
           </>
         ) : (
@@ -196,7 +212,8 @@ function ExecutiveSummary({ data }: { data: DashboardData }) {
       <ExecItem label="Unattributed spend" tone={unattributedTotal > 0 ? "warn" : "good"}>
         <span className="exec-value num">{money(unattributedTotal)}</span>
         <span className="exec-sub">
-          {money(data.unattributed.inference_cost)} inf · {money(data.unattributed.build_cost)} build
+          {money(data.unattributed.inference_cost)} inf · {money(data.unattributed.build_cost)}{" "}
+          build
         </span>
       </ExecItem>
     </section>
@@ -261,7 +278,59 @@ function DataActions({ period, onChanged }: { period?: string; onChanged: () => 
   const [provider, setProvider] = useState("anthropic");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [poolName, setPoolName] = useState("");
+  const [poolLabel, setPoolLabel] = useState("self_hosted");
+  const [poolCost, setPoolCost] = useState("");
+  const [pools, setPools] = useState<ComputePool[]>([]);
   const monthParam = period?.slice(0, 7);
+
+  useEffect(() => {
+    if (open)
+      api
+        .listComputePools()
+        .then(setPools)
+        .catch(() => undefined);
+  }, [open]);
+
+  async function savePool() {
+    const cost = parseFloat(poolCost);
+    if (!poolName.trim() || !poolLabel.trim() || Number.isNaN(cost)) {
+      setNote("Enter a pool name, its provider label, and a monthly cost.");
+      return;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.createComputePool(poolName.trim(), poolLabel.trim(), cost);
+      setPoolName("");
+      setPoolCost("");
+      setPools(await api.listComputePools());
+      setNote("Saved pool. Use Allocate once the SDK has reported usage.");
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Could not save pool.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function allocate() {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await api.allocateCompute(monthParam);
+      const total = res.reduce((sum, r) => sum + r.allocated, 0);
+      setNote(
+        res.length
+          ? `Allocated ${money(total)} of self-hosted cost across features.`
+          : "No pools to allocate yet.",
+      );
+      await onChanged();
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Allocation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function importBuild() {
     setBusy(true);
@@ -328,6 +397,40 @@ function DataActions({ period, onChanged }: { period?: string; onChanged: () => 
             Import
           </button>
         </span>
+      </div>
+      <div className="data-action">
+        <label>Self-hosted models (open-source GPU pool)</label>
+        <span className="inline">
+          <input
+            placeholder="Pool name (e.g. Llama-3.1-70B)"
+            value={poolName}
+            onChange={(e) => setPoolName(e.target.value)}
+          />
+          <input
+            placeholder="provider label"
+            value={poolLabel}
+            onChange={(e) => setPoolLabel(e.target.value)}
+          />
+          <input
+            placeholder="$ / month"
+            inputMode="decimal"
+            value={poolCost}
+            onChange={(e) => setPoolCost(e.target.value)}
+          />
+          <button onClick={savePool} disabled={busy}>
+            Save pool
+          </button>
+        </span>
+        {pools.length > 0 && (
+          <span className="inline pools-line">
+            <span className="muted">
+              {pools.map((p) => `${p.name} · ${money(p.monthly_cost)}/mo`).join("  ")}
+            </span>
+            <button onClick={allocate} disabled={busy}>
+              Allocate cost
+            </button>
+          </span>
+        )}
       </div>
       {note && <p className="muted">{note}</p>}
       <button className="link" onClick={() => setOpen(false)}>
