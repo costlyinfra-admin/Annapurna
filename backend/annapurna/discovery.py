@@ -250,6 +250,7 @@ def run_discovery(tenant_id: str, owner: str, token: str, *, days: int = 90) -> 
     """Fetch PRs, cluster them, and persist proposed features. Returns a summary."""
     since = dt.date.today() - dt.timedelta(days=days)
     with _make_github_client(token) as gh:
+        repos = gh.list_repos(owner)  # repos the token can actually see
         prs = gh.fetch_merged_prs(owner, since)
     proposals = cluster_prs(prs)
     pr_by_ref = {pr.ref: pr for pr in prs}
@@ -257,7 +258,8 @@ def run_discovery(tenant_id: str, owner: str, token: str, *, days: int = 90) -> 
     return {
         "owner": owner,
         "prs": len(prs),
-        "repos": sorted({p.repo for p in prs}),
+        "repos": sorted({p.repo for p in prs}),  # repos that had merged PRs
+        "repos_scanned": len(repos),  # repos accessible to the token (for clearer UX)
         "proposals": len(proposals),
     }
 

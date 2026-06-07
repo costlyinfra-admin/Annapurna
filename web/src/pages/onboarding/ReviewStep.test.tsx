@@ -41,6 +41,7 @@ describe("ReviewStep", () => {
       owner: "acme",
       prs: 3,
       repos: ["acme/core"],
+      repos_scanned: 2,
       proposals: 1,
     });
 
@@ -55,6 +56,44 @@ describe("ReviewStep", () => {
     expect(screen.getByText("high confidence")).toBeInTheDocument();
     expect(screen.getByText("acme/core#1")).toBeInTheDocument();
     expect(screen.getByText("branch: feature/threat-*")).toBeInTheDocument();
+  });
+
+  it("explains when no repositories are accessible (token/owner issue)", async () => {
+    vi.mocked(api.listFeatures).mockResolvedValue([]);
+    vi.mocked(api.runDiscovery).mockResolvedValue({
+      owner: "cloudoku-training",
+      prs: 0,
+      repos: [],
+      repos_scanned: 0,
+      proposals: 0,
+    });
+
+    render(<ReviewStep />);
+    fireEvent.change(await screen.findByLabelText("GitHub organization"), {
+      target: { value: "cloudoku-training" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Analyze last 90 days" }));
+
+    expect(await screen.findByText(/No repositories accessible/)).toBeInTheDocument();
+  });
+
+  it("explains when repos are found but have no merged PRs", async () => {
+    vi.mocked(api.listFeatures).mockResolvedValue([]);
+    vi.mocked(api.runDiscovery).mockResolvedValue({
+      owner: "cloudoku-training",
+      prs: 0,
+      repos: [],
+      repos_scanned: 1,
+      proposals: 0,
+    });
+
+    render(<ReviewStep />);
+    fireEvent.change(await screen.findByLabelText("GitHub organization"), {
+      target: { value: "cloudoku-training" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Analyze last 90 days" }));
+
+    expect(await screen.findByText(/no merged PRs in the last 90 days/)).toBeInTheDocument();
   });
 
   it("deletes a proposal", async () => {

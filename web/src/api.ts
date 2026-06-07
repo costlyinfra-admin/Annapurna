@@ -38,6 +38,7 @@ export interface DiscoverySummary {
   owner: string;
   prs: number;
   repos: string[];
+  repos_scanned: number;
   proposals: number;
 }
 

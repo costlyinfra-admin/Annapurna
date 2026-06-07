@@ -31,6 +31,9 @@ class _FakeGitHub:
     def __exit__(self, *_exc):
         return False
 
+    def list_repos(self, owner):
+        return sorted({p.repo for p in FIXTURE_PRS})
+
     def fetch_merged_prs(self, owner, since):
         return FIXTURE_PRS
 

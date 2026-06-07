@@ -33,9 +33,25 @@ export function ReviewStep() {
     setError(null);
     try {
       const s = await api.runDiscovery(owner.trim());
-      setSummary(
-        `Analyzed ${s.prs} merged PRs across ${s.repos.length} repositories → ${s.proposals} proposed features.`,
-      );
+      const who = owner.trim();
+      if (s.repos_scanned === 0) {
+        setSummary(
+          `No repositories accessible for "${who}". Check the token has repo access ` +
+            `(private repos need a classic PAT with the "repo" scope) and that "${who}" is ` +
+            `the org/user login.`,
+        );
+      } else if (s.prs === 0) {
+        const n = s.repos_scanned;
+        setSummary(
+          `Found ${n} repositor${n === 1 ? "y" : "ies"} for "${who}", but no merged PRs in the ` +
+            `last 90 days — discovery needs merged pull requests.`,
+        );
+      } else {
+        setSummary(
+          `Analyzed ${s.prs} merged PRs across ${s.repos.length} repositories → ` +
+            `${s.proposals} proposed features.`,
+        );
+      }
       setSelected(new Set());
       await reload();
     } catch (err) {
@@ -179,7 +195,11 @@ function FeatureCard({
         />
         {editing ? (
           <span className="rename-row">
-            <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Feature name" />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              aria-label="Feature name"
+            />
             <button onClick={saveName}>Save</button>
             <button className="secondary" onClick={() => setEditing(false)}>
               Cancel

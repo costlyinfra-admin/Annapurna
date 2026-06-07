@@ -114,6 +114,9 @@ class _FakeGitHub:
     def __exit__(self, *_exc):
         return False
 
+    def list_repos(self, owner):
+        return sorted({p.repo for p in self._prs})
+
     def fetch_merged_prs(self, owner, since):
         return self._prs
 
