@@ -267,12 +267,9 @@ def create_app() -> FastAPI:
     # ---- Feature discovery + editing (wizard step 2) --------------------
     @app.post("/api/discovery/run")
     def run_discovery(body: DiscoveryRequest, user: CurrentUser) -> dict:
+        # Token is optional: without a connected GitHub credential, discovery
+        # analyzes PUBLIC organizations/repos via GitHub's unauthenticated API.
         token = credentials.get_secret(user["tenant_id"], "github")
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Connect GitHub before running discovery.",
-            )
         try:
             return discovery.run_discovery(user["tenant_id"], body.owner, token, days=body.days)
         except GitHubError as exc:
@@ -280,6 +277,11 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="GitHub rejected the token. Reconnect with a valid token.",
+                ) from exc
+            if exc.status in (403, 404):
+                # Rate limit, or owner not found / no public repos.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
                 ) from exc
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub error: {exc}"

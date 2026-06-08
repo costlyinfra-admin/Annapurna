@@ -95,6 +95,10 @@ export function ReviewStep() {
           {busy ? "Analyzing…" : "Analyze last 90 days"}
         </button>
       </div>
+      <p className="muted hint-inline">
+        No token needed for <strong>public</strong> organizations. Connect GitHub (previous step)
+        for private repos and higher rate limits.
+      </p>
       {summary && <p className="summary">{summary}</p>}
       {error && (
         <p className="error" role="alert">
@@ -108,8 +112,9 @@ export function ReviewStep() {
         <div className="empty-state">
           <p className="empty-title">No features discovered yet</p>
           <p className="muted">
-            Connect GitHub in the previous step, then run analysis above. Proposals will appear here
-            with their PR evidence and a confidence badge.
+            Enter a GitHub organization above and run analysis. Public orgs work without a token;
+            connect GitHub for private repos. Proposals appear here with their PR evidence and a
+            confidence badge.
           </p>
         </div>
       ) : (

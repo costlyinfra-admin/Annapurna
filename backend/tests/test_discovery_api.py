@@ -48,9 +48,11 @@ def client(admin_conn, admin_conninfo, app_conninfo, monkeypatch):
     return c
 
 
-def test_discovery_requires_github_connected(client):
+def test_discovery_runs_without_github_credential(client):
+    # No token connected -> discovery still runs (public, unauthenticated GitHub).
     resp = client.post("/api/discovery/run", json={"owner": "acme"})
-    assert resp.status_code == 400
+    assert resp.status_code == 200
+    assert resp.json()["prs"] == 3
 
 
 def test_full_discovery_edit_confirm_flow(client):

@@ -107,6 +107,27 @@ def test_lists_private_repos_via_authenticated_endpoint():
     assert [pr.ref for pr in prs] == ["Cloudoku-training/cloudoku-training#5"]
 
 
+def test_unauthenticated_client_uses_public_listing_without_auth_header():
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        assert "authorization" not in {k.lower() for k in request.headers}  # no token sent
+        path = request.url.path
+        page = int(request.url.params.get("page", "1"))
+        if path == "/orgs/publicorg/repos":
+            return httpx.Response(200, json=[{"full_name": "publicorg/site"}] if page == 1 else [])
+        if path == "/repos/publicorg/site/pulls":
+            return httpx.Response(200, json=[_pr(1, "feature/x", "dev", 3)] if page == 1 else [])
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    # No token -> public, unauthenticated access.
+    client = GitHubClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    prs = client.fetch_merged_prs("publicorg", (NOW - dt.timedelta(days=90)).date())
+    assert [pr.ref for pr in prs] == ["publicorg/site#1"]
+    assert "/user/repos" not in calls  # the authenticated endpoint is skipped
+
+
 def test_auth_error_raised_on_401():
     def handler(_request):
         return httpx.Response(401, json={"message": "Bad credentials"})

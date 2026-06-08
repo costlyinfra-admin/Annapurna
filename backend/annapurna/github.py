@@ -55,12 +55,14 @@ class GitHubClient:
 
     def __init__(
         self,
-        token: str,
+        token: Optional[str] = None,
         *,
         client: Optional[httpx.Client] = None,
         base_url: str = GITHUB_API,
     ):
-        self._token = token
+        # token is optional: without it, only PUBLIC orgs/repos are visible
+        # (GitHub's unauthenticated API — lower rate limit).
+        self._token = token or None
         self._base = base_url.rstrip("/")
         self._client = client or httpx.Client(timeout=20.0)
         self._owns_client = client is None
@@ -76,18 +78,23 @@ class GitHubClient:
             self._client.close()
 
     def _get(self, path: str, params: Optional[dict] = None) -> httpx.Response:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if self._token:  # unauthenticated requests work for public data
+            headers["Authorization"] = f"Bearer {self._token}"
         resp = http_get_with_retry(
-            self._client,
-            f"{self._base}{path}",
-            params=params,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+            self._client, f"{self._base}{path}", params=params, headers=headers
         )
         if resp.status_code == 401:
             raise GitHubError("GitHub authentication failed — check the access token.", 401)
+        if resp.status_code == 403 and "rate limit" in resp.text.lower():
+            raise GitHubError(
+                "GitHub rate limit reached. Add a personal access token (Connect GitHub) "
+                "for higher limits and access to private repositories.",
+                403,
+            )
         if resp.status_code >= 400:
             raise GitHubError(
                 f"GitHub API error {resp.status_code}: {resp.text[:200]}", resp.status_code
@@ -127,6 +134,8 @@ class GitHubClient:
 
     def _list_accessible_repos(self) -> list[str]:
         """Every repo the token can access (own + org member), incl. private."""
+        if not self._token:
+            return []  # /user/repos needs auth; unauthenticated -> public listing only
         try:
             return self._paginate_full_names(
                 "/user/repos", {"affiliation": "owner,organization_member"}
@@ -158,6 +167,9 @@ class GitHubClient:
         fetched from its detail endpoint (one extra GET per PR; best-effort, so a
         failure leaves those counts as None rather than breaking discovery).
         """
+        # Unauthenticated requests have a tight rate limit (60/hr) — skip the
+        # per-PR stat calls to conserve it.
+        with_stats = with_stats and bool(self._token)
         prs: list[PullRequest] = []
         for repo in self.list_repos(owner):
             prs.extend(self._fetch_repo_merged_prs(repo, since, with_stats=with_stats))
