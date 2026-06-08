@@ -137,6 +137,37 @@ def test_auth_error_raised_on_401():
     assert exc.value.status == 401
 
 
+def test_fetch_copilot_seats_and_plan():
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        page = int(request.url.params.get("page", "1"))
+        if path == "/orgs/acme/copilot/billing":
+            return httpx.Response(200, json={"plan_type": "enterprise", "seat_breakdown": {}})
+        if path == "/orgs/acme/copilot/billing/seats":
+            if page > 1:
+                return httpx.Response(200, json={"seats": []})
+            return httpx.Response(
+                200,
+                json={
+                    "total_seats": 2,
+                    "seats": [
+                        {
+                            "assignee": {"login": "alice"},
+                            "last_activity_at": "2026-05-20T00:00:00Z",
+                        },
+                        {"assignee": {"login": "bob"}, "last_activity_at": None},
+                    ],
+                },
+            )
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    client = _client(handler)
+    assert client.copilot_plan_type("acme") == "enterprise"
+    seats = client.fetch_copilot_seats("acme")
+    assert [s.login for s in seats] == ["alice", "bob"]
+    assert seats[0].last_activity_at == "2026-05-20T00:00:00Z"
+
+
 def test_fetch_pr_stats_from_detail_endpoint():
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path

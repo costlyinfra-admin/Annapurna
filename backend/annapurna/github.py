@@ -46,6 +46,12 @@ class PullRequest:
         return f"{self.repo}#{self.number}"
 
 
+@dataclass
+class CopilotSeat:
+    login: str  # the developer assigned this Copilot seat
+    last_activity_at: Optional[str] = None  # ISO-8601 or None (informational)
+
+
 class GitHubClient:
     """Minimal read-only GitHub REST client.
 
@@ -224,6 +230,34 @@ class GitHubClient:
         except Exception:
             # Stats are non-critical; never let them break the connector.
             return None, None
+
+    # ---- GitHub Copilot seat billing (build cost) ----------------------
+    def copilot_plan_type(self, owner: str) -> str:
+        """The org's Copilot plan ("business" | "enterprise"), drives seat price.
+
+        Requires a token with Copilot billing admin access (org owner or
+        manage_billing:copilot).
+        """
+        data = self._get(f"/orgs/{owner}/copilot/billing").json()
+        plan = (data or {}).get("plan_type")
+        return plan if plan in ("business", "enterprise") else "business"
+
+    def fetch_copilot_seats(self, owner: str) -> list[CopilotSeat]:
+        """Every assigned Copilot seat in the org (one per developer)."""
+        seats: list[CopilotSeat] = []
+        page = 1
+        while True:
+            resp = self._get(
+                f"/orgs/{owner}/copilot/billing/seats", {"per_page": _PER_PAGE, "page": page}
+            )
+            batch = (resp.json() or {}).get("seats", [])
+            for seat in batch:
+                login = (seat.get("assignee") or {}).get("login")
+                if login:
+                    seats.append(CopilotSeat(login, seat.get("last_activity_at")))
+            if len(batch) < _PER_PAGE:
+                return seats
+            page += 1
 
 
 def _parse_date(value: Optional[str]) -> Optional[dt.date]:

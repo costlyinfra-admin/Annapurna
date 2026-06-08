@@ -16,6 +16,7 @@ vi.mock("../api", async (importActual) => {
       listComputePools: vi.fn(),
       createComputePool: vi.fn(),
       allocateCompute: vi.fn(),
+      syncCopilotSeats: vi.fn(),
     },
   };
 });
@@ -130,5 +131,25 @@ describe("Dashboard", () => {
     await waitFor(() =>
       expect(api.createComputePool).toHaveBeenCalledWith("Llama-3.1-70B", "self_hosted", 18000),
     );
+  });
+
+  it("syncs GitHub Copilot seats as build cost (no CSV)", async () => {
+    vi.mocked(api.listComputePools).mockResolvedValue([]);
+    vi.mocked(api.syncCopilotSeats).mockResolvedValue({
+      total: 78,
+      seats: 2,
+      plan: "enterprise",
+      seat_price: 39,
+    });
+    renderDashboard();
+    await screen.findAllByRole("link", { name: "AI threat triage" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add cost data" }));
+    fireEvent.change(await screen.findByPlaceholderText("GitHub organization"), {
+      target: { value: "acme" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sync seats" }));
+
+    await waitFor(() => expect(api.syncCopilotSeats).toHaveBeenCalledWith("acme", "2026-05"));
   });
 });

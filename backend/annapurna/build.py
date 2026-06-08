@@ -24,7 +24,9 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 from .db import app_dsn, connect, tenant_tx
+from .github import GitHubClient
 from .providers import month_start
+from .seatpricing import seat_price
 
 VALID_TOOLS = {"claude_code", "cursor", "copilot", "codex"}
 _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
@@ -144,6 +146,38 @@ def _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, p
         """,
         (tenant_id, feature_id, spend.developer_id, spend.tool, amount, period, confidence),
     )
+
+
+def _make_github_client(token):  # seam so tests can inject a fake
+    return GitHubClient(token)
+
+
+def import_copilot_seats(tenant_id: str, owner: str, token: str, period: dt.date) -> dict:
+    """Pull GitHub Copilot seat assignments and allocate their cost to features.
+
+    Each assigned seat is a fixed per-developer build cost (seat price by plan),
+    which the existing PR-authorship allocator maps onto features — exactly like
+    a CSV import, but pulled automatically (no upload). Idempotent per period.
+    """
+    start = month_start(period)
+    with _make_github_client(token) as gh:
+        plan = gh.copilot_plan_type(owner)
+        seats = gh.fetch_copilot_seats(owner)
+    price = seat_price("copilot", plan)
+    spends = [DeveloperSpend(seat.login, "copilot", price) for seat in seats]
+
+    if spends:
+        summary = allocate_and_store(tenant_id, spends, period)
+    else:
+        # No seats -> clear any prior Copilot rows for the period (reflect reality).
+        with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+            conn.execute("DELETE FROM build_cost WHERE period = %s AND tool = 'copilot'", (start,))
+        summary = build_summary(tenant_id, period)
+
+    summary["seats"] = len(seats)
+    summary["plan"] = plan
+    summary["seat_price"] = float(price)
+    return summary
 
 
 def record_training_cost(

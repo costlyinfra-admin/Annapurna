@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 from annapurna import build, discovery
 from annapurna.build import DeveloperSpend
-from annapurna.github import PullRequest
+from annapurna.github import CopilotSeat, PullRequest
 
 PERIOD = dt.date(2026, 5, 1)
 
@@ -97,3 +97,40 @@ def test_reimport_is_idempotent(discovered):
     build.allocate_and_store(discovered, spends, PERIOD)
     summary = build.allocate_and_store(discovered, spends, PERIOD)  # again
     assert summary["total"] == 100.0  # not doubled
+
+
+class _FakeCopilotGitHub:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def copilot_plan_type(self, owner):
+        return "enterprise"
+
+    def fetch_copilot_seats(self, owner):
+        return [CopilotSeat("alice"), CopilotSeat("bob")]
+
+
+def test_import_copilot_seats(discovered, monkeypatch):
+    # Seats pulled from GitHub become per-developer build cost, allocated to
+    # features by PR authorship — no CSV upload.
+    monkeypatch.setattr(build, "_make_github_client", lambda token: _FakeCopilotGitHub())
+    summary = build.import_copilot_seats(discovered, "acme", "tok", PERIOD)
+
+    assert summary["seats"] == 2
+    assert summary["plan"] == "enterprise"
+    assert summary["seat_price"] == 39.0  # enterprise seat
+
+    features = {f["name"]: f for f in summary["features"]}
+    # alice's PRs are all in Threat -> her $39 seat lands there (high confidence).
+    assert features["Threat"]["amount"] == 39.0
+    assert features["Threat"]["by_tool"] == {"copilot": 39.0}
+    assert features["Threat"]["confidence"] == "high"
+    # bob's PR is in Report.
+    assert features["Report"]["amount"] == 39.0
+
+    devs = {d["developer_id"]: d for d in summary["developers"]}
+    assert devs["alice"]["amount"] == 39.0
+    assert devs["bob"]["amount"] == 39.0

@@ -127,6 +127,11 @@ class ReconcileRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
+class CopilotSyncRequest(BaseModel):
+    owner: str = Field(min_length=1, max_length=120)
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+
+
 class TrainingCostRequest(BaseModel):
     feature_id: str
     amount: float = Field(ge=0)
@@ -426,6 +431,34 @@ def create_app() -> FastAPI:
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
         return build.build_summary(user["tenant_id"], _parse_period(period))
+
+    @app.post("/api/build/copilot/sync")
+    def sync_copilot_seats(body: CopilotSyncRequest, user: CurrentUser) -> dict:
+        token = credentials.get_secret(user["tenant_id"], "github")
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Connect GitHub to sync Copilot seats.",
+            )
+        try:
+            return build.import_copilot_seats(
+                user["tenant_id"], body.owner, token, _parse_period(body.period)
+            )
+        except GitHubError as exc:
+            if exc.status in (401, 403):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The GitHub token needs Copilot billing admin access "
+                    "(org owner or the manage_billing:copilot scope).",
+                ) from exc
+            if exc.status == 404:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No Copilot subscription found for '{body.owner}' (or no access).",
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub error: {exc}"
+            ) from exc
 
     @app.post("/api/build/training")
     def record_training_cost(body: TrainingCostRequest, user: CurrentUser) -> dict:

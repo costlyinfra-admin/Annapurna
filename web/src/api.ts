@@ -252,6 +252,12 @@ export const api = {
       body: JSON.stringify({ csv, tool, period }),
     }),
 
+  syncCopilotSeats: (owner: string, period?: string) =>
+    request<{ total: number; seats: number; plan: string; seat_price: number }>(
+      "/build/copilot/sync",
+      { method: "POST", body: JSON.stringify({ owner, period }) },
+    ),
+
   recordTrainingCost: (featureId: string, amount: number, label: string, period?: string) =>
     request<{ total: number }>("/build/training", {
       method: "POST",

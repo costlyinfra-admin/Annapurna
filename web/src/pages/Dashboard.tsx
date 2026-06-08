@@ -290,6 +290,7 @@ function DataActions({
   const [poolLabel, setPoolLabel] = useState("self_hosted");
   const [poolCost, setPoolCost] = useState("");
   const [pools, setPools] = useState<ComputePool[]>([]);
+  const [copilotOwner, setCopilotOwner] = useState("");
   const [ftFeature, setFtFeature] = useState("");
   const [ftAmount, setFtAmount] = useState("");
   const [ftLabel, setFtLabel] = useState("");
@@ -364,6 +365,26 @@ function DataActions({
     }
   }
 
+  async function syncCopilot() {
+    if (!copilotOwner.trim()) {
+      setNote("Enter the GitHub organization to sync Copilot seats.");
+      return;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await api.syncCopilotSeats(copilotOwner.trim(), monthParam);
+      setNote(
+        `Synced ${r.seats} Copilot ${r.plan} seats (${money(r.seat_price)}/seat) → ${money(r.total)} build cost.`,
+      );
+      await onChanged();
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Copilot sync failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importBuild() {
     setBusy(true);
     setNote(null);
@@ -421,7 +442,24 @@ function DataActions({
         </span>
       </div>
       <div className="data-action">
-        <label>Import build cost (CSV: developer,tool,amount)</label>
+        <label>Sync GitHub Copilot seats (build cost — no CSV)</label>
+        <span className="inline">
+          <input
+            placeholder="GitHub organization"
+            value={copilotOwner}
+            onChange={(e) => setCopilotOwner(e.target.value)}
+          />
+          <button onClick={syncCopilot} disabled={busy || !copilotOwner.trim()}>
+            Sync seats
+          </button>
+        </span>
+        <span className="muted">
+          Pulls per-developer seat assignments from GitHub and allocates them to features
+          automatically. Needs a token with Copilot billing admin access.
+        </span>
+      </div>
+      <div className="data-action">
+        <label>Import build cost (CSV: developer,tool,amount) — fallback</label>
         <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={3} />
         <span className="inline">
           <select value={tool} onChange={(e) => setTool(e.target.value)}>
