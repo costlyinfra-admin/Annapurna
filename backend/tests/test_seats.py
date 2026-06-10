@@ -102,6 +102,34 @@ def test_sync_idp_seats_allocates_to_features(discovered, monkeypatch):
     assert summary["total"] == 120.0  # 3 seats x $40
 
 
+def test_sync_idp_seats_supports_entra(discovered, monkeypatch):
+    # The same seat engine works for Microsoft Entra ID (normalized roster shape).
+    credentials.save_credential(
+        discovered, "entra", json.dumps({"tenant_id": "t", "client_id": "c", "client_secret": "s"})
+    )
+    seats.register_seat_source(
+        discovered, "entra", "sp-tabnine", "Tabnine", "tabnine", "enterprise"
+    )
+
+    class _FakeEntra:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def list_app_users(self, app_id):
+            assert app_id == "sp-tabnine"
+            return [{"profile": {"email": "alice@acme.com"}}]  # -> alice (Threat)
+
+    monkeypatch.setattr(seats.entra, "EntraClient", lambda **kw: _FakeEntra())
+
+    summary = seats.sync_idp_seats(discovered, PERIOD)
+    assert summary["sources"][0]["provider"] == "entra"
+    features = {f["name"]: f for f in summary["features"]}
+    assert features["Threat"]["by_tool"] == {"tabnine": 39.0}  # Tabnine enterprise seat
+
+
 def test_okta_credential_parsing_and_client_auth():
     domain, token = okta.parse_okta_credential(
         json.dumps({"domain": "https://acme.okta.com/", "token": "t"})

@@ -34,6 +34,7 @@ KNOWN_CONNECTORS = [
     {"type": "cursor", "name": "Cursor for Teams", "category": "build_activity"},
     # Identity provider for SSO/SCIM seat rosters (Cursor, Tabnine, Cody, …).
     {"type": "okta", "name": "Okta (SSO seats)", "category": "build_activity"},
+    {"type": "entra", "name": "Microsoft Entra ID (SSO seats)", "category": "build_activity"},
 ]
 _KNOWN_TYPES = {c["type"] for c in KNOWN_CONNECTORS}
 

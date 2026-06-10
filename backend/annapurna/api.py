@@ -27,6 +27,7 @@ from . import (
     credentials,
     dashboard,
     discovery,
+    entra,
     features,
     hook,
     inference,
@@ -135,7 +136,7 @@ class CopilotSyncRequest(BaseModel):
 
 
 class SeatSourceRequest(BaseModel):
-    provider: str = Field(default="okta", pattern="^okta$")
+    provider: str = Field(default="okta", pattern="^(okta|entra)$")
     app_id: str = Field(min_length=1, max_length=120)
     app_label: str = Field(default="", max_length=120)
     tool: str = Field(min_length=1, max_length=60)
@@ -494,11 +495,10 @@ def create_app() -> FastAPI:
             return seats.sync_idp_seats(user["tenant_id"], _parse_period(body.period))
         except seats.SeatSourceError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        except okta.OktaError as exc:
-            detail = (
-                "Okta rejected the API token." if exc.status in (401, 403) else f"Okta error: {exc}"
-            )
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+        except (okta.OktaError, entra.EntraError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=f"Identity provider error: {exc}"
+            ) from exc
 
     @app.post("/api/build/training")
     def record_training_cost(body: TrainingCostRequest, user: CurrentUser) -> dict:

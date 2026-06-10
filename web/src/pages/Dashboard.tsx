@@ -292,8 +292,12 @@ function DataActions({
   const [poolCost, setPoolCost] = useState("");
   const [pools, setPools] = useState<ComputePool[]>([]);
   const [copilotOwner, setCopilotOwner] = useState("");
+  const [idp, setIdp] = useState("okta");
   const [oktaDomain, setOktaDomain] = useState("");
   const [oktaToken, setOktaToken] = useState("");
+  const [entraTenant, setEntraTenant] = useState("");
+  const [entraClientId, setEntraClientId] = useState("");
+  const [entraSecret, setEntraSecret] = useState("");
   const [seatAppId, setSeatAppId] = useState("");
   const [seatTool, setSeatTool] = useState("cursor");
   const [seatPlan, setSeatPlan] = useState("business");
@@ -337,22 +341,34 @@ function DataActions({
     }
   }, [open]);
 
-  async function connectOkta() {
-    if (!oktaDomain.trim() || !oktaToken.trim()) {
-      setNote("Enter the Okta domain and an API token.");
-      return;
+  async function connectIdp() {
+    let secret: string;
+    if (idp === "okta") {
+      if (!oktaDomain.trim() || !oktaToken.trim()) {
+        setNote("Enter the Okta domain and an API token.");
+        return;
+      }
+      secret = JSON.stringify({ domain: oktaDomain.trim(), token: oktaToken.trim() });
+    } else {
+      if (!entraTenant.trim() || !entraClientId.trim() || !entraSecret.trim()) {
+        setNote("Enter the Entra tenant id, client id, and client secret.");
+        return;
+      }
+      secret = JSON.stringify({
+        tenant_id: entraTenant.trim(),
+        client_id: entraClientId.trim(),
+        client_secret: entraSecret.trim(),
+      });
     }
     setBusy(true);
     setNote(null);
     try {
-      await api.saveCredential(
-        "okta",
-        JSON.stringify({ domain: oktaDomain.trim(), token: oktaToken.trim() }),
-      );
+      await api.saveCredential(idp, secret);
       setOktaToken("");
-      setNote("Connected Okta. Add app→tool mappings below, then sync.");
+      setEntraSecret("");
+      setNote(`Connected ${idp}. Add app→tool mappings below, then sync.`);
     } catch (err) {
-      setNote(err instanceof ApiError ? err.message : "Could not connect Okta.");
+      setNote(err instanceof ApiError ? err.message : "Could not connect identity provider.");
     } finally {
       setBusy(false);
     }
@@ -360,13 +376,13 @@ function DataActions({
 
   async function addSeatSource() {
     if (!seatAppId.trim()) {
-      setNote("Enter the Okta application id to map.");
+      setNote("Enter the IdP application id to map.");
       return;
     }
     setBusy(true);
     setNote(null);
     try {
-      await api.registerSeatSource(seatAppId.trim(), seatTool, seatTool, seatPlan.trim());
+      await api.registerSeatSource(idp, seatAppId.trim(), seatTool, seatTool, seatPlan.trim());
       setSeatAppId("");
       setSeatSources(await api.listSeatSources());
       setNote("Added seat mapping.");
@@ -525,26 +541,53 @@ function DataActions({
         </span>
       </div>
       <div className="data-action">
-        <label>SSO seats via Okta (Cursor, Tabnine, Amazon Q, Gemini Code Assist…)</label>
+        <label>SSO seats (Cursor, Tabnine, Amazon Q, Gemini Code Assist…)</label>
         <span className="inline">
-          <input
-            placeholder="Okta domain (acme.okta.com)"
-            value={oktaDomain}
-            onChange={(e) => setOktaDomain(e.target.value)}
-          />
-          <input
-            placeholder="API token"
-            type="password"
-            value={oktaToken}
-            onChange={(e) => setOktaToken(e.target.value)}
-          />
-          <button onClick={connectOkta} disabled={busy}>
+          <select value={idp} onChange={(e) => setIdp(e.target.value)}>
+            <option value="okta">Okta</option>
+            <option value="entra">Microsoft Entra ID</option>
+          </select>
+          {idp === "okta" ? (
+            <>
+              <input
+                placeholder="Okta domain (acme.okta.com)"
+                value={oktaDomain}
+                onChange={(e) => setOktaDomain(e.target.value)}
+              />
+              <input
+                placeholder="API token"
+                type="password"
+                value={oktaToken}
+                onChange={(e) => setOktaToken(e.target.value)}
+              />
+            </>
+          ) : (
+            <>
+              <input
+                placeholder="Tenant id"
+                value={entraTenant}
+                onChange={(e) => setEntraTenant(e.target.value)}
+              />
+              <input
+                placeholder="Client id"
+                value={entraClientId}
+                onChange={(e) => setEntraClientId(e.target.value)}
+              />
+              <input
+                placeholder="Client secret"
+                type="password"
+                value={entraSecret}
+                onChange={(e) => setEntraSecret(e.target.value)}
+              />
+            </>
+          )}
+          <button onClick={connectIdp} disabled={busy}>
             Connect
           </button>
         </span>
         <span className="inline">
           <input
-            placeholder="Okta app id"
+            placeholder={idp === "okta" ? "Okta app id" : "Entra app (service principal) id"}
             value={seatAppId}
             onChange={(e) => setSeatAppId(e.target.value)}
           />
@@ -567,7 +610,7 @@ function DataActions({
           <span className="inline pools-line">
             <span className="muted">
               {seatSources
-                .map((s) => `${s.app_label || s.app_id} → ${s.tool}/${s.plan}`)
+                .map((s) => `${s.provider}: ${s.app_label || s.app_id} → ${s.tool}/${s.plan}`)
                 .join("  ")}
             </span>
             <button onClick={syncSeats} disabled={busy}>

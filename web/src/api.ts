@@ -264,10 +264,16 @@ export const api = {
   // ---- SSO/SCIM seat sources (Okta) ----
   listSeatSources: () => request<SeatSource[]>("/build/seat-sources"),
 
-  registerSeatSource: (appId: string, appLabel: string, tool: string, plan: string) =>
+  registerSeatSource: (
+    provider: string,
+    appId: string,
+    appLabel: string,
+    tool: string,
+    plan: string,
+  ) =>
     request<SeatSource>("/build/seat-sources", {
       method: "POST",
-      body: JSON.stringify({ provider: "okta", app_id: appId, app_label: appLabel, tool, plan }),
+      body: JSON.stringify({ provider, app_id: appId, app_label: appLabel, tool, plan }),
     }),
 
   syncIdpSeats: (period?: string) =>

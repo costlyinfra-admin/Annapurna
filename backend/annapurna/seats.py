@@ -15,13 +15,27 @@ Unattributed — never silently dropped, never silently misattributed.
 from __future__ import annotations
 
 import datetime as dt
+from collections import defaultdict
 
-from . import build, credentials, okta, seatpricing
+from . import build, credentials, entra, okta, seatpricing
 from .db import app_dsn, connect, tenant_tx
+
+#: Identity providers we can read seat rosters from (provider -> credential type).
+IDP_PROVIDERS = {"okta", "entra"}
 
 
 class SeatSourceError(Exception):
     pass
+
+
+def _idp_client(provider: str, secret: str):
+    """Build the right IdP client; both expose list_app_users() -> normalized roster."""
+    if provider == "okta":
+        domain, token = okta.parse_okta_credential(secret)
+        return okta.OktaClient(domain, token)
+    if provider == "entra":
+        return entra.EntraClient(**entra.parse_entra_credential(secret))
+    raise SeatSourceError(f"Unknown identity provider: {provider}")
 
 
 def register_seat_source(
@@ -92,15 +106,10 @@ def _resolve_login(okta_user: dict, actors_lower: dict) -> str:
 
 
 def sync_idp_seats(tenant_id: str, period: dt.date) -> dict:
-    """Pull every registered seat source's roster and allocate it to features."""
-    secret = credentials.get_secret(tenant_id, "okta")
-    if not secret:
-        raise SeatSourceError("Connect Okta before syncing seats.")
-    domain, token = okta.parse_okta_credential(secret)
-
+    """Pull every registered seat source's roster (any IdP) and allocate to features."""
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         sources = conn.execute(
-            "SELECT app_id, app_label, tool, plan FROM seat_source WHERE provider = 'okta'"
+            "SELECT provider, app_id, app_label, tool, plan FROM seat_source"
         ).fetchall()
         actors_lower = {
             r[0].lower(): r[0]
@@ -109,25 +118,34 @@ def sync_idp_seats(tenant_id: str, period: dt.date) -> dict:
             ).fetchall()
         }
 
+    by_provider: dict[str, list] = defaultdict(list)
+    for provider, app_id, app_label, tool, plan in sources:
+        by_provider[provider].append((app_id, app_label, tool, plan))
+
     spends: list[build.DeveloperSpend] = []
     per_source: list[dict] = []
-    with okta.OktaClient(domain, token) as client:
-        for app_id, app_label, tool, plan in sources:
-            users = client.list_app_users(app_id)
-            price = seatpricing.seat_price(tool, plan)
-            seats = 0
-            for user in users:
-                spends.append(build.DeveloperSpend(_resolve_login(user, actors_lower), tool, price))
-                seats += 1
-            per_source.append(
-                {
-                    "app_label": app_label or app_id,
-                    "tool": tool,
-                    "plan": plan,
-                    "seats": seats,
-                    "seat_price": float(price),
-                }
-            )
+    for provider, srcs in by_provider.items():
+        secret = credentials.get_secret(tenant_id, provider)
+        if not secret:
+            raise SeatSourceError(f"Connect {provider} before syncing its seats.")
+        with _idp_client(provider, secret) as client:
+            for app_id, app_label, tool, plan in srcs:
+                users = client.list_app_users(app_id)
+                price = seatpricing.seat_price(tool, plan)
+                for user in users:
+                    spends.append(
+                        build.DeveloperSpend(_resolve_login(user, actors_lower), tool, price)
+                    )
+                per_source.append(
+                    {
+                        "provider": provider,
+                        "app_label": app_label or app_id,
+                        "tool": tool,
+                        "plan": plan,
+                        "seats": len(users),
+                        "seat_price": float(price),
+                    }
+                )
 
     if spends:
         summary = build.allocate_and_store(tenant_id, spends, period)
