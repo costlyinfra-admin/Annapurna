@@ -32,6 +32,8 @@ KNOWN_CONNECTORS = [
     # Cloud-cost connector: Amazon Bedrock spend via AWS Cost Explorer.
     {"type": "bedrock", "name": "Amazon Bedrock (AWS cost)", "category": "inference"},
     {"type": "cursor", "name": "Cursor for Teams", "category": "build_activity"},
+    # Identity provider for SSO/SCIM seat rosters (Cursor, Tabnine, Cody, …).
+    {"type": "okta", "name": "Okta (SSO seats)", "category": "build_activity"},
 ]
 _KNOWN_TYPES = {c["type"] for c in KNOWN_CONNECTORS}
 

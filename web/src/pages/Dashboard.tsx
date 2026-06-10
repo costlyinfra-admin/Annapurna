@@ -13,6 +13,7 @@ import {
   type ComputePool,
   type Dashboard as DashboardData,
   type DashboardRow,
+  type SeatSource,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
@@ -291,6 +292,12 @@ function DataActions({
   const [poolCost, setPoolCost] = useState("");
   const [pools, setPools] = useState<ComputePool[]>([]);
   const [copilotOwner, setCopilotOwner] = useState("");
+  const [oktaDomain, setOktaDomain] = useState("");
+  const [oktaToken, setOktaToken] = useState("");
+  const [seatAppId, setSeatAppId] = useState("");
+  const [seatTool, setSeatTool] = useState("cursor");
+  const [seatPlan, setSeatPlan] = useState("business");
+  const [seatSources, setSeatSources] = useState<SeatSource[]>([]);
   const [ftFeature, setFtFeature] = useState("");
   const [ftAmount, setFtAmount] = useState("");
   const [ftLabel, setFtLabel] = useState("");
@@ -318,12 +325,71 @@ function DataActions({
   }
 
   useEffect(() => {
-    if (open)
+    if (open) {
       api
         .listComputePools()
         .then(setPools)
         .catch(() => undefined);
+      api
+        .listSeatSources()
+        .then(setSeatSources)
+        .catch(() => undefined);
+    }
   }, [open]);
+
+  async function connectOkta() {
+    if (!oktaDomain.trim() || !oktaToken.trim()) {
+      setNote("Enter the Okta domain and an API token.");
+      return;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.saveCredential(
+        "okta",
+        JSON.stringify({ domain: oktaDomain.trim(), token: oktaToken.trim() }),
+      );
+      setOktaToken("");
+      setNote("Connected Okta. Add app→tool mappings below, then sync.");
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Could not connect Okta.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addSeatSource() {
+    if (!seatAppId.trim()) {
+      setNote("Enter the Okta application id to map.");
+      return;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.registerSeatSource(seatAppId.trim(), seatTool, seatTool, seatPlan.trim());
+      setSeatAppId("");
+      setSeatSources(await api.listSeatSources());
+      setNote("Added seat mapping.");
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Could not add mapping.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncSeats() {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await api.syncIdpSeats(monthParam);
+      setNote(`Synced ${r.total_seats} SSO seats → ${money(r.total)} build cost.`);
+      await onChanged();
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Seat sync failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function savePool() {
     const cost = parseFloat(poolCost);
@@ -457,6 +523,58 @@ function DataActions({
           Pulls per-developer seat assignments from GitHub and allocates them to features
           automatically. Needs a token with Copilot billing admin access.
         </span>
+      </div>
+      <div className="data-action">
+        <label>SSO seats via Okta (Cursor, Tabnine, Amazon Q, Gemini Code Assist…)</label>
+        <span className="inline">
+          <input
+            placeholder="Okta domain (acme.okta.com)"
+            value={oktaDomain}
+            onChange={(e) => setOktaDomain(e.target.value)}
+          />
+          <input
+            placeholder="API token"
+            type="password"
+            value={oktaToken}
+            onChange={(e) => setOktaToken(e.target.value)}
+          />
+          <button onClick={connectOkta} disabled={busy}>
+            Connect
+          </button>
+        </span>
+        <span className="inline">
+          <input
+            placeholder="Okta app id"
+            value={seatAppId}
+            onChange={(e) => setSeatAppId(e.target.value)}
+          />
+          <select value={seatTool} onChange={(e) => setSeatTool(e.target.value)}>
+            <option value="cursor">Cursor</option>
+            <option value="tabnine">Tabnine</option>
+            <option value="amazon_q">Amazon Q</option>
+            <option value="gemini_code_assist">Gemini Code Assist</option>
+          </select>
+          <input
+            placeholder="plan"
+            value={seatPlan}
+            onChange={(e) => setSeatPlan(e.target.value)}
+          />
+          <button onClick={addSeatSource} disabled={busy}>
+            Add mapping
+          </button>
+        </span>
+        {seatSources.length > 0 && (
+          <span className="inline pools-line">
+            <span className="muted">
+              {seatSources
+                .map((s) => `${s.app_label || s.app_id} → ${s.tool}/${s.plan}`)
+                .join("  ")}
+            </span>
+            <button onClick={syncSeats} disabled={busy}>
+              Sync seats
+            </button>
+          </span>
+        )}
       </div>
       <div className="data-action">
         <label>Import build cost (CSV: developer,tool,amount) — fallback</label>

@@ -30,6 +30,8 @@ from . import (
     features,
     hook,
     inference,
+    okta,
+    seats,
 )
 from .github import GitHubError
 from .providers import ProviderError
@@ -129,6 +131,18 @@ class ReconcileRequest(BaseModel):
 
 class CopilotSyncRequest(BaseModel):
     owner: str = Field(min_length=1, max_length=120)
+    period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+
+
+class SeatSourceRequest(BaseModel):
+    provider: str = Field(default="okta", pattern="^okta$")
+    app_id: str = Field(min_length=1, max_length=120)
+    app_label: str = Field(default="", max_length=120)
+    tool: str = Field(min_length=1, max_length=60)
+    plan: str = Field(min_length=1, max_length=60)
+
+
+class SeatSyncRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
@@ -459,6 +473,32 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub error: {exc}"
             ) from exc
+
+    # ---- SSO/SCIM seat sources (Phase 2 build cost) --------------------
+    @app.get("/api/build/seat-sources")
+    def list_seat_sources(user: CurrentUser) -> list[dict]:
+        return seats.list_seat_sources(user["tenant_id"])
+
+    @app.post("/api/build/seat-sources", status_code=status.HTTP_201_CREATED)
+    def register_seat_source(body: SeatSourceRequest, user: CurrentUser) -> dict:
+        try:
+            return seats.register_seat_source(
+                user["tenant_id"], body.provider, body.app_id, body.app_label, body.tool, body.plan
+            )
+        except seats.SeatSourceError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @app.post("/api/build/seats/sync")
+    def sync_idp_seats(body: SeatSyncRequest, user: CurrentUser) -> dict:
+        try:
+            return seats.sync_idp_seats(user["tenant_id"], _parse_period(body.period))
+        except seats.SeatSourceError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except okta.OktaError as exc:
+            detail = (
+                "Okta rejected the API token." if exc.status in (401, 403) else f"Okta error: {exc}"
+            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
 
     @app.post("/api/build/training")
     def record_training_cost(body: TrainingCostRequest, user: CurrentUser) -> dict:

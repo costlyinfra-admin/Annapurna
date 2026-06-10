@@ -17,6 +17,10 @@ vi.mock("../api", async (importActual) => {
       createComputePool: vi.fn(),
       allocateCompute: vi.fn(),
       syncCopilotSeats: vi.fn(),
+      listSeatSources: vi.fn(),
+      registerSeatSource: vi.fn(),
+      syncIdpSeats: vi.fn(),
+      saveCredential: vi.fn(),
     },
   };
 });
@@ -64,6 +68,8 @@ describe("Dashboard", () => {
     vi.clearAllMocks();
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
     vi.mocked(api.dashboard).mockResolvedValue(DATA);
+    vi.mocked(api.listComputePools).mockResolvedValue([]);
+    vi.mocked(api.listSeatSources).mockResolvedValue([]);
   });
 
   it("shows build and inference as separate columns, plus the Unattributed row", async () => {

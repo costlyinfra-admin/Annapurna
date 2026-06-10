@@ -125,6 +125,15 @@ export interface FeatureInference {
   trend: { period: string; amount: number }[];
 }
 
+export interface SeatSource {
+  id: string;
+  provider: string;
+  app_id: string;
+  app_label: string | null;
+  tool: string;
+  plan: string;
+}
+
 export interface ComputePool {
   id: string;
   name: string;
@@ -251,6 +260,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ csv, tool, period }),
     }),
+
+  // ---- SSO/SCIM seat sources (Okta) ----
+  listSeatSources: () => request<SeatSource[]>("/build/seat-sources"),
+
+  registerSeatSource: (appId: string, appLabel: string, tool: string, plan: string) =>
+    request<SeatSource>("/build/seat-sources", {
+      method: "POST",
+      body: JSON.stringify({ provider: "okta", app_id: appId, app_label: appLabel, tool, plan }),
+    }),
+
+  syncIdpSeats: (period?: string) =>
+    request<{
+      total: number;
+      total_seats: number;
+      sources: { app_label: string; seats: number }[];
+    }>("/build/seats/sync", { method: "POST", body: JSON.stringify({ period }) }),
 
   syncCopilotSeats: (owner: string, period?: string) =>
     request<{ total: number; seats: number; plan: string; seat_price: number }>(

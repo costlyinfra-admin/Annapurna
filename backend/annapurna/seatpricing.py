@@ -35,6 +35,14 @@ _SEAT_PRICES: dict[tuple[str, str], str] = {
 }
 
 
+#: Tools we have a seat price for (a seat source must map to one of these).
+KNOWN_TOOLS = {tool for (tool, _plan) in _SEAT_PRICES}
+
+
+def known_plans(tool: str) -> list[str]:
+    return sorted(plan for (t, plan) in _SEAT_PRICES if t == tool)
+
+
 def seat_price(tool: str, plan: str) -> Decimal:
     """Monthly USD price for one seat, or 0 for an unknown (tool, plan)."""
     rate = _SEAT_PRICES.get((tool, plan))
