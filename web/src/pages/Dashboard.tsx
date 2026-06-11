@@ -292,6 +292,7 @@ function DataActions({
   const [poolCost, setPoolCost] = useState("");
   const [pools, setPools] = useState<ComputePool[]>([]);
   const [copilotOwner, setCopilotOwner] = useState("");
+  const [cursorKey, setCursorKey] = useState("");
   const [idp, setIdp] = useState("okta");
   const [oktaDomain, setOktaDomain] = useState("");
   const [oktaToken, setOktaToken] = useState("");
@@ -340,6 +341,27 @@ function DataActions({
         .catch(() => undefined);
     }
   }, [open]);
+
+  async function syncCursor() {
+    setBusy(true);
+    setNote(null);
+    try {
+      if (cursorKey.trim()) {
+        // A freshly-entered admin key replaces the stored credential first.
+        await api.saveCredential("cursor", cursorKey.trim());
+        setCursorKey("");
+      }
+      const r = await api.syncCursorSpend(monthParam);
+      setNote(
+        `Synced Cursor spend: ${r.spending_members} of ${r.members} members with usage → ${money(r.total)} build cost.`,
+      );
+      await onChanged();
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Cursor sync failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function connectIdp() {
     let secret: string;
@@ -538,6 +560,24 @@ function DataActions({
         <span className="muted">
           Pulls per-developer seat assignments from GitHub and allocates them to features
           automatically. Needs a token with Copilot billing admin access.
+        </span>
+      </div>
+      <div className="data-action">
+        <label>Sync Cursor spend (admin API — actual usage dollars)</label>
+        <span className="inline">
+          <input
+            placeholder="Admin API key (kept from last sync if blank)"
+            type="password"
+            value={cursorKey}
+            onChange={(e) => setCursorKey(e.target.value)}
+          />
+          <button onClick={syncCursor} disabled={busy}>
+            Sync spend
+          </button>
+        </span>
+        <span className="muted">
+          Pulls each member's actual metered spend from Cursor's Admin API — more precise than the
+          SSO seat estimate below, and replaces it for the period.
         </span>
       </div>
       <div className="data-action">

@@ -283,6 +283,12 @@ export const api = {
       sources: { app_label: string; seats: number }[];
     }>("/build/seats/sync", { method: "POST", body: JSON.stringify({ period }) }),
 
+  syncCursorSpend: (period?: string) =>
+    request<{ total: number; members: number; spending_members: number }>("/build/cursor/sync", {
+      method: "POST",
+      body: JSON.stringify({ period }),
+    }),
+
   syncCopilotSeats: (owner: string, period?: string) =>
     request<{ total: number; seats: number; plan: string; seat_price: number }>(
       "/build/copilot/sync",
