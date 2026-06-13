@@ -59,8 +59,7 @@ body {
   font-size: 15px;
   line-height: 1.55;
   background:
-    radial-gradient(1100px 520px at 100% -10%, var(--bg-accent), transparent 60%),
-    var(--bg);
+    radial-gradient(1100px 520px at 100% -10%, var(--bg-accent), transparent 60%), var(--bg);
   min-height: 100vh;
 }
 
@@ -435,6 +434,16 @@ select {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Inside the cost-action panels, inputs/selects share the row and shrink so a
+   row never overflows the (narrower) onboarding card — buttons keep their size
+   and wrap to the next line if needed. */
+.data-action .inline > input,
+.data-action .inline > select {
+  flex: 1 1 10rem;
+  min-width: 0;
 }
 
 /* ---------- Badges ---------- */
