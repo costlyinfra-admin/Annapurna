@@ -21,7 +21,9 @@ from .db import app_dsn, connect, tenant_tx
 #: Connectors offered in the onboarding wizard. category drives how they're
 #: grouped in the UI; "build_activity" feeds build cost, "inference" feeds run cost.
 KNOWN_CONNECTORS = [
-    {"type": "github", "name": "GitHub", "category": "build_activity"},
+    # "features": powers feature discovery (the spine). The same credential also
+    # serves the Copilot seat sync on the build side; category is presentational.
+    {"type": "github", "name": "GitHub", "category": "features"},
     {"type": "anthropic", "name": "Anthropic", "category": "inference"},
     {"type": "openai", "name": "OpenAI", "category": "inference"},
     {"type": "google", "name": "Google Gemini", "category": "inference"},

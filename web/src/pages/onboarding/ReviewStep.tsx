@@ -1,5 +1,5 @@
 /**
- * Wizard Step 2 — review auto-discovered features.
+ * Review auto-discovered features (part of the "Identify features" step).
  *
  * Runs discovery against a GitHub org, then lets the user curate the proposals:
  * rename, delete, split (one proposal is really two), merge (two are one), and
@@ -96,8 +96,8 @@ export function ReviewStep() {
         </button>
       </div>
       <p className="muted hint-inline">
-        No token needed for <strong>public</strong> organizations. Connect GitHub (previous step)
-        for private repos and higher rate limits.
+        No token needed for <strong>public</strong> organizations. Connect GitHub above for private
+        repos and higher rate limits.
       </p>
       {summary && <p className="summary">{summary}</p>}
       {error && (
@@ -113,8 +113,8 @@ export function ReviewStep() {
           <p className="empty-title">No features discovered yet</p>
           <p className="muted">
             Enter a GitHub organization above and run analysis. Public orgs work without a token;
-            connect GitHub for private repos. Proposals appear here with their PR evidence and a
-            confidence badge.
+            connect GitHub above for private repos. Proposals appear here with their PR evidence and
+            a confidence badge.
           </p>
         </div>
       ) : (

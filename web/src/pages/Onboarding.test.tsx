@@ -17,6 +17,8 @@ vi.mock("../api", async (importActual) => {
       listFeatures: vi.fn(),
       runDiscovery: vi.fn(),
       confirmOnboarding: vi.fn(),
+      listSeatSources: vi.fn(),
+      listComputePools: vi.fn(),
     },
   };
 });
@@ -36,55 +38,67 @@ describe("Onboarding wizard shell", () => {
     vi.clearAllMocks();
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
     vi.mocked(api.connectors).mockResolvedValue([
-      { type: "github", name: "GitHub", category: "build_activity", connected: false },
+      { type: "github", name: "GitHub", category: "features", connected: false },
       { type: "anthropic", name: "Anthropic", category: "inference", connected: false },
     ]);
-    vi.mocked(api.listFeatures).mockResolvedValue([]); // empty states in Review/Confirm
+    vi.mocked(api.listFeatures).mockResolvedValue([]); // empty states
+    vi.mocked(api.listSeatSources).mockResolvedValue([]);
+    vi.mocked(api.listComputePools).mockResolvedValue([]);
   });
 
-  it("walks Connect -> Review -> Confirm and back", async () => {
+  it("walks Features -> Build -> Inference -> Confirm and back", async () => {
     renderOnboarding();
 
-    // Step 1: Connect — connectors load from the API.
-    expect(await screen.findByRole("heading", { name: "Connect your sources" })).toBeInTheDocument();
+    // Step 1: Identify features — GitHub connect + discovery/curation together.
+    expect(await screen.findByRole("heading", { name: "Identify features" })).toBeInTheDocument();
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
-    expect(screen.getByText("Anthropic")).toBeInTheDocument();
-
-    // Step 2: Review — empty state.
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByRole("heading", { name: "Review auto-discovered features" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Review auto-discovered features" }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("No features discovered yet")).toBeInTheDocument();
 
-    // Step 3: Confirm — go-live step.
+    // Step 2: Build cost sources — embedded sync panels.
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByRole("heading", { name: "Build cost sources" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync spend" })).toBeInTheDocument(); // Cursor
+    expect(screen.getByPlaceholderText("GitHub organization")).toBeInTheDocument(); // Copilot
+
+    // Step 3: Inference cost sources — connectors + sync panel.
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(
+      await screen.findByRole("heading", { name: "Inference cost sources" }),
+    ).toBeInTheDocument();
+    expect((await screen.findAllByText("Anthropic")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Sync" })).toBeInTheDocument();
+
+    // Step 4: Confirm & go live.
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("heading", { name: "Confirm & go live" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Confirm & go live" })).toBeInTheDocument();
 
-    // Back returns to Review.
+    // Back returns to Inference.
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(
-      await screen.findByRole("heading", { name: "Review auto-discovered features" }),
+      await screen.findByRole("heading", { name: "Inference cost sources" }),
     ).toBeInTheDocument();
   });
 
-  it("saves a pasted credential through the Connect step", async () => {
+  it("saves a pasted GitHub credential on the features step", async () => {
     vi.mocked(api.saveCredential).mockResolvedValue(undefined);
     renderOnboarding();
 
     const connectButtons = await screen.findAllByRole("button", { name: "Connect" });
-    fireEvent.click(connectButtons[0]); // GitHub
+    fireEvent.click(connectButtons[0]); // GitHub (the only connector on step 1)
 
     fireEvent.change(screen.getByLabelText("GitHub token"), { target: { value: "ghp_token" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() =>
-      expect(api.saveCredential).toHaveBeenCalledWith("github", "ghp_token"),
-    );
+    await waitFor(() => expect(api.saveCredential).toHaveBeenCalledWith("github", "ghp_token"));
   });
 
   it("renders a connector as Connected when the API says so", async () => {
     vi.mocked(api.connectors).mockResolvedValue([
-      { type: "github", name: "GitHub", category: "build_activity", connected: true },
+      { type: "github", name: "GitHub", category: "features", connected: true },
     ]);
     renderOnboarding();
     expect(await screen.findByText("Connected")).toBeInTheDocument();

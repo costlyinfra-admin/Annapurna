@@ -290,7 +290,11 @@ export function BuildCostActions({
             <option value="amazon_q">Amazon Q</option>
             <option value="gemini_code_assist">Gemini Code Assist</option>
           </select>
-          <input placeholder="plan" value={seatPlan} onChange={(e) => setSeatPlan(e.target.value)} />
+          <input
+            placeholder="plan"
+            value={seatPlan}
+            onChange={(e) => setSeatPlan(e.target.value)}
+          />
           <button onClick={addSeatSource} disabled={busy}>
             Add mapping
           </button>

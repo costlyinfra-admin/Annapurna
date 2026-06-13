@@ -9,7 +9,14 @@ vi.mock("./api", async (importActual) => {
   const actual = await importActual<typeof import("./api")>();
   return {
     ...actual,
-    api: { me: vi.fn(), connectors: vi.fn(), logout: vi.fn(), login: vi.fn(), signup: vi.fn() },
+    api: {
+      me: vi.fn(),
+      connectors: vi.fn(),
+      logout: vi.fn(),
+      login: vi.fn(),
+      signup: vi.fn(),
+      listFeatures: vi.fn(),
+    },
   };
 });
 
@@ -37,7 +44,8 @@ describe("App routing", () => {
   it("sends authenticated users into onboarding", async () => {
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
     vi.mocked(api.connectors).mockResolvedValue([]);
+    vi.mocked(api.listFeatures).mockResolvedValue([]);
     renderApp();
-    expect(await screen.findByRole("heading", { name: "Connect your sources" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Identify features" })).toBeInTheDocument();
   });
 });

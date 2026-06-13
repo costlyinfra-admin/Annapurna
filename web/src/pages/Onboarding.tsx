@@ -1,19 +1,24 @@
 /**
- * Onboarding wizard shell — three steps: Connect → Review → Confirm.
- *
- * M2 ships the shell with empty states. Real feature discovery (Review) arrives
- * with the GitHub connector in M3; provider cost ingest in M4. The "Connect"
- * step is wired to the encrypted credential store so the flow is real today.
+ * Onboarding wizard shell — four purpose-driven steps that mirror the product's
+ * mental model: ① identify features (the spine, via GitHub + discovery),
+ * ② build cost sources, ③ inference cost sources, ④ confirm & go live.
+ * Every step is skippable; sources can always be added later from the dashboard.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, ApiError, type ConnectorStatus } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { DEMO_EMAIL } from "../demo";
+import { BuildStep } from "./onboarding/BuildStep";
 import { ConfirmStep } from "./onboarding/ConfirmStep";
-import { ReviewStep } from "./onboarding/ReviewStep";
+import { FeaturesStep } from "./onboarding/FeaturesStep";
+import { InferenceStep } from "./onboarding/InferenceStep";
 
-const STEPS = ["Connect sources", "Review features", "Confirm & go live"];
+const STEPS = [
+  "Identify features",
+  "Build cost sources",
+  "Inference cost sources",
+  "Confirm & go live",
+];
 
 export function Onboarding() {
   const [step, setStep] = useState(0);
@@ -33,8 +38,8 @@ export function Onboarding() {
       {isDemo && (
         <div className="demo-banner" role="status">
           <span>
-            👋 You're viewing the <strong>demo</strong>. You don't need to connect sources or
-            review features — the data is already loaded.
+            👋 You're viewing the <strong>demo</strong>. You don't need to connect sources or review
+            features — the data is already loaded.
           </span>
           <button onClick={() => navigate("/dashboard")}>Skip to the demo dashboard →</button>
         </div>
@@ -42,7 +47,11 @@ export function Onboarding() {
 
       <ol className="stepper">
         {STEPS.map((label, i) => (
-          <li key={label} className={i === step ? "active" : i < step ? "done" : ""} aria-current={i === step}>
+          <li
+            key={label}
+            className={i === step ? "active" : i < step ? "done" : ""}
+            aria-current={i === step}
+          >
             <span className="step-num">{i + 1}</span>
             {label}
           </li>
@@ -50,13 +59,18 @@ export function Onboarding() {
       </ol>
 
       <section className="wizard-body">
-        {step === 0 && <ConnectStep />}
-        {step === 1 && <ReviewStep />}
-        {step === 2 && <ConfirmStep onFinish={() => navigate("/dashboard")} />}
+        {step === 0 && <FeaturesStep />}
+        {step === 1 && <BuildStep />}
+        {step === 2 && <InferenceStep />}
+        {step === 3 && <ConfirmStep onFinish={() => navigate("/dashboard")} />}
       </section>
 
       <footer className="wizard-nav">
-        <button className="secondary" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}>
+        <button
+          className="secondary"
+          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          disabled={step === 0}
+        >
           Back
         </button>
         {step < STEPS.length - 1 ? (
@@ -66,95 +80,3 @@ export function Onboarding() {
     </div>
   );
 }
-
-function ConnectStep() {
-  const [connectors, setConnectors] = useState<ConnectorStatus[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function refresh() {
-    try {
-      setConnectors(await api.connectors());
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load connectors.");
-    }
-  }
-
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  return (
-    <div>
-      <h2>Connect your sources</h2>
-      <p className="muted">
-        Connect GitHub and at least one AI provider to get started. Everything is read-only and
-        stored encrypted. You can add more later.
-      </p>
-      {error && <p className="error" role="alert">{error}</p>}
-      {connectors === null ? (
-        <p className="muted">Loading…</p>
-      ) : (
-        <ul className="connector-list">
-          {connectors.map((c) => (
-            <ConnectorRow key={c.type} connector={c} onConnected={refresh} />
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function ConnectorRow({
-  connector,
-  onConnected,
-}: {
-  connector: ConnectorStatus;
-  onConnected: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [secret, setSecret] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    if (!secret) return;
-    setSaving(true);
-    try {
-      await api.saveCredential(connector.type, secret);
-      setSecret("");
-      setOpen(false);
-      onConnected();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <li className="connector-row">
-      <div className="connector-info">
-        <span className="connector-name">{connector.name}</span>
-        <span className="connector-category">{connector.category.replace("_", " ")}</span>
-      </div>
-      {connector.connected ? (
-        <span className="badge connected">Connected</span>
-      ) : open ? (
-        <span className="connector-form">
-          <input
-            type="password"
-            placeholder="Paste access token"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            aria-label={`${connector.name} token`}
-          />
-          <button onClick={save} disabled={saving || !secret}>
-            {saving ? "…" : "Save"}
-          </button>
-        </span>
-      ) : (
-        <button className="secondary" onClick={() => setOpen(true)}>
-          Connect
-        </button>
-      )}
-    </li>
-  );
-}
-
