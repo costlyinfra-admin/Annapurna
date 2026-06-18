@@ -24,6 +24,42 @@ honest **Unattributed** bucket rather than being faked.
 
 ---
 
+## What to generate and send — your setup
+
+Your stack — **GitHub (private repos)**, **Claude Code** on **Claude Team**,
+**Anthropic** in production, **Modal**, **Vercel** — needs just **two
+credentials**. Create them and send them over a **secure channel** (e.g. a
+1Password share — not plain email/Slack). Both are read-only; revoke after
+testing.
+
+**1. GitHub token** (read access to private repos)
+- GitHub → avatar (top-right) → **Settings** → **Developer settings** (bottom of
+  left nav) → **Personal access tokens** → **Fine-grained tokens** →
+  **Generate new token**.
+- **Resource owner:** your organization. **Repository access:** *All repositories*
+  (or just the ones you ship). **Permissions** (set each to **Read-only**):
+  **Metadata**, **Contents**, **Pull requests**.
+- **Expiration:** 30 days is plenty. Generate → **send me the token**.
+- *Simpler alternative:* a **classic** token with the **`repo`** and **`read:org`**
+  scopes.
+
+**2. Anthropic Admin API key** — covers **both** Claude Code build cost and any
+production Claude inference (one key, both sides).
+- <https://console.anthropic.com> → **Settings** → **Admin Keys** (you must be an
+  org **owner/admin**) → **Create Admin Key**.
+- **Send me the `sk-ant-admin-…` key.**
+
+**Optional — Modal:** only if you run your **LLMs** on Modal (not just app
+compute): send the **monthly $** for that GPU usage (modal.com → **Settings** →
+**Usage/Billing**). No key needed.
+
+**Vercel:** nothing needed — it's app hosting, not an AI cost.
+
+Those two tokens (plus the optional Modal figure) are everything I need to set up
+your full build + inference picture.
+
+---
+
 ## 1. GitHub — required (feature discovery + private repos)
 
 Powers step 1. With a token, it reads **private** repos too. Discovery looks at
