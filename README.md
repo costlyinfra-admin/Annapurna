@@ -14,7 +14,7 @@ consumed it: what each feature cost to **build** (AI coding tools) and to **run*
 ![Node](https://img.shields.io/badge/node-18%2B-green)
 ![Postgres](https://img.shields.io/badge/postgres-16-blue)
 
-[**Live demo**](https://annapurna.costlyinfra.com) · [Design doc](docs/annapurna-design-doc.md) · [Deploy guide](docs/deploy.md) · [Contributing](CONTRIBUTING.md)
+[**Live demo**](https://annapurna.costlyinfra.com) · [Design doc](docs/annapurna-design-doc.md) · [Testing with real accounts](docs/testing-with-real-accounts.md) · [Deploy guide](docs/deploy.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
