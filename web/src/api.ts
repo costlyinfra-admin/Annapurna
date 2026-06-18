@@ -283,6 +283,12 @@ export const api = {
       sources: { app_label: string; seats: number }[];
     }>("/build/seats/sync", { method: "POST", body: JSON.stringify({ period }) }),
 
+  syncClaudeCodeSpend: (period?: string) =>
+    request<{ total: number; members: number; spending_members: number }>(
+      "/build/claude-code/sync",
+      { method: "POST", body: JSON.stringify({ period }) },
+    ),
+
   syncCursorSpend: (period?: string) =>
     request<{ total: number; members: number; spending_members: number }>("/build/cursor/sync", {
       method: "POST",

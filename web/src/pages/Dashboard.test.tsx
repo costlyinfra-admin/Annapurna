@@ -18,6 +18,7 @@ vi.mock("../api", async (importActual) => {
       allocateCompute: vi.fn(),
       syncCopilotSeats: vi.fn(),
       syncCursorSpend: vi.fn(),
+      syncClaudeCodeSpend: vi.fn(),
       listSeatSources: vi.fn(),
       registerSeatSource: vi.fn(),
       syncIdpSeats: vi.fn(),
@@ -138,6 +139,22 @@ describe("Dashboard", () => {
     await waitFor(() =>
       expect(api.createComputePool).toHaveBeenCalledWith("Llama-3.1-70B", "self_hosted", 18000),
     );
+  });
+
+  it("syncs Claude Code spend via the Anthropic admin API", async () => {
+    vi.mocked(api.syncClaudeCodeSpend).mockResolvedValue({
+      total: 231,
+      members: 4,
+      spending_members: 3,
+    });
+    renderDashboard();
+    await screen.findAllByRole("link", { name: "AI threat triage" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add cost data" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sync Claude Code" }));
+
+    await waitFor(() => expect(api.syncClaudeCodeSpend).toHaveBeenCalledWith("2026-05"));
+    expect(await screen.findByText(/3 of 4 developers/)).toBeInTheDocument();
   });
 
   it("syncs Cursor usage spend via the admin API", async () => {

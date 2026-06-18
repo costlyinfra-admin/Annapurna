@@ -29,6 +29,7 @@ export function BuildCostActions({
   const [tool, setTool] = useState("cursor");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [claudeKey, setClaudeKey] = useState("");
   const [copilotOwner, setCopilotOwner] = useState("");
   const [cursorKey, setCursorKey] = useState("");
   const [idp, setIdp] = useState("okta");
@@ -52,6 +53,27 @@ export function BuildCostActions({
       .then(setSeatSources)
       .catch(() => undefined);
   }, []);
+
+  async function syncClaudeCode() {
+    setBusy(true);
+    setNote(null);
+    try {
+      if (claudeKey.trim()) {
+        // A freshly-entered admin key updates the shared Anthropic credential.
+        await api.saveCredential("anthropic", claudeKey.trim());
+        setClaudeKey("");
+      }
+      const r = await api.syncClaudeCodeSpend(monthParam);
+      setNote(
+        `Synced Claude Code spend: ${r.spending_members} of ${r.members} developers → ${money(r.total)} build cost.`,
+      );
+      await onChanged();
+    } catch (err) {
+      setNote(err instanceof ApiError ? err.message : "Claude Code sync failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function syncCopilot() {
     if (!copilotOwner.trim()) {
@@ -198,6 +220,25 @@ export function BuildCostActions({
 
   return (
     <>
+      <div className="data-action">
+        <label>Sync Claude Code spend (Anthropic admin API — per developer)</label>
+        <span className="inline">
+          <input
+            placeholder="Anthropic admin key (sk-ant-admin…, reuses your Anthropic connection)"
+            type="password"
+            value={claudeKey}
+            onChange={(e) => setClaudeKey(e.target.value)}
+          />
+          <button onClick={syncClaudeCode} disabled={busy}>
+            Sync Claude Code
+          </button>
+        </span>
+        <span className="muted">
+          Pulls each developer's Claude Code cost from Anthropic's Admin API and allocates it to
+          features by PR authorship. Reuses the Anthropic admin key (same as inference); leave blank
+          if already connected.
+        </span>
+      </div>
       <div className="data-action">
         <label>Sync GitHub Copilot seats (build cost — no CSV)</label>
         <span className="inline">

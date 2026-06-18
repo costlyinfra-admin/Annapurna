@@ -23,6 +23,7 @@ from . import (
     __version__,
     auth,
     build,
+    claudecode,
     compute,
     credentials,
     cursorspend,
@@ -500,6 +501,20 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=f"Identity provider error: {exc}"
             ) from exc
+
+    @app.post("/api/build/claude-code/sync")
+    def sync_claude_code_spend(body: SeatSyncRequest, user: CurrentUser) -> dict:
+        try:
+            return claudecode.import_claude_code_spend(
+                user["tenant_id"], _parse_period(body.period)
+            )
+        except claudecode.ClaudeCodeError as exc:
+            code = (
+                status.HTTP_400_BAD_REQUEST
+                if exc.status in (None, 401, 403)
+                else status.HTTP_502_BAD_GATEWAY
+            )
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
 
     @app.post("/api/build/cursor/sync")
     def sync_cursor_spend(body: SeatSyncRequest, user: CurrentUser) -> dict:
