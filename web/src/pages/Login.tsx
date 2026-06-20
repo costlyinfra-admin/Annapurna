@@ -16,11 +16,9 @@ export function Login() {
     setDemoBusy(true);
     try {
       await login(DEMO_EMAIL, DEMO_PASSWORD);
-      navigate("/dashboard");
+      navigate("/");
     } catch (err) {
-      setDemoError(
-        err instanceof ApiError ? err.message : "The demo isn't available right now.",
-      );
+      setDemoError(err instanceof ApiError ? err.message : "The demo isn't available right now.");
       setDemoBusy(false);
     }
   }

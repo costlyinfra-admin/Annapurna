@@ -25,9 +25,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="page-center">
           <div className="auth-card">
             <h2>Something went wrong</h2>
-            <p className="muted">
-              The page hit an unexpected error. Reloading usually fixes it.
-            </p>
+            <p className="muted">The page hit an unexpected error. Reloading usually fixes it.</p>
             <button onClick={() => window.location.assign("/")}>Reload</button>
           </div>
         </div>

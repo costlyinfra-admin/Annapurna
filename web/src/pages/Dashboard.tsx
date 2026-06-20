@@ -8,14 +8,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError, type Dashboard as DashboardData, type DashboardRow } from "../api";
-import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
-import { BuildCostActions } from "../components/BuildCostActions";
-import { InferenceActions } from "../components/InferenceActions";
+import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import { compact, money, num } from "../format";
 
 export function Dashboard() {
-  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,127 +29,119 @@ export function Dashboard() {
     load();
   }, [load]);
 
+  const hasFeatures = !!data && data.features.length > 0;
+  const hasBuild = !!data && data.totals.build_cost > 0;
+  const hasInference = !!data && data.totals.inference_cost > 0;
+  const setupComplete = hasFeatures && hasBuild && hasInference;
+
   return (
-    <div className="page">
-      <header className="topbar">
-        <span className="brand">Annapurna</span>
-        <span className="muted">{user?.email}</span>
-        <button className="link" onClick={() => logout().then(() => navigate("/login"))}>
-          Sign out
-        </button>
-      </header>
+    <div className="content">
+      <div className="dash-head">
+        <h1>Overview</h1>
+        {data && <span className="muted">Period {data.period}</span>}
+      </div>
 
-      <main>
-        <div className="dash-head">
-          <h1>Features</h1>
-          {data && <span className="muted">Period {data.period}</span>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {data && !setupComplete && (
+        <OnboardingChecklist
+          hasFeatures={hasFeatures}
+          hasBuild={hasBuild}
+          hasInference={hasInference}
+        />
+      )}
+
+      {data && <ExecutiveSummary data={data} />}
+
+      {data && <KeyInsights insights={data.insights} />}
+
+      {data && (
+        <div className="totals-strip">
+          <div className="total-card">
+            <span className="total-label">Build cost</span>
+            <span className="total-value">{money(data.totals.build_cost)}</span>
+            <span className="muted">one-time-ish</span>
+          </div>
+          <div className="total-card">
+            <span className="total-label">Inference cost</span>
+            <span className="total-value">{money(data.totals.inference_cost)}</span>
+            <span className="muted">monthly</span>
+          </div>
         </div>
+      )}
 
-        {error && (
-          <p className="error" role="alert">
-            {error}
+      {data === null && !error ? (
+        <p className="muted">Loading…</p>
+      ) : data && data.features.length === 0 ? (
+        <div className="empty-state">
+          <p className="empty-title">No features yet</p>
+          <p className="muted">
+            Your dashboard fills in as you finish setup above — start by discovering features.
           </p>
-        )}
-
-        {data && <ExecutiveSummary data={data} />}
-
-        {data && <KeyInsights insights={data.insights} />}
-
-        {data && (
-          <div className="totals-strip">
-            <div className="total-card">
-              <span className="total-label">Build cost</span>
-              <span className="total-value">{money(data.totals.build_cost)}</span>
-              <span className="muted">one-time-ish</span>
-            </div>
-            <div className="total-card">
-              <span className="total-label">Inference cost</span>
-              <span className="total-value">{money(data.totals.inference_cost)}</span>
-              <span className="muted">monthly</span>
-            </div>
-          </div>
-        )}
-
-        <DataActions period={data?.period} features={data?.features ?? []} onChanged={load} />
-
-        {data &&
-          data.features.length > 0 &&
-          data.totals.build_cost === 0 &&
-          data.totals.inference_cost === 0 && (
-            <p className="hint" role="status">
-              Your features are confirmed, but no cost is synced yet. Use{" "}
-              <strong>Add cost data</strong> above to sync inference and import build cost.
-            </p>
-          )}
-
-        {data === null && !error ? (
-          <p className="muted">Loading…</p>
-        ) : data && data.features.length === 0 ? (
-          <div className="empty-state">
-            <p className="empty-title">No features yet</p>
-            <p className="muted">Confirm features in onboarding, then sync your cost sources.</p>
-            <button onClick={() => navigate("/onboarding")}>Go to onboarding</button>
-          </div>
-        ) : data ? (
-          <table className="features-table">
-            <thead>
-              <tr>
-                <th>Feature</th>
-                <th className="num">Build cost</th>
-                <th className="num">Inference / mo</th>
-                <th className="num">Active users</th>
-                <th className="num">Cost / user</th>
-                <th className="num">Requests</th>
-                <th>Worth it?</th>
-                <th>Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.features.map((f) => (
-                <tr
-                  key={f.feature_id}
-                  className="feature-row"
-                  onClick={() => navigate(`/features/${f.feature_id}`)}
-                >
-                  <td>
-                    <Link to={`/features/${f.feature_id}`} onClick={(e) => e.stopPropagation()}>
-                      {f.name}
-                    </Link>
-                  </td>
-                  <td className="num">{money(f.build_cost)}</td>
-                  <td className="num">{money(f.inference_cost)}</td>
-                  <td className="num">{num(f.active_users)}</td>
-                  <td className="num">{money(f.cost_per_user)}</td>
-                  <td className="num" title="AI model calls this feature made">
-                    {compact(f.requests)}
-                  </td>
-                  <td>
-                    <WorthBadge value={f.worth_it} />
-                  </td>
-                  <td>
-                    <ConfidenceBadge level={f.confidence} />
-                  </td>
-                </tr>
-              ))}
-              <tr className="unattributed-row">
-                <td>Unattributed</td>
-                <td className="num">{money(data.unattributed.build_cost)}</td>
-                <td className="num">{money(data.unattributed.inference_cost)}</td>
-                <td className="num">—</td>
-                <td className="num">—</td>
-                <td className="num">—</td>
-                <td colSpan={2} className="muted">
-                  spend not yet mapped to a feature
+        </div>
+      ) : data ? (
+        <table className="features-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th className="num">Build cost</th>
+              <th className="num">Inference / mo</th>
+              <th className="num">Active users</th>
+              <th className="num">Cost / user</th>
+              <th className="num">Requests</th>
+              <th>Worth it?</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.features.map((f) => (
+              <tr
+                key={f.feature_id}
+                className="feature-row"
+                onClick={() => navigate(`/features/${f.feature_id}`)}
+              >
+                <td>
+                  <Link to={`/features/${f.feature_id}`} onClick={(e) => e.stopPropagation()}>
+                    {f.name}
+                  </Link>
+                </td>
+                <td className="num">{money(f.build_cost)}</td>
+                <td className="num">{money(f.inference_cost)}</td>
+                <td className="num">{num(f.active_users)}</td>
+                <td className="num">{money(f.cost_per_user)}</td>
+                <td className="num" title="AI model calls this feature made">
+                  {compact(f.requests)}
+                </td>
+                <td>
+                  <WorthBadge value={f.worth_it} />
+                </td>
+                <td>
+                  <ConfidenceBadge level={f.confidence} />
                 </td>
               </tr>
-            </tbody>
-          </table>
-        ) : null}
+            ))}
+            <tr className="unattributed-row">
+              <td>Unattributed</td>
+              <td className="num">{money(data.unattributed.build_cost)}</td>
+              <td className="num">{money(data.unattributed.inference_cost)}</td>
+              <td className="num">—</td>
+              <td className="num">—</td>
+              <td className="num">—</td>
+              <td colSpan={2} className="muted">
+                spend not yet mapped to a feature
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      ) : null}
 
-        <p className="muted legend">
-          "Worth it?" is directional (cost per active user), not a revenue-based ROI.
-        </p>
-      </main>
+      <p className="muted legend">
+        "Worth it?" is directional (cost per active user), not a revenue-based ROI.
+      </p>
     </div>
   );
 }
@@ -264,35 +253,5 @@ function ExecEmpty({ note }: { note: string }) {
       <span className="exec-value muted">—</span>
       <span className="exec-sub">{note}</span>
     </>
-  );
-}
-
-function DataActions({
-  period,
-  features,
-  onChanged,
-}: {
-  period?: string;
-  features: DashboardRow[];
-  onChanged: () => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-
-  if (!open) {
-    return (
-      <button className="secondary add-data-toggle" onClick={() => setOpen(true)}>
-        Add cost data
-      </button>
-    );
-  }
-
-  return (
-    <div className="data-actions">
-      <InferenceActions period={period} onChanged={onChanged} />
-      <BuildCostActions period={period} features={features} onChanged={onChanged} />
-      <button className="link" onClick={() => setOpen(false)}>
-        Close
-      </button>
-    </div>
   );
 }

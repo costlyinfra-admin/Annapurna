@@ -35,7 +35,13 @@ const DETAIL = {
     },
   ],
   evidence: [
-    { signal_type: "pr", external_ref: "acme/core#1421", confidence: "high", actor: "alice", source: "github" },
+    {
+      signal_type: "pr",
+      external_ref: "acme/core#1421",
+      confidence: "high",
+      actor: "alice",
+      source: "github",
+    },
   ],
   inference_sources: ["cost_api"],
   optimization: {

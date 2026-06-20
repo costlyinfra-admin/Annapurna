@@ -16,6 +16,7 @@ vi.mock("./api", async (importActual) => {
       login: vi.fn(),
       signup: vi.fn(),
       listFeatures: vi.fn(),
+      dashboard: vi.fn(),
     },
   };
 });
@@ -41,11 +42,19 @@ describe("App routing", () => {
     expect(screen.getByRole("button", { name: "View the demo" })).toBeInTheDocument();
   });
 
-  it("sends authenticated users into onboarding", async () => {
+  it("sends authenticated users into the app shell on the Overview", async () => {
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
-    vi.mocked(api.connectors).mockResolvedValue([]);
-    vi.mocked(api.listFeatures).mockResolvedValue([]);
+    vi.mocked(api.dashboard).mockResolvedValue({
+      period: "2026-05-01",
+      features: [],
+      unattributed: { build_cost: 0, inference_cost: 0 },
+      highlights: { most_expensive: null, optimization: null, highest_cost_per_user: null },
+      insights: [],
+      totals: { build_cost: 0, inference_cost: 0 },
+    });
     renderApp();
-    expect(await screen.findByRole("heading", { name: "Identify features" })).toBeInTheDocument();
+    // The Overview page + the sidebar nav both render (proves the shell).
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cost sources" })).toBeInTheDocument();
   });
 });

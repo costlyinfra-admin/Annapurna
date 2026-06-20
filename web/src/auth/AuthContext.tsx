@@ -34,8 +34,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const signup = async (email: string, password: string) => setUser(await api.signup(email, password));
-  const login = async (email: string, password: string) => setUser(await api.login(email, password));
+  const signup = async (email: string, password: string) =>
+    setUser(await api.signup(email, password));
+  const login = async (email: string, password: string) =>
+    setUser(await api.login(email, password));
   const logout = async () => {
     await api.logout();
     setUser(null);

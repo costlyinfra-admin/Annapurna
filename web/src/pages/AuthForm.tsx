@@ -56,7 +56,11 @@ export function AuthForm({ title, submitLabel, onSubmit, footer, note }: AuthFor
             required
           />
         </label>
-        {error && <p className="error" role="alert">{error}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
         <button type="submit" disabled={submitting}>
           {submitting ? "…" : submitLabel}
         </button>

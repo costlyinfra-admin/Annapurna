@@ -6,9 +6,8 @@
  * Plus the evidence trail — the actual signals behind every number.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api, ApiError, type FeatureDetail as Detail, type FeatureInference } from "../api";
-import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge } from "../components/badges";
 import { compact, money, num } from "../format";
 
@@ -17,8 +16,6 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 export function FeatureDetail() {
   const { id = "" } = useParams();
-  const { logout } = useAuth();
-  const navigate = useNavigate();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,16 +39,10 @@ export function FeatureDetail() {
       : "connector-derived";
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <span className="brand">Annapurna</span>
-        <Link to="/dashboard" className="link">
-          ← All features
-        </Link>
-        <button className="link signout" onClick={() => logout().then(() => navigate("/login"))}>
-          Sign out
-        </button>
-      </header>
+    <div className="content">
+      <Link to="/" className="link breadcrumb">
+        ← All features
+      </Link>
 
       {error && (
         <p className="error" role="alert">
@@ -61,7 +52,7 @@ export function FeatureDetail() {
       {detail === null && !error ? (
         <p className="muted">Loading…</p>
       ) : detail ? (
-        <main>
+        <div>
           <h1>{detail.name}</h1>
           {detail.description && <p className="muted">{detail.description}</p>}
           <p className="detail-meta">
@@ -147,7 +138,7 @@ export function FeatureDetail() {
               </ul>
             )}
           </section>
-        </main>
+        </div>
       ) : null}
     </div>
   );
