@@ -52,19 +52,25 @@ describe("CostSourcesPage", () => {
     // controls all render.
     expect((await screen.findAllByText("Anthropic")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Save pool" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sync Claude Code" })).toBeInTheDocument();
+    // Build cost is now a list of collapsible method cards; the forms inside
+    // them stay hidden until a card is expanded.
+    expect(screen.getByRole("button", { name: /Usage-based tools/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /GitHub Copilot/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sync Claude Code" })).not.toBeInTheDocument();
     // The old standalone "Sync inference" dropdown is gone.
     expect(screen.queryByRole("button", { name: "Sync" })).not.toBeInTheDocument();
   });
 
-  it("syncs Claude Code spend (build) from here", async () => {
+  it("syncs Claude Code spend after opening the usage-based card", async () => {
     vi.mocked(api.syncClaudeCodeSpend).mockResolvedValue({
       total: 231,
       members: 4,
       spending_members: 3,
     });
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Sync Claude Code" }));
+    // Expand the "Usage-based tools" method card, then sync.
+    fireEvent.click(await screen.findByRole("button", { name: /Usage-based tools/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync Claude Code" }));
     await waitFor(() => expect(api.syncClaudeCodeSpend).toHaveBeenCalled());
     expect(await screen.findByText(/3 of 4 developers/)).toBeInTheDocument();
   });

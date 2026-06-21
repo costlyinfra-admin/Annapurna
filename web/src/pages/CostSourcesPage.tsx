@@ -87,8 +87,8 @@ export function CostSourcesPage() {
         <h2>Build cost</h2>
         <p className="muted">
           What your features cost to build — per-developer AI coding-tool spend, allocated to
-          features by who authored which PRs. Most precise first: Claude Code / Copilot / Cursor
-          connectors, SSO seats, then CSV as a fallback.
+          features by who authored which PRs. Pick whichever methods match your tools; each is
+          self-contained, and anything you skip simply lands in Unattributed.
         </p>
         <div className="data-actions">
           <BuildCostActions features={features} onChanged={refreshFeatures} />

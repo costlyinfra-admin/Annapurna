@@ -1212,6 +1212,100 @@ a.exec-value:hover {
   gap: 0.45rem;
 }
 
+/* Build-cost methods: one collapsible card per connect option. */
+.method-list {
+  list-style: none;
+  padding: 0;
+  margin: 1.1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.method-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.method-card:hover {
+  border-color: var(--line-strong);
+}
+
+.method-card.open {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.method-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.method-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.method-title {
+  font-weight: 600;
+}
+
+.method-tagline {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.method-toggle {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.method-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.9rem 1.1rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.method-help {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.method-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.method-block-title {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.build-note {
+  margin-top: 0.4rem;
+}
+
 .data-action label {
   font-size: 0.85rem;
   font-weight: 600;

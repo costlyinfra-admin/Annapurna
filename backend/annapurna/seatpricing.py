@@ -32,6 +32,11 @@ _SEAT_PRICES: dict[tuple[str, str], str] = {
     # Tabnine
     ("tabnine", "pro"): "12",
     ("tabnine", "enterprise"): "39",
+    # OpenAI Codex via ChatGPT seats. Note: since 2026 Codex on Business bills by
+    # API token usage, so this per-seat figure is an approximation for licensed
+    # seats; use the CSV import for exact usage-based Codex spend.
+    ("codex", "business"): "25",
+    ("codex", "enterprise"): "60",
 }
 
 

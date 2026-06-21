@@ -1,19 +1,57 @@
 /**
- * Build-cost data actions: every way to get per-developer coding-tool spend in.
+ * Build-cost data actions: every way to get per-developer coding-tool spend in,
+ * organized into one collapsible card per method so the panel stays uncluttered.
  *
- * Precision ladder (most precise first): Copilot seats API (exact roster x
- * price), Cursor Admin API (actual usage dollars), SSO seats via Okta/Entra
- * (seats x price book), CSV import (universal fallback) — plus one-time
- * fine-tune/training cost. Shared by the dashboard's "Add cost data" panel and
- * the onboarding "Build cost sources" step.
+ * Methods, most precise first:
+ *  1. Usage-based tools (Claude Code, Cursor) — admin APIs report actual spend.
+ *  2. GitHub Copilot — seat roster from the GitHub org × seat price.
+ *  3. Other tools via SSO seats — count assigned users in Okta/Entra × price book.
+ *  4. CSV import — universal fallback.
+ *  5. Fine-tune / training cost — one-time, added manually.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, type SeatSource } from "../api";
 import { money } from "../format";
 
 export interface FeatureOption {
   feature_id: string;
   name: string;
+}
+
+/** One collapsible method card: a clickable header + an expanding panel. */
+function MethodCard({
+  id,
+  title,
+  tagline,
+  openId,
+  setOpenId,
+  children,
+}: {
+  id: string;
+  title: string;
+  tagline: string;
+  openId: string | null;
+  setOpenId: (v: string | null) => void;
+  children: ReactNode;
+}) {
+  const open = openId === id;
+  return (
+    <li className={`method-card${open ? " open" : ""}`}>
+      <button
+        type="button"
+        className="method-head"
+        onClick={() => setOpenId(open ? null : id)}
+        aria-expanded={open}
+      >
+        <span className="method-text">
+          <span className="method-title">{title}</span>
+          <span className="method-tagline">{tagline}</span>
+        </span>
+        <span className="method-toggle">{open ? "Close" : "Set up"}</span>
+      </button>
+      {open && <div className="method-panel">{children}</div>}
+    </li>
+  );
 }
 
 export function BuildCostActions({
@@ -25,6 +63,7 @@ export function BuildCostActions({
   features: FeatureOption[];
   onChanged: () => Promise<void>;
 }) {
+  const [openId, setOpenId] = useState<string | null>(null);
   const [csv, setCsv] = useState("");
   const [tool, setTool] = useState("cursor");
   const [busy, setBusy] = useState(false);
@@ -220,182 +259,282 @@ export function BuildCostActions({
 
   return (
     <>
-      <div className="data-action">
-        <label>Sync Claude Code spend (Anthropic admin API — per developer)</label>
-        <span className="inline">
-          <input
-            placeholder="Anthropic admin key (sk-ant-admin…, reuses your Anthropic connection)"
-            type="password"
-            value={claudeKey}
-            onChange={(e) => setClaudeKey(e.target.value)}
-          />
-          <button onClick={syncClaudeCode} disabled={busy}>
-            Sync Claude Code
-          </button>
-        </span>
-        <span className="muted">
-          Pulls each developer's Claude Code cost from Anthropic's Admin API and allocates it to
-          features by PR authorship. Reuses the Anthropic admin key (same as inference); leave blank
-          if already connected.
-        </span>
-      </div>
-      <div className="data-action">
-        <label>Sync GitHub Copilot seats (build cost — no CSV)</label>
-        <span className="inline">
-          <input
-            placeholder="GitHub organization"
-            value={copilotOwner}
-            onChange={(e) => setCopilotOwner(e.target.value)}
-          />
-          <button onClick={syncCopilot} disabled={busy || !copilotOwner.trim()}>
-            Sync seats
-          </button>
-        </span>
-        <span className="muted">
-          Pulls per-developer seat assignments from GitHub and allocates them to features
-          automatically. Needs a token with Copilot billing admin access.
-        </span>
-      </div>
-      <div className="data-action">
-        <label>Sync Cursor spend (admin API — actual usage dollars)</label>
-        <span className="inline">
-          <input
-            placeholder="Admin API key (kept from last sync if blank)"
-            type="password"
-            value={cursorKey}
-            onChange={(e) => setCursorKey(e.target.value)}
-          />
-          <button onClick={syncCursor} disabled={busy}>
-            Sync spend
-          </button>
-        </span>
-        <span className="muted">
-          Pulls each member's actual metered spend from Cursor's Admin API — more precise than the
-          SSO seat estimate below, and replaces it for the period.
-        </span>
-      </div>
-      <div className="data-action">
-        <label>SSO seats (Cursor, Tabnine, Amazon Q, Gemini Code Assist…)</label>
-        <span className="inline">
-          <select value={idp} onChange={(e) => setIdp(e.target.value)}>
-            <option value="okta">Okta</option>
-            <option value="entra">Microsoft Entra ID</option>
-          </select>
-          {idp === "okta" ? (
-            <>
+      <ul className="method-list">
+        {/* 1 — Usage-based tools: Claude Code + Cursor admin APIs (most precise). */}
+        <MethodCard
+          id="usage"
+          title="Usage-based tools — Claude Code &amp; Cursor"
+          tagline="Most precise. Pulls each developer's actual spend from the tool's admin API."
+          openId={openId}
+          setOpenId={setOpenId}
+        >
+          <p className="method-help">
+            Claude Code and Cursor each expose an admin API that reports real per-developer spend.
+            We pull it and split it across features by who authored which pull requests — the most
+            accurate build-cost option.
+          </p>
+
+          <div className="method-block">
+            <span className="method-block-title">Claude Code</span>
+            <span className="inline">
               <input
-                placeholder="Okta domain (acme.okta.com)"
-                value={oktaDomain}
-                onChange={(e) => setOktaDomain(e.target.value)}
-              />
-              <input
-                placeholder="API token"
+                placeholder="Anthropic Admin key (sk-ant-admin…)"
                 type="password"
-                value={oktaToken}
-                onChange={(e) => setOktaToken(e.target.value)}
+                value={claudeKey}
+                onChange={(e) => setClaudeKey(e.target.value)}
+                autoComplete="off"
               />
-            </>
-          ) : (
-            <>
-              <input
-                placeholder="Tenant id"
-                value={entraTenant}
-                onChange={(e) => setEntraTenant(e.target.value)}
-              />
-              <input
-                placeholder="Client id"
-                value={entraClientId}
-                onChange={(e) => setEntraClientId(e.target.value)}
-              />
-              <input
-                placeholder="Client secret"
-                type="password"
-                value={entraSecret}
-                onChange={(e) => setEntraSecret(e.target.value)}
-              />
-            </>
-          )}
-          <button onClick={connectIdp} disabled={busy}>
-            Connect
-          </button>
-        </span>
-        <span className="inline">
-          <input
-            placeholder={idp === "okta" ? "Okta app id" : "Entra app (service principal) id"}
-            value={seatAppId}
-            onChange={(e) => setSeatAppId(e.target.value)}
-          />
-          <select value={seatTool} onChange={(e) => setSeatTool(e.target.value)}>
-            <option value="cursor">Cursor</option>
-            <option value="tabnine">Tabnine</option>
-            <option value="amazon_q">Amazon Q</option>
-            <option value="gemini_code_assist">Gemini Code Assist</option>
-          </select>
-          <input
-            placeholder="plan"
-            value={seatPlan}
-            onChange={(e) => setSeatPlan(e.target.value)}
-          />
-          <button onClick={addSeatSource} disabled={busy}>
-            Add mapping
-          </button>
-        </span>
-        {seatSources.length > 0 && (
-          <span className="inline pools-line">
-            <span className="muted">
-              {seatSources
-                .map((s) => `${s.provider}: ${s.app_label || s.app_id} → ${s.tool}/${s.plan}`)
-                .join("  ")}
+              <button onClick={syncClaudeCode} disabled={busy}>
+                Sync Claude Code
+              </button>
             </span>
-            <button onClick={syncSeats} disabled={busy}>
-              Sync seats
+            <span className="muted">
+              Anthropic Console → Settings → Admin keys. Reuses your Anthropic connection — leave
+              blank if already connected. (Per-developer Claude Code spend needs an Enterprise
+              plan.)
+            </span>
+          </div>
+
+          <div className="method-block">
+            <span className="method-block-title">Cursor</span>
+            <span className="inline">
+              <input
+                placeholder="Cursor Admin API key (kept from last sync if blank)"
+                type="password"
+                value={cursorKey}
+                onChange={(e) => setCursorKey(e.target.value)}
+                autoComplete="off"
+              />
+              <button onClick={syncCursor} disabled={busy}>
+                Sync Cursor
+              </button>
+            </span>
+            <span className="muted">
+              cursor.com/dashboard → Settings → Cursor Admin API Keys (team admins only). Pulls each
+              member's metered spend.
+            </span>
+          </div>
+        </MethodCard>
+
+        {/* 2 — GitHub Copilot seats. */}
+        <MethodCard
+          id="copilot"
+          title="GitHub Copilot"
+          tagline="Reads who has a Copilot seat in your GitHub org × the seat price."
+          openId={openId}
+          setOpenId={setOpenId}
+        >
+          <p className="method-help">
+            Copilot is licensed per seat. We read the seat assignments from your GitHub organization
+            and multiply by the plan's seat price, then allocate to features by PR authorship.
+          </p>
+          <span className="inline">
+            <input
+              placeholder="GitHub organization"
+              value={copilotOwner}
+              onChange={(e) => setCopilotOwner(e.target.value)}
+            />
+            <button onClick={syncCopilot} disabled={busy || !copilotOwner.trim()}>
+              Sync Copilot seats
             </button>
           </span>
-        )}
-      </div>
-      <div className="data-action">
-        <label>Import build cost (CSV: developer,tool,amount) — fallback</label>
-        <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={3} />
-        <span className="inline">
-          <select value={tool} onChange={(e) => setTool(e.target.value)}>
-            <option value="cursor">Cursor</option>
-            <option value="claude_code">Claude Code</option>
-            <option value="copilot">Copilot</option>
-            <option value="codex">Codex</option>
-          </select>
-          <button onClick={importBuild} disabled={busy || !csv.trim()}>
-            Import
-          </button>
-        </span>
-      </div>
-      <div className="data-action">
-        <label>Fine-tune / training cost (one-time, counts as build)</label>
-        <span className="inline">
-          <select value={ftFeature} onChange={(e) => setFtFeature(e.target.value)}>
-            <option value="">Select feature…</option>
-            {features.map((f) => (
-              <option key={f.feature_id} value={f.feature_id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder="Run label (e.g. Llama-3.1-70B tuning)"
-            value={ftLabel}
-            onChange={(e) => setFtLabel(e.target.value)}
+          <span className="muted">
+            Needs a GitHub token with the <code>manage_billing:copilot</code> or{" "}
+            <code>admin:org</code> scope — the same GitHub connection from Features works if it has
+            billing access.
+          </span>
+        </MethodCard>
+
+        {/* 3 — SSO seat estimate for tools without a usage API. */}
+        <MethodCard
+          id="sso"
+          title="Other tools via SSO seats"
+          tagline="Tabnine, Amazon Q, Gemini Code Assist, Codex, Cursor — counted from your SSO provider."
+          openId={openId}
+          setOpenId={setOpenId}
+        >
+          <p className="method-help">
+            Some tools don't report per-developer cost. If your team signs in to them through{" "}
+            <strong>Okta</strong> or <strong>Microsoft Entra ID</strong> (your single sign-on
+            provider), we can count how many people are assigned to each tool and multiply by its
+            per-seat price.
+          </p>
+          <ol className="connector-steps">
+            <li>Connect your SSO provider below (read-only).</li>
+            <li>
+              <strong>Map</strong> each SSO app to the tool and plan it stands for — e.g. “the
+              Tabnine app = Tabnine, Enterprise”. That tells us which seat price to apply.
+            </li>
+            <li>Sync — we count assigned users × seat price for the month.</li>
+          </ol>
+
+          <div className="method-block">
+            <span className="method-block-title">1. Connect SSO provider</span>
+            <span className="inline">
+              <select value={idp} onChange={(e) => setIdp(e.target.value)}>
+                <option value="okta">Okta</option>
+                <option value="entra">Microsoft Entra ID</option>
+              </select>
+              {idp === "okta" ? (
+                <>
+                  <input
+                    placeholder="Okta domain (acme.okta.com)"
+                    value={oktaDomain}
+                    onChange={(e) => setOktaDomain(e.target.value)}
+                  />
+                  <input
+                    placeholder="API token"
+                    type="password"
+                    value={oktaToken}
+                    onChange={(e) => setOktaToken(e.target.value)}
+                  />
+                </>
+              ) : (
+                <>
+                  <input
+                    placeholder="Tenant id"
+                    value={entraTenant}
+                    onChange={(e) => setEntraTenant(e.target.value)}
+                  />
+                  <input
+                    placeholder="Client id"
+                    value={entraClientId}
+                    onChange={(e) => setEntraClientId(e.target.value)}
+                  />
+                  <input
+                    placeholder="Client secret"
+                    type="password"
+                    value={entraSecret}
+                    onChange={(e) => setEntraSecret(e.target.value)}
+                  />
+                </>
+              )}
+              <button onClick={connectIdp} disabled={busy}>
+                Connect
+              </button>
+            </span>
+          </div>
+
+          <div className="method-block">
+            <span className="method-block-title">2. Map an app to a tool</span>
+            <span className="inline">
+              <input
+                placeholder={idp === "okta" ? "Okta app id" : "Entra app (service principal) id"}
+                value={seatAppId}
+                onChange={(e) => setSeatAppId(e.target.value)}
+              />
+              <select value={seatTool} onChange={(e) => setSeatTool(e.target.value)}>
+                <option value="cursor">Cursor</option>
+                <option value="tabnine">Tabnine</option>
+                <option value="amazon_q">Amazon Q Developer</option>
+                <option value="gemini_code_assist">Gemini Code Assist</option>
+                <option value="codex">OpenAI Codex (ChatGPT)</option>
+              </select>
+              <input
+                placeholder="plan (e.g. business)"
+                value={seatPlan}
+                onChange={(e) => setSeatPlan(e.target.value)}
+              />
+              <button onClick={addSeatSource} disabled={busy}>
+                Add mapping
+              </button>
+            </span>
+          </div>
+
+          {seatSources.length > 0 && (
+            <div className="method-block">
+              <span className="method-block-title">3. Mapped apps</span>
+              <span className="inline pools-line">
+                <span className="muted">
+                  {seatSources
+                    .map((s) => `${s.provider}: ${s.app_label || s.app_id} → ${s.tool}/${s.plan}`)
+                    .join("  ")}
+                </span>
+                <button onClick={syncSeats} disabled={busy}>
+                  Sync seats
+                </button>
+              </span>
+            </div>
+          )}
+
+          <span className="muted">
+            Seat-licensed tools like Gemini Code Assist, Amazon Q, and Tabnine have no per-developer
+            usage API, so this seat estimate is how we capture them. Cursor is more precise via its
+            own API above.
+          </span>
+        </MethodCard>
+
+        {/* 4 — CSV import (universal fallback). */}
+        <MethodCard
+          id="csv"
+          title="Import a CSV"
+          tagline="Works for any tool. Paste developer, tool, amount."
+          openId={openId}
+          setOpenId={setOpenId}
+        >
+          <p className="method-help">
+            A universal fallback. Assemble a simple sheet of <code>developer,tool,amount</code> —
+            one row per developer — and paste it here.
+          </p>
+          <textarea
+            value={csv}
+            onChange={(e) => setCsv(e.target.value)}
+            rows={3}
+            placeholder={"alice,cursor,40\nbob,claude_code,180"}
           />
-          <input
-            placeholder="$ amount"
-            inputMode="decimal"
-            value={ftAmount}
-            onChange={(e) => setFtAmount(e.target.value)}
-          />
-          <button onClick={recordTraining} disabled={busy}>
-            Add training cost
-          </button>
-        </span>
-      </div>
-      {note && <p className="muted">{note}</p>}
+          <span className="inline">
+            <select value={tool} onChange={(e) => setTool(e.target.value)}>
+              <option value="cursor">Cursor</option>
+              <option value="claude_code">Claude Code</option>
+              <option value="copilot">Copilot</option>
+              <option value="codex">Codex</option>
+            </select>
+            <button onClick={importBuild} disabled={busy || !csv.trim()}>
+              Import
+            </button>
+          </span>
+        </MethodCard>
+
+        {/* 5 — Fine-tune / training cost (one-time, manual). */}
+        <MethodCard
+          id="training"
+          title="Fine-tuning / training runs"
+          tagline="One-time model-training cost, added manually per feature."
+          openId={openId}
+          setOpenId={setOpenId}
+        >
+          <p className="method-help">
+            The one-time cost of fine-tuning or training a model. It counts as build cost (never
+            blended with inference). Pick the feature it was for and enter the amount.
+          </p>
+          <span className="inline">
+            <select value={ftFeature} onChange={(e) => setFtFeature(e.target.value)}>
+              <option value="">Select feature…</option>
+              {features.map((f) => (
+                <option key={f.feature_id} value={f.feature_id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Run label (e.g. Llama-3.1-70B tuning)"
+              value={ftLabel}
+              onChange={(e) => setFtLabel(e.target.value)}
+            />
+            <input
+              placeholder="$ amount"
+              inputMode="decimal"
+              value={ftAmount}
+              onChange={(e) => setFtAmount(e.target.value)}
+              autoComplete="off"
+            />
+            <button onClick={recordTraining} disabled={busy}>
+              Add training cost
+            </button>
+          </span>
+        </MethodCard>
+      </ul>
+      {note && <p className="muted build-note">{note}</p>}
     </>
   );
 }
