@@ -616,9 +616,8 @@ select {
 
 .connector-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.85rem;
   padding: 0.85rem 1.1rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -631,6 +630,69 @@ select {
 .connector-row:hover {
   border-color: var(--line-strong);
   box-shadow: var(--shadow-sm);
+}
+
+.connector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+/* Expanded Connect panel: source-specific instructions + the credential form,
+   sitting underneath the row header. */
+.connector-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.connector-guide-blurb {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.connector-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.connector-steps code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  background: var(--bg);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+.connector-doc-link {
+  display: inline-block;
+  font-size: 0.84rem;
+}
+
+.connector-panel .connector-form > input {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.connector-panel .connector-form > textarea {
+  flex: 1 1 100%;
+  min-width: 0;
+  min-height: 4.5rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  resize: vertical;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
 }
 
 .connector-info {

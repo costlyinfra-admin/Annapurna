@@ -1,10 +1,14 @@
 /**
- * One connector in a connect list: shows its name/category, a Connected badge,
- * or a paste-token form that saves the credential (encrypted server-side).
- * Shared by the onboarding steps; extracted from the original Connect step.
+ * One connector in a connect list. The header shows its name/category and a
+ * Connected badge or a Connect toggle. Pressing Connect expands a panel
+ * *underneath* the row with source-specific setup instructions plus the
+ * credential form (saved encrypted server-side). Instructions come from
+ * CONNECTOR_GUIDES, keyed by connector type; connectors without a guide get
+ * the generic paste-token form.
  */
 import { useState } from "react";
 import { api, type ConnectorStatus } from "../api";
+import { CONNECTOR_GUIDES } from "../connectorGuides";
 
 export function ConnectorRow({
   connector,
@@ -19,11 +23,13 @@ export function ConnectorRow({
   const [secret, setSecret] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const guide = CONNECTOR_GUIDES[connector.type];
+
   async function save() {
-    if (!secret) return;
+    if (!secret.trim()) return;
     setSaving(true);
     try {
-      await api.saveCredential(connector.type, secret);
+      await api.saveCredential(connector.type, secret.trim());
       setSecret("");
       setOpen(false);
       onConnected();
@@ -34,29 +40,65 @@ export function ConnectorRow({
 
   return (
     <li className="connector-row">
-      <div className="connector-info">
-        <span className="connector-name">{connector.name}</span>
-        <span className="connector-category">{hint ?? connector.category.replace("_", " ")}</span>
-      </div>
-      {connector.connected ? (
-        <span className="badge connected">Connected</span>
-      ) : open ? (
-        <span className="connector-form">
-          <input
-            type="password"
-            placeholder="Paste access token"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            aria-label={`${connector.name} token`}
-          />
-          <button onClick={save} disabled={saving || !secret}>
-            {saving ? "…" : "Save"}
+      <div className="connector-head">
+        <div className="connector-info">
+          <span className="connector-name">{connector.name}</span>
+          <span className="connector-category">{hint ?? connector.category.replace("_", " ")}</span>
+        </div>
+        {connector.connected ? (
+          <span className="badge connected">Connected</span>
+        ) : (
+          <button className="secondary" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+            {open ? "Cancel" : "Connect"}
           </button>
-        </span>
-      ) : (
-        <button className="secondary" onClick={() => setOpen(true)}>
-          Connect
-        </button>
+        )}
+      </div>
+
+      {open && !connector.connected && (
+        <div className="connector-panel">
+          {guide && (
+            <div className="connector-guide">
+              <p className="muted connector-guide-blurb">{guide.blurb}</p>
+              <ol className="connector-steps">
+                {guide.steps.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+              {guide.docUrl && (
+                <a
+                  className="link connector-doc-link"
+                  href={guide.docUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open provider setup page ↗
+                </a>
+              )}
+            </div>
+          )}
+          <div className="connector-form">
+            {guide?.multiline ? (
+              <textarea
+                placeholder={guide.placeholder}
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                aria-label={`${connector.name} credentials`}
+                rows={3}
+              />
+            ) : (
+              <input
+                type="password"
+                placeholder={guide?.placeholder ?? "Paste access token"}
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                aria-label={`${connector.name} token`}
+              />
+            )}
+            <button onClick={save} disabled={saving || !secret.trim()}>
+              {saving ? "…" : "Save"}
+            </button>
+          </div>
+        </div>
       )}
     </li>
   );
