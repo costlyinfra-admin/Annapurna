@@ -61,4 +61,25 @@ describe("ConnectorRow", () => {
     expect(field.tagName).toBe("TEXTAREA");
     expect(field).toHaveAttribute("placeholder", expect.stringContaining("access_key_id"));
   });
+
+  it("shows Sync now on a connected row and reports the result", async () => {
+    const onSync = vi.fn().mockResolvedValue("Pulled $42 of spend.");
+    render(
+      <ul>
+        <ConnectorRow
+          connector={{
+            type: "anthropic",
+            name: "Anthropic",
+            category: "inference",
+            connected: true,
+          }}
+          onConnected={vi.fn()}
+          onSync={onSync}
+        />
+      </ul>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await waitFor(() => expect(onSync).toHaveBeenCalled());
+    expect(await screen.findByText("Pulled $42 of spend.")).toBeInTheDocument();
+  });
 });

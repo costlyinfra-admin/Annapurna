@@ -42,15 +42,19 @@ describe("CostSourcesPage", () => {
     vi.mocked(api.listSeatSources).mockResolvedValue([]);
   });
 
-  it("renders inference + build sections with their connectors and panels", async () => {
+  it("renders inference, self-hosted, and build sections with their panels", async () => {
     renderPage();
     expect(await screen.findByRole("heading", { name: "Cost sources" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Inference cost" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Self-hosted models" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Build cost" })).toBeInTheDocument();
-    // An inference connector row + the build sync controls both render.
+    // An inference connector row, the self-hosted pool form, and the build sync
+    // controls all render.
     expect((await screen.findAllByText("Anthropic")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Save pool" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync Claude Code" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sync" })).toBeInTheDocument(); // inference
+    // The old standalone "Sync inference" dropdown is gone.
+    expect(screen.queryByRole("button", { name: "Sync" })).not.toBeInTheDocument();
   });
 
   it("syncs Claude Code spend (build) from here", async () => {
@@ -65,10 +69,14 @@ describe("CostSourcesPage", () => {
     expect(await screen.findByText(/3 of 4 developers/)).toBeInTheDocument();
   });
 
-  it("syncs an inference provider from here", async () => {
+  it("pulls a connected provider's bill via Sync now", async () => {
+    vi.mocked(api.connectors).mockResolvedValue([
+      { type: "anthropic", name: "Anthropic", category: "inference", connected: true },
+    ]);
     vi.mocked(api.ingestInference).mockResolvedValue({ total: 4200 });
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Sync" }));
-    await waitFor(() => expect(api.ingestInference).toHaveBeenCalledWith("anthropic", undefined));
+    fireEvent.click(await screen.findByRole("button", { name: "Sync now" }));
+    await waitFor(() => expect(api.ingestInference).toHaveBeenCalledWith("anthropic"));
+    expect(await screen.findByText(/Pulled .* of Anthropic spend/)).toBeInTheDocument();
   });
 });

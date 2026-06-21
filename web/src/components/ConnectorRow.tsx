@@ -14,14 +14,20 @@ export function ConnectorRow({
   connector,
   onConnected,
   hint,
+  onSync,
 }: {
   connector: ConnectorStatus;
   onConnected: () => void;
   hint?: string;
+  /** When set, a connected row shows a "Sync now" button that pulls the latest
+   *  data on demand and returns a short result message to display inline. */
+  onSync?: () => Promise<string>;
 }) {
   const [open, setOpen] = useState(false);
   const [secret, setSecret] = useState("");
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
 
   const guide = CONNECTOR_GUIDES[connector.type];
 
@@ -38,6 +44,19 @@ export function ConnectorRow({
     }
   }
 
+  async function runSync() {
+    if (!onSync) return;
+    setSyncing(true);
+    setSyncNote(null);
+    try {
+      setSyncNote(await onSync());
+    } catch (err) {
+      setSyncNote(err instanceof Error ? err.message : "Sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <li className="connector-row">
       <div className="connector-head">
@@ -46,13 +65,22 @@ export function ConnectorRow({
           <span className="connector-category">{hint ?? connector.category.replace("_", " ")}</span>
         </div>
         {connector.connected ? (
-          <span className="badge connected">Connected</span>
+          <span className="connector-actions">
+            <span className="badge connected">Connected</span>
+            {onSync && (
+              <button className="secondary" onClick={runSync} disabled={syncing}>
+                {syncing ? "Syncing…" : "Sync now"}
+              </button>
+            )}
+          </span>
         ) : (
           <button className="secondary" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
             {open ? "Cancel" : "Connect"}
           </button>
         )}
       </div>
+
+      {syncNote && <p className="muted connector-sync-note">{syncNote}</p>}
 
       {open && !connector.connected && (
         <div className="connector-panel">

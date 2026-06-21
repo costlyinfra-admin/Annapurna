@@ -639,6 +639,44 @@ select {
   gap: 1rem;
 }
 
+.connector-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.connector-sync-note {
+  margin: 0;
+  font-size: 0.83rem;
+}
+
+/* Self-hosted pool instructions + registered-pool list. */
+.source-guide {
+  margin: 0.2rem 0 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pool-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.3rem 0 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pool-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pool-item .muted {
+  font-size: 0.82rem;
+}
+
 /* Expanded Connect panel: source-specific instructions + the credential form,
    sitting underneath the row header. */
 .connector-panel {

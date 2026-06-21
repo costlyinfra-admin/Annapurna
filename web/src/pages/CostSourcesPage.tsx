@@ -7,7 +7,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type ConnectorStatus } from "../api";
 import { BuildCostActions, type FeatureOption } from "../components/BuildCostActions";
 import { ConnectorRow } from "../components/ConnectorRow";
-import { InferenceActions } from "../components/InferenceActions";
+import { SelfHostedPools } from "../components/SelfHostedPools";
+import { money } from "../format";
 
 export function CostSourcesPage() {
   const [connectors, setConnectors] = useState<ConnectorStatus[] | null>(null);
@@ -52,19 +53,33 @@ export function CostSourcesPage() {
       <section className="source-section">
         <h2>Inference cost</h2>
         <p className="muted">
-          What your features cost to run. Connect each provider's cost API (the authoritative bill);
-          spend attributes to features by API-key/project, and anything unmapped lands in
-          Unattributed. Amazon Bedrock takes a JSON blob with AWS key/secret/region/tag.
+          What your features cost to run. Connect each provider's cost API — the authoritative bill
+          — and spend attributes to features by API key or project; anything unmapped lands in
+          Unattributed. Once connected, costs refresh automatically each night, or hit Sync now to
+          pull immediately. Each row has setup instructions.
         </p>
         {connectors && inference.length > 0 && (
           <ul className="connector-list">
             {inference.map((c) => (
-              <ConnectorRow key={c.type} connector={c} onConnected={refreshConnectors} />
+              <ConnectorRow
+                key={c.type}
+                connector={c}
+                onConnected={refreshConnectors}
+                onSync={async () => {
+                  const r = await api.ingestInference(c.type);
+                  await refreshFeatures();
+                  return `Pulled ${money(r.total)} of ${c.name} spend for this month.`;
+                }}
+              />
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="source-section">
+        <h2>Self-hosted models</h2>
         <div className="data-actions">
-          <InferenceActions onChanged={refreshFeatures} />
+          <SelfHostedPools onChanged={refreshFeatures} />
         </div>
       </section>
 
