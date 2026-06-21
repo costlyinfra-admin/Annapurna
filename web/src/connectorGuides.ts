@@ -108,4 +108,65 @@ export const CONNECTOR_GUIDES: Record<string, ConnectorGuide> = {
     multiline: true,
     docUrl: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html",
   },
+  azure: {
+    blurb:
+      "Read-only. Azure OpenAI spend lives in Azure Cost Management; we read it, filter to Cognitive Services, and split by a cost-allocation tag.",
+    steps: [
+      "In Microsoft Entra ID, register an app (service principal) and create a client secret.",
+      "Grant it the “Cost Management Reader” role on the subscription.",
+      "Tag your Azure OpenAI resources with a cost-allocation tag (e.g. “feature”) per feature.",
+      "Paste the credentials below as JSON (this connector takes JSON, not a plain token).",
+    ],
+    placeholder:
+      '{"tenant_id":"…","client_id":"…","client_secret":"…","subscription_id":"…","tag":"feature"}',
+    multiline: true,
+    docUrl:
+      "https://learn.microsoft.com/azure/cost-management-billing/automate/automation-ingest-usage-details-overview",
+  },
+  litellm: {
+    blurb:
+      "Read-only. Your LiteLLM proxy already tracks per-key, per-model dollar spend; we read its spend report.",
+    steps: [
+      "Use your self-hosted LiteLLM proxy URL (e.g. https://litellm.acme.com).",
+      "Use the LITELLM_MASTER_KEY you configured (starts with sk-) — it authorizes the admin spend report.",
+      "Paste both below as JSON.",
+    ],
+    placeholder: '{"base_url":"https://litellm.acme.com","master_key":"sk-…"}',
+    multiline: true,
+    docUrl: "https://docs.litellm.ai/docs/proxy/cost_tracking",
+  },
+  vercel: {
+    blurb: "Read-only. We read the AI Gateway Custom Reporting API for cost by model and project.",
+    steps: [
+      "In Vercel → Account Settings → Tokens, create an access token.",
+      "Optionally include your team id to scope the report to a team.",
+      'Paste below as JSON. (The reporting API is in beta — if your endpoint differs, add a "url" field to override.)',
+    ],
+    placeholder: '{"token":"…","team_id":"team_… (optional)"}',
+    multiline: true,
+    docUrl: "https://vercel.com/docs/ai-gateway/capabilities/observability",
+  },
+  modal: {
+    blurb:
+      "Read-only. Modal bills GPU/CPU compute time per app; we read your workspace's billing usage and attribute by app.",
+    steps: [
+      "In the Modal dashboard → Settings → API Tokens, create a token (id + secret).",
+      "Programmatic billing export needs a Team or Enterprise workspace.",
+      'Paste below as JSON. (Add a "url" field to override the billing endpoint if needed.)',
+    ],
+    placeholder: '{"token_id":"ak-…","token_secret":"as-…"}',
+    multiline: true,
+    docUrl: "https://modal.com/docs/guide/billing",
+  },
+  elevenlabs: {
+    blurb:
+      "Read-only. ElevenLabs bills by characters/credits; we read your monthly character usage and price it at a transparent rate.",
+    steps: [
+      "In the ElevenLabs dashboard, open your profile → API Keys.",
+      "Create or copy an API key.",
+      "Paste the key below. (Cost is estimated from character usage, since ElevenLabs has no dollar-cost API.)",
+    ],
+    placeholder: "ElevenLabs API key (xi-…)",
+    docUrl: "https://elevenlabs.io/docs/api-reference/usage/get",
+  },
 };

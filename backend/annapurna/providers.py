@@ -447,6 +447,360 @@ def _parse_bedrock(payload: dict, period: dt.date):
             )
 
 
+# --------------------------------------------------------------------------
+# Gateways, cloud-cost, and audio providers (added per customer demand)
+# --------------------------------------------------------------------------
+# Each follows the vendor's documented cost/usage API. As with the clients
+# above, exact JSON shapes can't be verified offline — parsing is tolerant and
+# the stable contract is the normalized CostRecord. JSON-credential connectors
+# take one encrypted blob; see web/src/connectorGuides.ts for each shape.
+
+# ElevenLabs bills credits/characters, not dollars; this transparent rate maps
+# character usage to an approximate cost. Edit as plans change (drift is visible,
+# never a silently-wrong number).
+_ELEVENLABS_USD_PER_1K_CHARS = Decimal("0.15")
+
+
+def _json_cred(admin_key: str, hint: str) -> dict:
+    """Parse a JSON credential blob or raise a clear ProviderError."""
+    try:
+        creds = json.loads(admin_key)
+    except (ValueError, TypeError) as exc:
+        raise ProviderError(f"Credential must be JSON: {hint}") from exc
+    if not isinstance(creds, dict):
+        raise ProviderError(f"Credential must be JSON: {hint}")
+    return creds
+
+
+def _first_tag_value(row: list) -> Optional[str]:
+    """Best-effort: the first short non-currency string in a cost-query row."""
+    for v in row:
+        if isinstance(v, str) and len(v) <= 64 and v.upper() not in ("USD", "EUR", "GBP"):
+            return v
+    return None
+
+
+class AzureCostClient(_BaseCostClient):
+    """Azure Cost Management for Azure OpenAI / Cognitive Services spend.
+
+    JSON cred: {tenant_id, client_id, client_secret, subscription_id, tag?}. A
+    service principal (Cost Management Reader) authenticates via client-credentials;
+    we query the Cost Management API filtered to Cognitive Services and grouped by
+    a cost-allocation tag, attributing each tag value to a feature (untagged ->
+    Unattributed), mirroring the Bedrock connector.
+    """
+
+    base_url = "https://management.azure.com"
+    _AUTH_HOST = "https://login.microsoftonline.com"
+
+    def __init__(self, admin_key, **kwargs):
+        super().__init__(admin_key, **kwargs)
+        c = _json_cred(
+            admin_key,
+            '{"tenant_id":…, "client_id":…, "client_secret":…, "subscription_id":…, "tag":…}',
+        )
+        self._tenant = c.get("tenant_id")
+        self._client_id = c.get("client_id")
+        self._secret = c.get("client_secret")
+        self._sub = c.get("subscription_id")
+        self._tag = c.get("tag", "feature")
+
+    def _token(self) -> str:
+        resp = self._client.post(
+            f"{self._AUTH_HOST}/{self._tenant}/oauth2/v2.0/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": self._client_id,
+                "client_secret": self._secret,
+                "scope": "https://management.azure.com/.default",
+            },
+        )
+        if resp.status_code >= 400:
+            raise ProviderError(
+                "Azure rejected the service-principal credentials.", resp.status_code
+            )
+        return resp.json().get("access_token", "")
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        token = self._token()
+        body = {
+            "type": "ActualCost",
+            "timeframe": "Custom",
+            "timePeriod": {
+                "from": start.isoformat(),
+                "to": (end - dt.timedelta(days=1)).isoformat(),
+            },
+            "dataset": {
+                "granularity": "None",
+                "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}},
+                "grouping": [{"type": "TagKey", "name": self._tag}],
+                "filter": {
+                    "dimensions": {
+                        "name": "ServiceName",
+                        "operator": "In",
+                        "values": ["Cognitive Services", "Azure OpenAI"],
+                    }
+                },
+            },
+        }
+        url = (
+            f"{self._base}/subscriptions/{self._sub}"
+            "/providers/Microsoft.CostManagement/query?api-version=2023-03-01"
+        )
+        resp = self._client.post(url, json=body, headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code in (401, 403):
+            raise ProviderError("Azure rejected the credentials.", resp.status_code)
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Azure Cost Management error {resp.status_code}: {resp.text[:200]}",
+                resp.status_code,
+            )
+        return aggregate(list(_parse_azure(resp.json(), start)))
+
+
+def _parse_azure(payload: dict, period: dt.date):
+    props = payload.get("properties", payload)
+    for row in props.get("rows", []):
+        if not isinstance(row, list):
+            continue
+        amount = next((_to_decimal(v) for v in row if _to_decimal(v) is not None), None)
+        if amount is None:
+            continue
+        yield CostRecord(
+            provider="azure",
+            period=period,
+            amount=amount,
+            api_key_ref=_first_tag_value(row)
+            or None,  # tag value -> feature; empty -> Unattributed
+        )
+
+
+class LiteLLMCostClient(_BaseCostClient):
+    """Self-hosted LiteLLM proxy spend report (GET /global/spend/report).
+
+    JSON cred: {base_url, master_key}. The master key authorizes the proxy's admin
+    spend endpoints; we read the per-key/model dollar spend it has already computed.
+    """
+
+    def __init__(self, admin_key, **kwargs):
+        creds = _json_cred(admin_key, '{"base_url":"https://litellm.acme.com","master_key":"sk-…"}')
+        base = (creds.get("base_url") or "").rstrip("/")
+        super().__init__(creds.get("master_key") or "", base_url=base, **kwargs)
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        resp = self._get(
+            "/global/spend/report",
+            params={"start_date": start.isoformat(), "end_date": end.isoformat()},
+            headers={"Authorization": f"Bearer {self._key}"},
+        )
+        return aggregate(list(_parse_litellm(resp.json(), start)))
+
+
+def _parse_litellm(payload, period: dt.date):
+    rows = (
+        payload
+        if isinstance(payload, list)
+        else (payload.get("data") or payload.get("spend") or payload.get("results") or [])
+    )
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        key_ref = (
+            item.get("api_key") or item.get("team") or item.get("team_id") or item.get("team_alias")
+        )
+        breakdown = item.get("metadata") or item.get("models") or item.get("breakdown")
+        if isinstance(breakdown, list) and breakdown:
+            for b in breakdown:
+                if not isinstance(b, dict):
+                    continue
+                amt = _to_decimal(b.get("spend") or b.get("total_spend") or b.get("cost"))
+                if amt is None:
+                    continue
+                yield CostRecord(
+                    provider="litellm",
+                    period=period,
+                    amount=amt,
+                    api_key_ref=key_ref,
+                    model=b.get("model") or b.get("model_name"),
+                )
+            continue
+        amount = _to_decimal(item.get("spend") or item.get("total_spend") or item.get("cost"))
+        if amount is None:
+            continue
+        yield CostRecord(
+            provider="litellm",
+            period=period,
+            amount=amount,
+            api_key_ref=key_ref,
+            model=item.get("model") or item.get("model_name"),
+        )
+
+
+class VercelGatewayCostClient(_BaseCostClient):
+    """Vercel AI Gateway Custom Reporting API (cost by model/project/tag).
+
+    JSON cred: {token, team_id?, url?}. A Vercel access token authenticates; the
+    reporting API is in beta, so the endpoint can be overridden via ``url``.
+    """
+
+    DEFAULT_URL = "https://api.vercel.com/v1/ai-gateway/usage"
+
+    def __init__(self, admin_key, **kwargs):
+        creds = _json_cred(admin_key, '{"token":"…","team_id":"…(optional)"}')
+        self._token = creds.get("token") or ""
+        self._team = creds.get("team_id")
+        self._url = creds.get("url") or self.DEFAULT_URL
+        super().__init__(self._token, **kwargs)
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        params = {"start": start.isoformat(), "end": end.isoformat()}
+        if self._team:
+            params["teamId"] = self._team
+        resp = http_get_with_retry(
+            self._client,
+            self._url,
+            params=params,
+            headers={"Authorization": f"Bearer {self._token}"},
+        )
+        if resp.status_code in (401, 403):
+            raise ProviderError("Vercel rejected the access token.", resp.status_code)
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Vercel error {resp.status_code}: {resp.text[:200]}", resp.status_code
+            )
+        return aggregate(list(_parse_vercel(resp.json(), start)))
+
+
+def _parse_vercel(payload: dict, period: dt.date):
+    rows = (
+        payload.get("data")
+        or payload.get("usage")
+        or payload.get("results")
+        or payload.get("rows")
+        or []
+    )
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        amount = _to_decimal(item.get("cost") or item.get("amount") or item.get("spend"))
+        if amount is None:
+            continue
+        yield CostRecord(
+            provider="vercel",
+            period=period,
+            amount=amount,
+            project=item.get("project") or item.get("projectId") or item.get("tag"),
+            api_key_ref=item.get("keyId") or item.get("apiKey"),
+            model=item.get("model"),
+        )
+
+
+class ModalCostClient(_BaseCostClient):
+    """Modal compute spend by app (billing usage report).
+
+    JSON cred: {token_id, token_secret, url?}. Modal bills GPU/CPU time, reported
+    per app; we attribute each app to a feature like a project. Beta endpoint, so
+    ``url`` can override the default.
+    """
+
+    DEFAULT_URL = "https://api.modal.com/v1/billing/usage"
+
+    def __init__(self, admin_key, **kwargs):
+        creds = _json_cred(admin_key, '{"token_id":"ak-…","token_secret":"as-…"}')
+        self._id = creds.get("token_id") or ""
+        self._secret = creds.get("token_secret") or ""
+        self._url = creds.get("url") or self.DEFAULT_URL
+        super().__init__(self._secret, **kwargs)
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        resp = http_get_with_retry(
+            self._client,
+            self._url,
+            params={"start_date": start.isoformat(), "end_date": end.isoformat()},
+            headers={"Modal-Key": self._id, "Modal-Secret": self._secret},
+        )
+        if resp.status_code in (401, 403):
+            raise ProviderError("Modal rejected the token.", resp.status_code)
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Modal error {resp.status_code}: {resp.text[:200]}", resp.status_code
+            )
+        return aggregate(list(_parse_modal(resp.json(), start)))
+
+
+def _parse_modal(payload: dict, period: dt.date):
+    rows = (
+        payload.get("data")
+        or payload.get("usage")
+        or payload.get("apps")
+        or payload.get("results")
+        or []
+    )
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        amount = _to_decimal(item.get("cost") or item.get("amount") or item.get("spend"))
+        if amount is None:
+            continue
+        yield CostRecord(
+            provider="modal",
+            period=period,
+            amount=amount,
+            project=item.get("app") or item.get("app_name") or item.get("name"),
+        )
+
+
+class ElevenLabsCostClient(_BaseCostClient):
+    """ElevenLabs character usage -> approximate cost. Auth: xi-api-key.
+
+    ElevenLabs bills credits/characters, not dollars, so we read character usage
+    for the month and price it at a transparent per-1k-character rate.
+    """
+
+    base_url = "https://api.elevenlabs.io"
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        start_ms = int(
+            dt.datetime(start.year, start.month, start.day, tzinfo=dt.timezone.utc).timestamp()
+            * 1000
+        )
+        end_ms = int(
+            dt.datetime(end.year, end.month, end.day, tzinfo=dt.timezone.utc).timestamp() * 1000
+        )
+        resp = self._get(
+            "/v1/usage/character-stats",
+            params={"start_unix": start_ms, "end_unix": end_ms, "aggregation_interval": "month"},
+            headers={"xi-api-key": self._key},
+        )
+        return aggregate(list(_parse_elevenlabs(resp.json(), start)))
+
+
+def _parse_elevenlabs(payload: dict, period: dt.date):
+    usage = payload.get("usage") or {}
+    total_chars = 0
+    for series in usage.values():
+        if isinstance(series, list):
+            total_chars += sum(int(v) for v in series if isinstance(v, (int, float)))
+    if total_chars <= 0:
+        total_chars = int(payload.get("character_count") or 0)
+    if total_chars <= 0:
+        return
+    amount = (_ELEVENLABS_USD_PER_1K_CHARS * Decimal(total_chars) / Decimal("1000")).quantize(
+        Decimal("0.0001")
+    )
+    yield CostRecord(provider="elevenlabs", period=period, amount=amount, model="elevenlabs-tts")
+
+
 def make_cost_client(provider: str, admin_key: str) -> _BaseCostClient:
     if provider == "anthropic":
         return AnthropicCostClient(admin_key)
@@ -456,6 +810,16 @@ def make_cost_client(provider: str, admin_key: str) -> _BaseCostClient:
         return GoogleCostClient(admin_key)
     if provider == "bedrock":
         return BedrockCostClient(admin_key)
+    if provider == "azure":
+        return AzureCostClient(admin_key)
+    if provider == "litellm":
+        return LiteLLMCostClient(admin_key)
+    if provider == "vercel":
+        return VercelGatewayCostClient(admin_key)
+    if provider == "modal":
+        return ModalCostClient(admin_key)
+    if provider == "elevenlabs":
+        return ElevenLabsCostClient(admin_key)
     if provider in _HOSTED_PROVIDERS:
         base_url, path = _HOSTED_PROVIDERS[provider]
         return HostedUsageCostClient(provider, admin_key, path, base_url=base_url)

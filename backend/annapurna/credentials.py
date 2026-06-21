@@ -31,8 +31,15 @@ KNOWN_CONNECTORS = [
     {"type": "openrouter", "name": "OpenRouter", "category": "inference"},
     {"type": "together", "name": "Together AI", "category": "inference"},
     {"type": "fireworks", "name": "Fireworks AI", "category": "inference"},
-    # Cloud-cost connector: Amazon Bedrock spend via AWS Cost Explorer.
+    # Cloud-cost connectors: spend lives in the cloud bill, read via its cost API.
     {"type": "bedrock", "name": "Amazon Bedrock (AWS cost)", "category": "inference"},
+    {"type": "azure", "name": "Azure OpenAI (Azure cost)", "category": "inference"},
+    # Gateways/proxies that aggregate spend across many providers.
+    {"type": "litellm", "name": "LiteLLM (gateway)", "category": "inference"},
+    {"type": "vercel", "name": "Vercel AI Gateway", "category": "inference"},
+    # Compute platform (GPU time) and an audio-model provider.
+    {"type": "modal", "name": "Modal (compute)", "category": "inference"},
+    {"type": "elevenlabs", "name": "ElevenLabs (audio)", "category": "inference"},
     {"type": "cursor", "name": "Cursor for Teams", "category": "build_activity"},
     # Identity provider for SSO/SCIM seat rosters (Cursor, Tabnine, Cody, …).
     {"type": "okta", "name": "Okta (SSO seats)", "category": "build_activity"},

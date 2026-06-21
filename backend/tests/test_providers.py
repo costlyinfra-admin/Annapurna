@@ -250,3 +250,96 @@ def test_provider_401_raises():
     with pytest.raises(ProviderError) as exc:
         client.fetch_costs(dt.date(2026, 5, 1))
     assert exc.value.status == 401
+
+
+def test_litellm_reads_spend_report():
+    import json
+
+    from annapurna.providers import make_cost_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"  # read-only
+        assert "litellm.acme.com/global/spend/report" in str(request.url)
+        assert request.headers["Authorization"] == "Bearer sk-master"
+        return httpx.Response(
+            200,
+            json=[
+                {"api_key": "key:prod", "model": "gpt-4o", "spend": "120.50"},
+                {"api_key": "key:dev", "model": "claude-sonnet-4-6", "spend": "9.50"},
+            ],
+        )
+
+    client = make_cost_client(
+        "litellm", json.dumps({"base_url": "https://litellm.acme.com", "master_key": "sk-master"})
+    )
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = client.fetch_costs(dt.date(2026, 5, 10))
+    by_key = {r.api_key_ref: r.amount for r in records}
+    assert by_key["key:prod"] == Decimal("120.50")
+    assert by_key["key:dev"] == Decimal("9.50")
+
+
+def test_elevenlabs_prices_character_usage():
+    from annapurna.providers import make_cost_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["xi-api-key"] == "xi-key"
+        return httpx.Response(200, json={"time": [1], "usage": {"All": [10_000]}})
+
+    client = make_cost_client("elevenlabs", "xi-key")
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = client.fetch_costs(dt.date(2026, 5, 1))
+    # 10k characters at $0.15 / 1k chars = $1.50, computed transparently by us.
+    assert records[0].amount == Decimal("1.5000")
+    assert records[0].provider == "elevenlabs"
+
+
+def test_azure_parses_cost_query_by_tag():
+    import json
+
+    from annapurna.providers import make_cost_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "oauth2" in str(request.url):
+            return httpx.Response(200, json={"access_token": "tok"})
+        assert "Microsoft.CostManagement/query" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "columns": [{"name": "Cost"}, {"name": "feature"}, {"name": "Currency"}],
+                    "rows": [[820.0, "triage", "USD"], [60.0, "", "USD"]],
+                }
+            },
+        )
+
+    client = make_cost_client(
+        "azure",
+        json.dumps(
+            {
+                "tenant_id": "t",
+                "client_id": "c",
+                "client_secret": "s",
+                "subscription_id": "sub",
+                "tag": "feature",
+            }
+        ),
+    )
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = client.fetch_costs(dt.date(2026, 5, 1))
+    by_tag = {r.api_key_ref: r.amount for r in records}
+    assert by_tag["triage"] == Decimal("820.0")
+    assert by_tag[None] == Decimal("60.0")  # untagged -> Unattributed
+
+
+def test_new_json_connectors_require_json():
+    from annapurna.providers import (
+        AzureCostClient,
+        LiteLLMCostClient,
+        ModalCostClient,
+        VercelGatewayCostClient,
+    )
+
+    for cls in (AzureCostClient, LiteLLMCostClient, VercelGatewayCostClient, ModalCostClient):
+        with pytest.raises(ProviderError):
+            cls("not-json")

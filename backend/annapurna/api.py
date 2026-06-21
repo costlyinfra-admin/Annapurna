@@ -15,6 +15,7 @@ import os
 import time
 from typing import Annotated, Optional
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
@@ -98,7 +99,10 @@ class SignalRequest(BaseModel):
 
 class IngestRequest(BaseModel):
     provider: str = Field(
-        pattern="^(anthropic|openai|google|openrouter|together|fireworks|bedrock)$"
+        pattern=(
+            "^(anthropic|openai|google|openrouter|together|fireworks|bedrock"
+            "|azure|litellm|vercel|modal|elevenlabs)$"
+        )
     )
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")  # YYYY-MM
 
@@ -401,6 +405,13 @@ def create_app() -> FastAPI:
                 ) from exc
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Provider error: {exc}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            # Unreachable host / network failure — common for self-hosted gateway
+            # URLs (LiteLLM, Vercel/Modal overrides). Surface it cleanly, not a 500.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Could not reach {body.provider}. Check the URL/credentials and retry.",
             ) from exc
 
     @app.get("/api/inference/summary")
