@@ -7,7 +7,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type ConnectorStatus } from "../api";
 import { BuildCostActions, type FeatureOption } from "../components/BuildCostActions";
 import { ConnectorRow } from "../components/ConnectorRow";
-import { HookUpsell } from "../components/HookUpsell";
 import { InferenceActions } from "../components/InferenceActions";
 
 export function CostSourcesPage() {
@@ -80,8 +79,6 @@ export function CostSourcesPage() {
           <BuildCostActions features={features} onChanged={refreshFeatures} />
         </div>
       </section>
-
-      <HookUpsell />
     </div>
   );
 }

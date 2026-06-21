@@ -10,6 +10,7 @@ import { CostSourcesPage } from "./pages/CostSourcesPage";
 import { Dashboard } from "./pages/Dashboard";
 import { FeatureDetail } from "./pages/FeatureDetail";
 import { FeaturesPage } from "./pages/FeaturesPage";
+import { InstallSdkPage } from "./pages/InstallSdkPage";
 import { Login } from "./pages/Login";
 import { SettingsPage } from "./pages/SettingsPage";
 import { Signup } from "./pages/Signup";
@@ -58,6 +59,7 @@ export function App() {
         <Route path="/cost-sources" element={<CostSourcesPage />} />
         <Route path="/features" element={<FeaturesPage />} />
         <Route path="/features/:id" element={<FeatureDetail />} />
+        <Route path="/install-sdk" element={<InstallSdkPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="/dashboard" element={<Navigate to="/" replace />} />

@@ -9,6 +9,7 @@ const NAV = [
   { to: "/", label: "Overview", end: true },
   { to: "/cost-sources", label: "Cost sources", end: false },
   { to: "/features", label: "Features", end: false },
+  { to: "/install-sdk", label: "Install SDK", end: false },
   { to: "/settings", label: "Settings", end: false },
 ];
 
