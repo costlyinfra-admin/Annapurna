@@ -274,6 +274,16 @@ _HOSTED_PROVIDERS = {
     "openrouter": ("https://openrouter.ai", "/api/v1/activity"),
     "together": ("https://api.together.xyz", "/v1/usage"),
     "fireworks": ("https://api.fireworks.ai", "/v1/usage"),
+    # OpenAI-compatible inference providers (Bearer key + a usage endpoint). Cost
+    # is the reported dollar amount when present, else priced from tokens via the
+    # (provider, model) table in pricing.py. Endpoints are best-effort per their
+    # docs and parsed tolerantly; the hook SDK is the precise path for these.
+    "groq": ("https://api.groq.com", "/openai/v1/usage"),
+    "mistral": ("https://api.mistral.ai", "/v1/usage"),
+    "xai": ("https://api.x.ai", "/v1/usage"),
+    "perplexity": ("https://api.perplexity.ai", "/v1/usage"),
+    "cohere": ("https://api.cohere.ai", "/v1/usage"),
+    "replicate": ("https://api.replicate.com", "/v1/account"),
 }
 
 
@@ -801,6 +811,88 @@ def _parse_elevenlabs(payload: dict, period: dt.date):
     yield CostRecord(provider="elevenlabs", period=period, amount=amount, model="elevenlabs-tts")
 
 
+class _AnalyticsGatewayClient(_BaseCostClient):
+    """Base for gateways whose analytics API reports per-model dollar cost for a
+    window. JSON cred: {api_key, url?}. Subclasses set the default URL, the auth
+    header, and the query params. Endpoints are beta/best-effort and overridable.
+    """
+
+    DEFAULT_URL = ""
+    provider = ""
+
+    def __init__(self, admin_key, **kwargs):
+        creds = _json_cred(admin_key, '{"api_key":"…"}')
+        self._api_key = creds.get("api_key") or ""
+        self._url = creds.get("url") or self.DEFAULT_URL
+        super().__init__(self._api_key, **kwargs)
+
+    def _auth_headers(self) -> dict:
+        raise NotImplementedError
+
+    def fetch_costs(self, period: dt.date) -> list[CostRecord]:
+        start = month_start(period)
+        end = next_month(start)
+        resp = http_get_with_retry(
+            self._client,
+            self._url,
+            params={"start_date": start.isoformat(), "end_date": end.isoformat()},
+            headers=self._auth_headers(),
+        )
+        if resp.status_code in (401, 403):
+            raise ProviderError(f"{self.provider} rejected the API key.", resp.status_code)
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"{self.provider} error {resp.status_code}: {resp.text[:200]}", resp.status_code
+            )
+        return aggregate(list(_parse_analytics_cost(resp.json(), self.provider, start)))
+
+
+class PortkeyCostClient(_AnalyticsGatewayClient):
+    """Portkey analytics Get-Cost-Data API. Auth via x-portkey-api-key."""
+
+    DEFAULT_URL = "https://api.portkey.ai/v1/analytics/graphs/cost"
+    provider = "portkey"
+
+    def _auth_headers(self) -> dict:
+        return {"x-portkey-api-key": self._api_key}
+
+
+class HeliconeCostClient(_AnalyticsGatewayClient):
+    """Helicone cost query API. Auth via Bearer key."""
+
+    DEFAULT_URL = "https://api.helicone.ai/v1/cost/query"
+    provider = "helicone"
+
+    def _auth_headers(self) -> dict:
+        return {"Authorization": f"Bearer {self._api_key}"}
+
+
+def _parse_analytics_cost(payload, provider: str, period: dt.date):
+    rows = (
+        payload.get("data")
+        or payload.get("results")
+        or payload.get("cost")
+        or (payload if isinstance(payload, list) else [])
+    )
+    if isinstance(rows, dict):
+        rows = [rows]
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        amount = _to_decimal(
+            item.get("cost") or item.get("total_cost") or item.get("amount") or item.get("spend")
+        )
+        if amount is None:
+            continue
+        yield CostRecord(
+            provider=provider,
+            period=period,
+            amount=amount,
+            model=item.get("model"),
+            api_key_ref=item.get("metadata") or item.get("user") or item.get("api_key"),
+        )
+
+
 def make_cost_client(provider: str, admin_key: str) -> _BaseCostClient:
     if provider == "anthropic":
         return AnthropicCostClient(admin_key)
@@ -820,6 +912,10 @@ def make_cost_client(provider: str, admin_key: str) -> _BaseCostClient:
         return ModalCostClient(admin_key)
     if provider == "elevenlabs":
         return ElevenLabsCostClient(admin_key)
+    if provider == "portkey":
+        return PortkeyCostClient(admin_key)
+    if provider == "helicone":
+        return HeliconeCostClient(admin_key)
     if provider in _HOSTED_PROVIDERS:
         base_url, path = _HOSTED_PROVIDERS[provider]
         return HostedUsageCostClient(provider, admin_key, path, base_url=base_url)

@@ -169,4 +169,86 @@ export const CONNECTOR_GUIDES: Record<string, ConnectorGuide> = {
     placeholder: "ElevenLabs API key (xi-…)",
     docUrl: "https://elevenlabs.io/docs/api-reference/usage/get",
   },
+  groq: {
+    blurb: "Read-only. We read your monthly usage; cost is priced from tokens via our price book.",
+    steps: [
+      "Sign in at console.groq.com and open API Keys.",
+      "Create or copy an API key (starts with gsk_…).",
+      "Paste the key below. (For exact per-feature cost, the metering SDK is the precise path.)",
+    ],
+    placeholder: "gsk_…",
+    docUrl: "https://console.groq.com/keys",
+  },
+  mistral: {
+    blurb: "Read-only. We read your monthly usage; cost is priced from tokens via our price book.",
+    steps: [
+      "Sign in to the Mistral console (console.mistral.ai) and open API Keys.",
+      "Create or copy an API key.",
+      "Paste the key below.",
+    ],
+    placeholder: "Mistral API key",
+    docUrl: "https://console.mistral.ai/api-keys",
+  },
+  xai: {
+    blurb: "Read-only. We read your monthly usage; cost is priced from tokens via our price book.",
+    steps: [
+      "Sign in to the xAI console (console.x.ai) and open API Keys.",
+      "Create or copy an API key (starts with xai-…).",
+      "Paste the key below.",
+    ],
+    placeholder: "xai-…",
+    docUrl: "https://console.x.ai",
+  },
+  perplexity: {
+    blurb: "Read-only. We read your monthly usage; cost is priced from tokens via our price book.",
+    steps: [
+      "Sign in at perplexity.ai → Settings → API and generate a key.",
+      "Create or copy an API key (starts with pplx-…).",
+      "Paste the key below.",
+    ],
+    placeholder: "pplx-…",
+    docUrl: "https://www.perplexity.ai/settings/api",
+  },
+  cohere: {
+    blurb: "Read-only. We read your monthly usage; cost is priced from tokens via our price book.",
+    steps: [
+      "Sign in to the Cohere dashboard (dashboard.cohere.com) and open API Keys.",
+      "Copy a production API key.",
+      "Paste the key below.",
+    ],
+    placeholder: "Cohere API key",
+    docUrl: "https://dashboard.cohere.com/api-keys",
+  },
+  replicate: {
+    blurb: "Read-only. Replicate bills by usage; we read your account's reported spend.",
+    steps: [
+      "Sign in at replicate.com → Account → API tokens.",
+      "Copy your API token (starts with r8_…).",
+      "Paste the token below.",
+    ],
+    placeholder: "r8_…",
+    docUrl: "https://replicate.com/account/api-tokens",
+  },
+  portkey: {
+    blurb:
+      "Read-only. Portkey's analytics API reports per-model dollar cost across all providers you route through it.",
+    steps: [
+      "In the Portkey dashboard, open API Keys and copy your key.",
+      'Paste it below as JSON. (If your analytics endpoint differs, add a "url" field to override.)',
+    ],
+    placeholder: '{"api_key":"…"}',
+    multiline: true,
+    docUrl: "https://portkey.ai/docs/api-reference/analytics",
+  },
+  helicone: {
+    blurb:
+      "Read-only. Helicone tracks per-request cost across providers; we read its cost query API.",
+    steps: [
+      "In Helicone → Settings → API Keys, create a key (starts with sk-helicone-…).",
+      'Paste it below as JSON. (Add a "url" field to override the endpoint if needed.)',
+    ],
+    placeholder: '{"api_key":"sk-helicone-…"}',
+    multiline: true,
+    docUrl: "https://docs.helicone.ai/rest/overview",
+  },
 };

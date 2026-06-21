@@ -343,3 +343,53 @@ def test_new_json_connectors_require_json():
     for cls in (AzureCostClient, LiteLLMCostClient, VercelGatewayCostClient, ModalCostClient):
         with pytest.raises(ProviderError):
             cls("not-json")
+
+
+def test_portkey_reads_analytics_cost():
+    import json
+
+    from annapurna.providers import make_cost_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"  # read-only
+        assert request.headers["x-portkey-api-key"] == "pk-123"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"model": "gpt-4o", "cost": "84.20"},
+                    {"model": "claude", "cost": "5.80"},
+                ]
+            },
+        )
+
+    client = make_cost_client("portkey", json.dumps({"api_key": "pk-123"}))
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = client.fetch_costs(dt.date(2026, 5, 1))
+    by_model = {r.model: r.amount for r in records}
+    assert by_model["gpt-4o"] == Decimal("84.20")
+    assert by_model["claude"] == Decimal("5.80")
+
+
+def test_groq_prices_tokens_via_hosted_pattern():
+    from annapurna.providers import make_cost_client
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        # No dollar cost -> priced from tokens. groq llama-3.1-8b-instant = 0.05/0.08 per M.
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "model": "llama-3.1-8b-instant",
+                        "prompt_tokens": 1_000_000,
+                        "completion_tokens": 1_000_000,
+                    }
+                ]
+            },
+        )
+
+    client = make_cost_client("groq", "gsk-key")
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = client.fetch_costs(dt.date(2026, 5, 1))
+    assert records[0].amount == Decimal("0.1300")  # 0.05 + 0.08, computed by us

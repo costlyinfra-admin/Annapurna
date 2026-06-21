@@ -40,6 +40,16 @@ KNOWN_CONNECTORS = [
     # Compute platform (GPU time) and an audio-model provider.
     {"type": "modal", "name": "Modal (compute)", "category": "inference"},
     {"type": "elevenlabs", "name": "ElevenLabs (audio)", "category": "inference"},
+    # Single-vendor inference APIs (OpenAI-compatible; priced per token).
+    {"type": "groq", "name": "Groq", "category": "inference"},
+    {"type": "mistral", "name": "Mistral AI", "category": "inference"},
+    {"type": "xai", "name": "xAI (Grok)", "category": "inference"},
+    {"type": "perplexity", "name": "Perplexity", "category": "inference"},
+    {"type": "cohere", "name": "Cohere", "category": "inference"},
+    {"type": "replicate", "name": "Replicate", "category": "inference"},
+    # More gateways/proxies that aggregate spend across providers.
+    {"type": "portkey", "name": "Portkey (gateway)", "category": "inference"},
+    {"type": "helicone", "name": "Helicone (gateway)", "category": "inference"},
     {"type": "cursor", "name": "Cursor for Teams", "category": "build_activity"},
     # Identity provider for SSO/SCIM seat rosters (Cursor, Tabnine, Cody, …).
     {"type": "okta", "name": "Okta (SSO seats)", "category": "build_activity"},

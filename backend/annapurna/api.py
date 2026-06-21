@@ -101,7 +101,8 @@ class IngestRequest(BaseModel):
     provider: str = Field(
         pattern=(
             "^(anthropic|openai|google|openrouter|together|fireworks|bedrock"
-            "|azure|litellm|vercel|modal|elevenlabs)$"
+            "|azure|litellm|vercel|modal|elevenlabs"
+            "|groq|mistral|xai|perplexity|cohere|replicate|portkey|helicone)$"
         )
     )
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")  # YYYY-MM

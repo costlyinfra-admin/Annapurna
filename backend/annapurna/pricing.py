@@ -28,6 +28,10 @@ PRICED_PROVIDERS = {
     "openrouter",
     "deepinfra",
     "bedrock",
+    "mistral",
+    "xai",
+    "perplexity",
+    "cohere",
 }
 
 # Provider-agnostic model prices (single-vendor models).
@@ -71,6 +75,16 @@ _OSS_PRICES: dict[tuple[str, str], tuple[str, str]] = {
     ("deepinfra", "meta-llama-3.1-70b-instruct"): ("0.35", "0.40"),
     # OpenRouter (representative)
     ("openrouter", "meta-llama-3.1-70b-instruct"): ("0.59", "0.79"),
+    # Single-vendor frontier models on their own APIs (representative list prices,
+    # per 1M tokens; approximate — drift surfaces as a reconciliation delta).
+    ("mistral", "mistral-large-latest"): ("2", "6"),
+    ("mistral", "mistral-small-latest"): ("0.20", "0.60"),
+    ("xai", "grok-4"): ("3", "15"),
+    ("xai", "grok-3-mini"): ("0.30", "0.50"),
+    ("perplexity", "sonar"): ("1", "1"),
+    ("perplexity", "sonar-pro"): ("3", "15"),
+    ("cohere", "command-r-plus"): ("2.50", "10"),
+    ("cohere", "command-r"): ("0.15", "0.60"),
 }
 
 _MILLION = Decimal("1000000")
