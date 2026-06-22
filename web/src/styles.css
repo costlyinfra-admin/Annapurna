@@ -439,19 +439,15 @@ select {
   border-bottom-color: var(--accent);
 }
 
-/* Overview "By provider" tab — inference + build blocks, each with bars. */
-.provider-block {
-  margin-top: 1.4rem;
-}
-
-.provider-block:first-of-type {
-  margin-top: 0.6rem;
+/* Overview "By provider" tab — shared header + one card per source. */
+.breakdown-head {
+  margin-top: 0.5rem;
 }
 
 .breakdown-subhead {
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 650;
-  margin: 0 0 0.7rem;
+  margin: 0 0 0.85rem;
 }
 
 .provider-bars {

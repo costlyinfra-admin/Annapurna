@@ -566,6 +566,24 @@ def _hist_inference(conn, tenant_id, feature_id, provider, model, ref, latest, p
         )
 
 
+def _hist_build(conn, tenant_id, feature_id, dev, tool, ref, latest, periods, confidence):
+    """Write a monthly build-cost series for a feature.
+
+    Build cost is NOT one-off: developers keep enhancing and maintaining a
+    feature month over month, so its build spend recurs (heavier early during
+    active development, then a steadier maintenance tail). Mirrors the inference
+    history so the by-tool trend has real depth.
+    """
+    n = len(periods)
+    for i, period in enumerate(periods):
+        amount = round(_ramp(latest, i, n) * _SEASON[period.month - 1], 2)
+        if amount <= 0:
+            continue
+        _add_build_cost(
+            conn, tenant_id, feature_id, dev, tool, ref, amount, confidence, period=period
+        )
+
+
 def _add_extended_demo(conn, tenant_id, base: dict) -> int:
     """Add multi-year history for the base features + several new features.
 
@@ -608,6 +626,43 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         "low",
     )  # ends Apr 2026 (base has May)
 
+    # Build cost recurs too — backfill a monthly build series for each base
+    # feature's main contributor (the latest month is already in the base data).
+    _bld_hist = _months((2024, 6), 23)  # Jun 2024 -> Apr 2026 (base wrote May)
+    _hist_build(
+        conn,
+        tenant_id,
+        base["triage"],
+        "alice",
+        "claude_code",
+        "acme/core#1421",
+        117.00,
+        _bld_hist,
+        "high",
+    )
+    _hist_build(
+        conn,
+        tenant_id,
+        base["report"],
+        "alice",
+        "claude_code",
+        "acme/core#1455",
+        88.50,
+        _bld_hist,
+        "high",
+    )
+    _hist_build(
+        conn,
+        tenant_id,
+        base["soc"],
+        "carol",
+        "copilot",
+        "acme/soc-copilot#12",
+        42.25,
+        _bld_hist,
+        "med",
+    )
+
     # 2) New features, each with a full 24-month history (Jun 2024 -> May 2026).
     full = _months((2024, 6), 24)
     for f in _NEW_FEATURES:
@@ -626,6 +681,8 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
                 files_changed=files,
             )
             _add_build_cost(conn, tenant_id, fid, dev, tool, ref, amount, conf)
+            # Recurring build/maintenance over the prior months (latest already set).
+            _hist_build(conn, tenant_id, fid, dev, tool, ref, amount, full[:-1], conf)
         for provider, model, ref, latest, conf in f["models"]:
             _hist_inference(conn, tenant_id, fid, provider, model, ref, latest, full, conf)
         _add_usage(conn, tenant_id, fid, f["users"], f["events"])

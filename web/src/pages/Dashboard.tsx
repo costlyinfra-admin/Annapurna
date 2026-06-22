@@ -70,12 +70,12 @@ export function Dashboard() {
           <div className="total-card">
             <span className="total-label">Build cost</span>
             <span className="total-value">{money(data.totals.build_cost)}</span>
-            <span className="muted">one-time-ish</span>
+            <span className="muted">this month · recurs as devs build &amp; maintain</span>
           </div>
           <div className="total-card">
             <span className="total-label">Inference cost</span>
             <span className="total-value">{money(data.totals.inference_cost)}</span>
-            <span className="muted">monthly</span>
+            <span className="muted">this month · recurring run cost</span>
           </div>
         </div>
       )}

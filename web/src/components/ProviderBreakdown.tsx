@@ -69,8 +69,8 @@ export function ProviderBreakdown() {
   const nothing = data && data.by_provider.length === 0 && data.build_by_tool.length === 0;
 
   return (
-    <section className="detail-section">
-      <div className="section-head">
+    <>
+      <div className="section-head breakdown-head">
         <div>
           <h2>Spend by source</h2>
           <span className="section-sub muted">
@@ -97,7 +97,7 @@ export function ProviderBreakdown() {
         </div>
       ) : (
         <>
-          <div className="provider-block">
+          <section className="detail-section">
             <h3 className="breakdown-subhead">Inference (run) cost by provider</h3>
             {data.by_provider.length === 0 ? (
               <p className="muted">No inference cost in this window.</p>
@@ -119,9 +119,9 @@ export function ProviderBreakdown() {
                 </div>
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="provider-block">
+          <section className="detail-section">
             <h3 className="breakdown-subhead">Build cost by tool</h3>
             {data.build_by_tool.length === 0 ? (
               <p className="muted">No build cost in this window.</p>
@@ -143,9 +143,9 @@ export function ProviderBreakdown() {
                 </div>
               </div>
             )}
-          </div>
+          </section>
         </>
       )}
-    </section>
+    </>
   );
 }
