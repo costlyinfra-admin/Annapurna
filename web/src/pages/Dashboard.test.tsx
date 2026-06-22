@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -7,7 +7,7 @@ import { Dashboard } from "./Dashboard";
 
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { me: vi.fn(), dashboard: vi.fn() } };
+  return { ...actual, api: { me: vi.fn(), dashboard: vi.fn(), providerSpend: vi.fn() } };
 });
 
 const TRIAGE = {
@@ -109,5 +109,28 @@ describe("Dashboard (Overview)", () => {
     renderDashboard(); // DATA has features + build + inference cost
     await screen.findByText("Key insights");
     expect(screen.queryByText("Finish setting up")).not.toBeInTheDocument();
+  });
+
+  it("switches to the By provider tab and shows provider spend + trend", async () => {
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      window: "month",
+      total: 5450,
+      by_provider: [
+        { provider: "openai", amount: 4200, pct: 77.06, requests: 320000 },
+        { provider: "anthropic", amount: 1250, pct: 22.94, requests: 60000 },
+      ],
+      trend: [{ period: "2026-05-01", amount: 5450 }],
+    });
+    renderDashboard();
+    // Features tab is the default view.
+    await screen.findByText("Key insights");
+
+    fireEvent.click(screen.getByRole("tab", { name: "By provider" }));
+    expect(await screen.findByText("Inference spend by provider")).toBeInTheDocument();
+    await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith("month"));
+    expect(screen.getByText("openai")).toBeInTheDocument();
+    expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
+    // The feature table is no longer shown on this tab.
+    expect(screen.queryByText("Key insights")).not.toBeInTheDocument();
   });
 });

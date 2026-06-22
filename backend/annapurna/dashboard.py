@@ -486,3 +486,50 @@ def feature_inference(tenant_id: str, feature_id: str, window: str = "month") ->
         ]
 
     return {"window": window, "total": total, "by_model": by_model, "trend": trend}
+
+
+def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
+    """Tenant-wide inference spend grouped by provider over a window + a trend.
+
+    Inference (run) cost only — never blended with build cost (invariant 2).
+    Self-hosted pools appear under their provider label. ``window`` is month,
+    quarter (last 3 months), or year (12). Per-provider amounts sum to the total.
+    """
+    months = _WINDOW_MONTHS.get(window, 1)
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        latest = _resolve_period(conn, None)
+        start = _months_back(latest, months - 1)
+
+        provider_rows = conn.execute(
+            """
+            SELECT provider, SUM(amount), SUM(request_count)
+            FROM inference_cost
+            WHERE period BETWEEN %s AND %s
+            GROUP BY provider ORDER BY SUM(amount) DESC
+            """,
+            (start, latest),
+        ).fetchall()
+        total = sum(float(amount) for _p, amount, _req in provider_rows) or 0.0
+        by_provider = [
+            {
+                "provider": provider,
+                "amount": float(amount),
+                "pct": (float(amount) / total * 100.0) if total else 0.0,
+                "requests": int(req) if req is not None else None,
+            }
+            for provider, amount, req in provider_rows
+        ]
+        trend = [
+            {"period": p.isoformat(), "amount": float(amount)}
+            for p, amount in conn.execute(
+                """
+                SELECT period, SUM(amount)
+                FROM inference_cost
+                WHERE period BETWEEN %s AND %s
+                GROUP BY period ORDER BY period
+                """,
+                (start, latest),
+            ).fetchall()
+        ]
+
+    return {"window": window, "total": total, "by_provider": by_provider, "trend": trend}

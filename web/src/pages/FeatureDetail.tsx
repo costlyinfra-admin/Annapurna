@@ -9,10 +9,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, ApiError, type FeatureDetail as Detail, type FeatureInference } from "../api";
 import { ConfidenceBadge } from "../components/badges";
+import { TrendChart } from "../components/TrendChart";
 import { compact, money, num } from "../format";
 
 const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function FeatureDetail() {
   const { id = "" } = useParams();
@@ -265,31 +265,6 @@ function InferenceSection({
         </div>
       )}
     </section>
-  );
-}
-
-function TrendChart({ trend }: { trend: FeatureInference["trend"] }) {
-  if (trend.length === 0) return <p className="muted">No inference cost yet.</p>;
-  const max = Math.max(...trend.map((t) => t.amount), 1);
-  return (
-    <div className="trend-chart">
-      {trend.map((t) => {
-        const month = Number(t.period.slice(5, 7)) - 1;
-        return (
-          <div
-            className="trend-bar-wrap"
-            key={t.period}
-            title={`${MONTHS[month]} · ${money(t.amount)}`}
-          >
-            <div
-              className="trend-bar"
-              style={{ height: `${Math.max(3, (t.amount / max) * 100)}%` }}
-            />
-            <span className="trend-label">{MONTHS[month]}</span>
-          </div>
-        );
-      })}
-    </div>
   );
 }
 

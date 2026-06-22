@@ -10,10 +10,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError, type Dashboard as DashboardData, type DashboardRow } from "../api";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
+import { ProviderBreakdown } from "../components/ProviderBreakdown";
 import { compact, money, num } from "../format";
+
+type OverviewTab = "features" | "providers";
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const [tab, setTab] = useState<OverviewTab>("features");
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,11 +59,36 @@ export function Dashboard() {
         />
       )}
 
-      {data && <ExecutiveSummary data={data} />}
-
-      {data && <KeyInsights insights={data.insights} />}
+      {data === null && !error && <p className="muted">Loading…</p>}
 
       {data && (
+        <div className="tabs" role="tablist" aria-label="Overview views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "features"}
+            className={tab === "features" ? "tab active" : "tab"}
+            onClick={() => setTab("features")}
+          >
+            Features
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "providers"}
+            className={tab === "providers" ? "tab active" : "tab"}
+            onClick={() => setTab("providers")}
+          >
+            By provider
+          </button>
+        </div>
+      )}
+
+      {data && tab === "features" && <ExecutiveSummary data={data} />}
+
+      {data && tab === "features" && <KeyInsights insights={data.insights} />}
+
+      {data && tab === "features" && (
         <div className="totals-strip">
           <div className="total-card">
             <span className="total-label">Build cost</span>
@@ -74,16 +103,14 @@ export function Dashboard() {
         </div>
       )}
 
-      {data === null && !error ? (
-        <p className="muted">Loading…</p>
-      ) : data && data.features.length === 0 ? (
+      {data && tab === "features" && data.features.length === 0 ? (
         <div className="empty-state">
           <p className="empty-title">No features yet</p>
           <p className="muted">
             Your dashboard fills in as you finish setup above — start by discovering features.
           </p>
         </div>
-      ) : data ? (
+      ) : data && tab === "features" ? (
         <table className="features-table">
           <thead>
             <tr>
@@ -139,9 +166,13 @@ export function Dashboard() {
         </table>
       ) : null}
 
-      <p className="muted legend">
-        "Worth it?" is directional (cost per active user), not a revenue-based ROI.
-      </p>
+      {data && tab === "features" && (
+        <p className="muted legend">
+          "Worth it?" is directional (cost per active user), not a revenue-based ROI.
+        </p>
+      )}
+
+      {data && tab === "providers" && <ProviderBreakdown />}
     </div>
   );
 }

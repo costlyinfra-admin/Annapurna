@@ -125,6 +125,13 @@ export interface FeatureInference {
   trend: { period: string; amount: number }[];
 }
 
+export interface ProviderSpend {
+  window: string;
+  total: number;
+  by_provider: { provider: string; amount: number; pct: number; requests: number | null }[];
+  trend: { period: string; amount: number }[];
+}
+
 export interface SeatSource {
   id: string;
   provider: string;
@@ -242,6 +249,9 @@ export const api = {
 
   featureInference: (id: string, window: "month" | "quarter" | "year") =>
     request<FeatureInference>(`/features/${id}/inference?window=${window}`),
+
+  providerSpend: (window: "month" | "quarter" | "year") =>
+    request<ProviderSpend>(`/dashboard/providers?window=${window}`),
 
   setUsage: (id: string, activeUsers: number, period?: string) =>
     request<Feature>(`/features/${id}/usage`, {

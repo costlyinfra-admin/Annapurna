@@ -595,6 +595,13 @@ def create_app() -> FastAPI:
     ) -> dict:
         return dashboard.feature_inference(user["tenant_id"], feature_id, window)
 
+    @app.get("/api/dashboard/providers")
+    def dashboard_providers(
+        user: CurrentUser,
+        window: str = Query(default="month", pattern="^(month|quarter|year)$"),
+    ) -> dict:
+        return dashboard.spend_by_provider(user["tenant_id"], window)
+
     @app.put("/api/features/{feature_id}/usage")
     def set_feature_usage(feature_id: str, body: UsageRequest, user: CurrentUser) -> dict:
         period = _parse_period(body.period) if body.period else None

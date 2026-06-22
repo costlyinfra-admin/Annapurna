@@ -439,6 +439,47 @@ select {
   border-bottom-color: var(--accent);
 }
 
+/* Overview "By provider" tab — ranked spend bars. */
+.provider-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.provider-bar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.86rem;
+  margin-bottom: 0.25rem;
+}
+
+.provider-bar-name {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.provider-bar-amt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.provider-bar-track {
+  height: 8px;
+  background: var(--bg);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.provider-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+
 .settings-card {
   background: var(--card);
   border: 1px solid var(--line);

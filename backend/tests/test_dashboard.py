@@ -124,5 +124,24 @@ def test_feature_inference_breakdown_and_window(seeded):
     assert len(quarter["trend"]) == 3
 
 
+def test_spend_by_provider_breakdown_and_window(seeded):
+    # Month window: providers sum to the tenant's total inference for the month,
+    # ordered by spend, with pct shares that add to 100.
+    month = dashboard.spend_by_provider(seeded, "month")
+    by_provider = {p["provider"]: p for p in month["by_provider"]}
+    assert set(by_provider) >= {"openai", "anthropic"}
+    assert month["total"] == sum(p["amount"] for p in month["by_provider"])
+    assert abs(sum(p["pct"] for p in month["by_provider"]) - 100.0) < 1e-6
+    # Ordered by spend descending.
+    amounts = [p["amount"] for p in month["by_provider"]]
+    assert amounts == sorted(amounts, reverse=True)
+    assert len(month["trend"]) == 1
+
+    # Quarter window pulls in prior months and yields three trend points.
+    quarter = dashboard.spend_by_provider(seeded, "quarter")
+    assert len(quarter["trend"]) == 3
+    assert quarter["total"] >= month["total"]
+
+
 def test_detail_missing_feature_returns_none(seeded):
     assert dashboard.feature_detail(seeded, "00000000-0000-0000-0000-000000000000", PERIOD) is None
