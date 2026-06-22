@@ -156,6 +156,32 @@ Connect on the **Inference cost sources** step, then **Sync**:
 > Modal/EC2 when they're *not* running LLMs) isn't a build or inference cost, so
 > Annapurna doesn't ingest it.
 
+### Provider coverage — how much to trust each number
+
+Not every source reports dollars the same way. When you're sanity-checking
+totals against a provider's own console, expect this:
+
+| Tier | What it means | Connectors |
+|---|---|---|
+| **Authoritative dollars** | We read the provider's actual **billed cost** (its cost/billing API). Match these to the vendor's invoice. | Anthropic · OpenAI · Google Gemini · Amazon Bedrock · Azure OpenAI · LiteLLM · Vercel AI Gateway · Portkey · Helicone |
+| **Dollars if reported, else token-priced** | We use the provider's reported dollar amount when its usage API returns one; otherwise we compute cost from token counts × our price book (`pricing.py`). | OpenRouter · Together · Fireworks · Groq · Mistral · xAI (Grok) · Perplexity · Cohere · Replicate |
+| **Estimated** | No dollar API exists, so the number is a transparent estimate — directionally right, not invoice-exact. | ElevenLabs (characters × a per-1k-char rate) · Self-hosted pools (infra cost split by usage share) · SSO-seat build cost (seats × seat price book) |
+
+Two things make a "token-priced" or "estimated" total drift from the real bill,
+and both are **visible, never silent**:
+
+- **Price-book drift.** Per-token and per-seat rates live in `backend/annapurna/pricing.py`
+  and `seatpricing.py`. If a vendor changed prices, the number is off until the
+  table is updated — send the current rate and it's a one-line fix.
+- **Reconciliation gap.** Where we can compare a computed total to an
+  authoritative one, any difference is surfaced as an explicit gap (and unmapped
+  spend lands in **Unattributed**), so you always see *that* it's off, not a
+  confidently-wrong figure.
+
+> **Beta endpoints:** the **Vercel AI Gateway** and **Modal** cost endpoints are
+> still in beta; if a sync fails to reach them, add a `"url"` field to that
+> connector's JSON credential to point at the right endpoint.
+
 ---
 
 ## Worked example — a "Claude Code shop"
