@@ -410,6 +410,8 @@ select {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
   margin-bottom: -1px;
   padding: 0.6rem 0.9rem;
   font: inherit;
@@ -420,11 +422,19 @@ select {
   white-space: nowrap;
 }
 
+/* Stay transparent in every state — the underline (not a fill) marks the active
+   tab. These also out-specify the global filled-button hover/active styles. */
 .tab:hover {
+  background: none;
   color: var(--ink-soft);
 }
 
+.tab:active {
+  transform: none;
+}
+
 .tab.active {
+  background: none;
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
