@@ -130,6 +130,9 @@ export interface ProviderSpend {
   total: number;
   by_provider: { provider: string; amount: number; pct: number; requests: number | null }[];
   trend: { period: string; amount: number }[];
+  build_total: number;
+  build_by_tool: { tool: string; amount: number; pct: number }[];
+  build_trend: { period: string; amount: number }[];
 }
 
 export interface SeatSource {

@@ -120,16 +120,27 @@ describe("Dashboard (Overview)", () => {
         { provider: "anthropic", amount: 1250, pct: 22.94, requests: 60000 },
       ],
       trend: [{ period: "2026-05-01", amount: 5450 }],
+      build_total: 270,
+      build_by_tool: [
+        { tool: "claude_code", amount: 181, pct: 67.04 },
+        { tool: "cursor", amount: 89, pct: 32.96 },
+      ],
+      build_trend: [{ period: "2026-05-01", amount: 270 }],
     });
     renderDashboard();
     // Features tab is the default view.
     await screen.findByText("Key insights");
 
     fireEvent.click(screen.getByRole("tab", { name: "By provider" }));
-    expect(await screen.findByText("Inference spend by provider")).toBeInTheDocument();
+    // Both an inference-by-provider and a build-by-tool section render.
+    expect(await screen.findByText("Inference (run) cost by provider")).toBeInTheDocument();
+    expect(screen.getByText("Build cost by tool")).toBeInTheDocument();
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith("month"));
     expect(screen.getByText("openai")).toBeInTheDocument();
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
+    // Build cost broken out by tool, with a friendly tool label.
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
     // The summary/insights stay put across tabs; only the breakdown swaps,
     // so the feature table is gone but Key insights remains.
     expect(screen.queryByRole("table")).not.toBeInTheDocument();

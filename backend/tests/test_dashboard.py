@@ -137,6 +137,15 @@ def test_spend_by_provider_breakdown_and_window(seeded):
     assert amounts == sorted(amounts, reverse=True)
     assert len(month["trend"]) == 1
 
+    # Build cost is grouped by tool, separately from inference (never blended).
+    by_tool = {t["tool"]: t for t in month["build_by_tool"]}
+    assert set(by_tool) <= {"claude_code", "cursor", "copilot", "codex"}
+    assert month["build_total"] == sum(t["amount"] for t in month["build_by_tool"])
+    if month["build_by_tool"]:
+        assert abs(sum(t["pct"] for t in month["build_by_tool"]) - 100.0) < 1e-6
+    # Build trend is its own series, not summed with inference.
+    assert "build_trend" in month
+
     # Quarter window pulls in prior months and yields three trend points.
     quarter = dashboard.spend_by_provider(seeded, "quarter")
     assert len(quarter["trend"]) == 3

@@ -7,7 +7,7 @@ import { money } from "../format";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function TrendChart({ trend }: { trend: { period: string; amount: number }[] }) {
-  if (trend.length === 0) return <p className="muted">No inference cost yet.</p>;
+  if (trend.length === 0) return <p className="muted">No data yet.</p>;
   const max = Math.max(...trend.map((t) => t.amount), 1);
   return (
     <div className="trend-chart">

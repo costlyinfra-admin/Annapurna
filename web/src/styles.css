@@ -439,7 +439,21 @@ select {
   border-bottom-color: var(--accent);
 }
 
-/* Overview "By provider" tab — ranked spend bars. */
+/* Overview "By provider" tab — inference + build blocks, each with bars. */
+.provider-block {
+  margin-top: 1.4rem;
+}
+
+.provider-block:first-of-type {
+  margin-top: 0.6rem;
+}
+
+.breakdown-subhead {
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin: 0 0 0.7rem;
+}
+
 .provider-bars {
   list-style: none;
   margin: 0;

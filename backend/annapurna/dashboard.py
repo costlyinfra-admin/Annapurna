@@ -489,17 +489,21 @@ def feature_inference(tenant_id: str, feature_id: str, window: str = "month") ->
 
 
 def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
-    """Tenant-wide inference spend grouped by provider over a window + a trend.
+    """Tenant-wide spend by source over a window, with trends.
 
-    Inference (run) cost only — never blended with build cost (invariant 2).
-    Self-hosted pools appear under their provider label. ``window`` is month,
-    quarter (last 3 months), or year (12). Per-provider amounts sum to the total.
+    Two parallel, never-blended views (invariant 2):
+      - inference (run) cost grouped by provider — self-hosted pools appear
+        under their provider label;
+      - build cost grouped by coding tool.
+    Each carries its own total and monthly trend. ``window`` is month, quarter
+    (last 3 months), or year (12).
     """
     months = _WINDOW_MONTHS.get(window, 1)
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         latest = _resolve_period(conn, None)
         start = _months_back(latest, months - 1)
 
+        # ---- Inference: by provider + trend ----
         provider_rows = conn.execute(
             """
             SELECT provider, SUM(amount), SUM(request_count)
@@ -532,4 +536,44 @@ def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
             ).fetchall()
         ]
 
-    return {"window": window, "total": total, "by_provider": by_provider, "trend": trend}
+        # ---- Build: by coding tool + trend (kept separate from inference) ----
+        tool_rows = conn.execute(
+            """
+            SELECT tool, SUM(amount)
+            FROM build_cost
+            WHERE period BETWEEN %s AND %s
+            GROUP BY tool ORDER BY SUM(amount) DESC
+            """,
+            (start, latest),
+        ).fetchall()
+        build_total = sum(float(amount) for _t, amount in tool_rows) or 0.0
+        build_by_tool = [
+            {
+                "tool": tool,
+                "amount": float(amount),
+                "pct": (float(amount) / build_total * 100.0) if build_total else 0.0,
+            }
+            for tool, amount in tool_rows
+        ]
+        build_trend = [
+            {"period": p.isoformat(), "amount": float(amount)}
+            for p, amount in conn.execute(
+                """
+                SELECT period, SUM(amount)
+                FROM build_cost
+                WHERE period BETWEEN %s AND %s
+                GROUP BY period ORDER BY period
+                """,
+                (start, latest),
+            ).fetchall()
+        ]
+
+    return {
+        "window": window,
+        "total": total,
+        "by_provider": by_provider,
+        "trend": trend,
+        "build_total": build_total,
+        "build_by_tool": build_by_tool,
+        "build_trend": build_trend,
+    }
