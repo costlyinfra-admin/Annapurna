@@ -130,7 +130,9 @@ describe("Dashboard (Overview)", () => {
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith("month"));
     expect(screen.getByText("openai")).toBeInTheDocument();
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
-    // The feature table is no longer shown on this tab.
-    expect(screen.queryByText("Key insights")).not.toBeInTheDocument();
+    // The summary/insights stay put across tabs; only the breakdown swaps,
+    // so the feature table is gone but Key insights remains.
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByText("Key insights")).toBeInTheDocument();
   });
 });

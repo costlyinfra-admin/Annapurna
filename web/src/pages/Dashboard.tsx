@@ -61,34 +61,11 @@ export function Dashboard() {
 
       {data === null && !error && <p className="muted">Loading…</p>}
 
+      {data && <ExecutiveSummary data={data} />}
+
+      {data && <KeyInsights insights={data.insights} />}
+
       {data && (
-        <div className="tabs" role="tablist" aria-label="Overview views">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "features"}
-            className={tab === "features" ? "tab active" : "tab"}
-            onClick={() => setTab("features")}
-          >
-            Features
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "providers"}
-            className={tab === "providers" ? "tab active" : "tab"}
-            onClick={() => setTab("providers")}
-          >
-            By provider
-          </button>
-        </div>
-      )}
-
-      {data && tab === "features" && <ExecutiveSummary data={data} />}
-
-      {data && tab === "features" && <KeyInsights insights={data.insights} />}
-
-      {data && tab === "features" && (
         <div className="totals-strip">
           <div className="total-card">
             <span className="total-label">Build cost</span>
@@ -100,6 +77,31 @@ export function Dashboard() {
             <span className="total-value">{money(data.totals.inference_cost)}</span>
             <span className="muted">monthly</span>
           </div>
+        </div>
+      )}
+
+      {/* Tabs switch only the detailed breakdown below; the summary, insights,
+          and totals above stay put no matter which tab is active. */}
+      {data && (
+        <div className="tabs" role="tablist" aria-label="Cost breakdown">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "features"}
+            className={tab === "features" ? "tab active" : "tab"}
+            onClick={() => setTab("features")}
+          >
+            By feature
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "providers"}
+            className={tab === "providers" ? "tab active" : "tab"}
+            onClick={() => setTab("providers")}
+          >
+            By provider
+          </button>
         </div>
       )}
 
