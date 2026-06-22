@@ -398,6 +398,37 @@ select {
   margin-bottom: 0.3rem;
 }
 
+/* Tabbed sections (Cost sources: Inference · Self-hosted · Build). */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  margin: 0.4rem 0 1.5rem;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 0.6rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--ink-soft);
+}
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
 .settings-card {
   background: var(--card);
   border: 1px solid var(--line);

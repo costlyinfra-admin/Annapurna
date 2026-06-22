@@ -42,34 +42,42 @@ describe("CostSourcesPage", () => {
     vi.mocked(api.listSeatSources).mockResolvedValue([]);
   });
 
-  it("renders inference, self-hosted, and build sections with their panels", async () => {
+  it("splits sources into tabs; Inference is the default", async () => {
     renderPage();
     expect(await screen.findByRole("heading", { name: "Cost sources" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Inference cost" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Self-hosted models" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Build cost" })).toBeInTheDocument();
-    // An inference connector row, the self-hosted pool form, and the build sync
-    // controls all render.
+    // Three tabs, Inference active by default with its connector list shown.
+    expect(screen.getByRole("tab", { name: "Inference cost" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Self-hosted models" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Build cost" })).toBeInTheDocument();
     expect((await screen.findAllByText("Anthropic")).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Save pool" })).toBeInTheDocument();
-    // Build cost is now a list of collapsible method cards; the forms inside
-    // them stay hidden until a card is expanded.
+    // Other tabs' panels are not mounted until selected.
+    expect(screen.queryByRole("button", { name: "Save pool" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Usage-based tools/ })).not.toBeInTheDocument();
+
+    // Self-hosted tab shows the pool form.
+    fireEvent.click(screen.getByRole("tab", { name: "Self-hosted models" }));
+    expect(await screen.findByRole("button", { name: "Save pool" })).toBeInTheDocument();
+
+    // Build tab shows the collapsible method cards (forms hidden until expanded).
+    fireEvent.click(screen.getByRole("tab", { name: "Build cost" }));
     expect(screen.getByRole("button", { name: /Usage-based tools/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /GitHub Copilot/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sync Claude Code" })).not.toBeInTheDocument();
-    // The old standalone "Sync inference" dropdown is gone.
-    expect(screen.queryByRole("button", { name: "Sync" })).not.toBeInTheDocument();
   });
 
-  it("syncs Claude Code spend after opening the usage-based card", async () => {
+  it("syncs Claude Code spend from the Build tab's usage-based card", async () => {
     vi.mocked(api.syncClaudeCodeSpend).mockResolvedValue({
       total: 231,
       members: 4,
       spending_members: 3,
     });
     renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Build cost" }));
     // Expand the "Usage-based tools" method card, then sync.
-    fireEvent.click(await screen.findByRole("button", { name: /Usage-based tools/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Usage-based tools/ }));
     fireEvent.click(screen.getByRole("button", { name: "Sync Claude Code" }));
     await waitFor(() => expect(api.syncClaudeCodeSpend).toHaveBeenCalled());
     expect(await screen.findByText(/3 of 4 developers/)).toBeInTheDocument();
