@@ -76,7 +76,14 @@ export interface Dashboard {
   unattributed: { build_cost: number; inference_cost: number };
   highlights: DashboardHighlights;
   insights: Insight[];
-  totals: { build_cost: number; inference_cost: number };
+  totals: {
+    build_cost: number;
+    inference_cost: number;
+    prev_build_cost: number;
+    prev_inference_cost: number;
+    tokens_in: number;
+    tokens_out: number;
+  };
 }
 
 export interface FeatureDetail {

@@ -74,6 +74,26 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
             ).fetchall()
         }
 
+        # Prior month's totals (for the month-over-month deltas on the cards) and
+        # this month's token split (input vs output) from connector/hook rows.
+        prev = _months_back(start, 1)
+        prev_build = float(
+            conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) FROM build_cost WHERE period = %s", (prev,)
+            ).fetchone()[0]
+        )
+        prev_inference = float(
+            conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) FROM inference_cost WHERE period = %s", (prev,)
+            ).fetchone()[0]
+        )
+        tok = conn.execute(
+            "SELECT COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0) "
+            "FROM inference_cost WHERE period = %s",
+            (start,),
+        ).fetchone()
+        tokens_in, tokens_out = int(tok[0]), int(tok[1])
+
     rows = []
     for fid, name, _status, _disc in features:
         fid = str(fid)
@@ -104,6 +124,10 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
     totals = {
         "build_cost": sum(r["build_cost"] for r in rows) + unattributed["build_cost"],
         "inference_cost": sum(r["inference_cost"] for r in rows) + unattributed["inference_cost"],
+        "prev_build_cost": prev_build,
+        "prev_inference_cost": prev_inference,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
     }
     return {
         "period": start.isoformat(),

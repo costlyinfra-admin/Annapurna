@@ -70,12 +70,24 @@ export function Dashboard() {
           <div className="total-card">
             <span className="total-label">Build cost</span>
             <span className="total-value">{money(data.totals.build_cost)}</span>
-            <span className="muted">this month · recurs as devs build &amp; maintain</span>
+            <MonthDelta current={data.totals.build_cost} prev={data.totals.prev_build_cost} />
           </div>
           <div className="total-card">
             <span className="total-label">Inference cost</span>
             <span className="total-value">{money(data.totals.inference_cost)}</span>
-            <span className="muted">this month · recurring run cost</span>
+            <MonthDelta
+              current={data.totals.inference_cost}
+              prev={data.totals.prev_inference_cost}
+            />
+          </div>
+          <div className="total-card">
+            <span className="total-label">Total tokens</span>
+            <span className="total-value">
+              {compact(data.totals.tokens_in + data.totals.tokens_out)}
+            </span>
+            <span className="muted">
+              {compact(data.totals.tokens_in)} in · {compact(data.totals.tokens_out)} out
+            </span>
           </div>
         </div>
       )}
@@ -176,6 +188,21 @@ export function Dashboard() {
 
       {data && tab === "providers" && <ProviderBreakdown />}
     </div>
+  );
+}
+
+/** Month-over-month change vs the prior month. Up = more spend (shown as a
+ *  caution), down = less (good). No prior month -> a neutral note. */
+function MonthDelta({ current, prev }: { current: number; prev: number }) {
+  if (prev <= 0) {
+    return <span className="muted">no prior month yet</span>;
+  }
+  const pct = ((current - prev) / prev) * 100;
+  const up = current >= prev;
+  return (
+    <span className={`delta ${up ? "delta-up" : "delta-down"}`}>
+      {up ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}% vs last month
+    </span>
   );
 }
 

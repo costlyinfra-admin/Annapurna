@@ -31,7 +31,14 @@ const DATA = {
     { kind: "concentration", text: "AI threat triage represents 54% of all AI spend." },
     { kind: "governance", text: "Unattributed spend represents 9.7% of total AI costs." },
   ],
-  totals: { build_cost: 211, inference_cost: 4960 },
+  totals: {
+    build_cost: 211,
+    inference_cost: 4960,
+    prev_build_cost: 180,
+    prev_inference_cost: 5200,
+    tokens_in: 1_200_000,
+    tokens_out: 300_000,
+  },
 };
 
 function renderDashboard() {
@@ -84,12 +91,31 @@ describe("Dashboard (Overview)", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows month-over-month deltas and a token split", async () => {
+    renderDashboard();
+    await screen.findByText("Key insights");
+    // Build up (211 vs 180), inference down (4960 vs 5200) vs last month.
+    expect(screen.getByText(/▲ 17% vs last month/)).toBeInTheDocument();
+    expect(screen.getByText(/▼ 5% vs last month/)).toBeInTheDocument();
+    // New Total tokens card with the input/output split.
+    expect(screen.getByText("Total tokens")).toBeInTheDocument();
+    expect(screen.getByText("1.5M")).toBeInTheDocument();
+    expect(screen.getByText(/1\.2M in · 300K out/)).toBeInTheDocument();
+  });
+
   it("shows the setup checklist until features + build + inference all exist", async () => {
     // No features, no cost yet -> all three items pending.
     vi.mocked(api.dashboard).mockResolvedValue({
       ...DATA,
       features: [],
-      totals: { build_cost: 0, inference_cost: 0 },
+      totals: {
+        build_cost: 0,
+        inference_cost: 0,
+        prev_build_cost: 0,
+        prev_inference_cost: 0,
+        tokens_in: 0,
+        tokens_out: 0,
+      },
     });
     renderDashboard();
 

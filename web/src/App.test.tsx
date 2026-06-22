@@ -50,7 +50,14 @@ describe("App routing", () => {
       unattributed: { build_cost: 0, inference_cost: 0 },
       highlights: { most_expensive: null, optimization: null, highest_cost_per_user: null },
       insights: [],
-      totals: { build_cost: 0, inference_cost: 0 },
+      totals: {
+        build_cost: 0,
+        inference_cost: 0,
+        prev_build_cost: 0,
+        prev_inference_cost: 0,
+        tokens_in: 0,
+        tokens_out: 0,
+      },
     });
     renderApp();
     // The Overview page + the sidebar nav both render (proves the shell).

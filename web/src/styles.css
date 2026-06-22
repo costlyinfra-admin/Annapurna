@@ -1220,6 +1220,28 @@ a.exec-value:hover {
   color: var(--ink);
 }
 
+/* Let the totals cards share the row evenly (3 across, wrapping on narrow). */
+.totals-strip .total-card {
+  flex: 1 1 180px;
+}
+
+/* Month-over-month delta on the cost cards. Up = more spend (caution). */
+.delta {
+  font-size: 0.8rem;
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.delta-up {
+  color: var(--warn);
+}
+
+.delta-down {
+  color: var(--good);
+}
+
 /* ---------- Tables ---------- */
 .features-table,
 .mini-table {

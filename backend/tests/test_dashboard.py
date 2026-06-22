@@ -40,6 +40,18 @@ def test_dashboard_keeps_build_and_inference_separate(seeded):
     assert data["unattributed"]["inference_cost"] == 760.0
 
 
+def test_dashboard_totals_have_prev_month_and_token_split(seeded):
+    totals = dashboard.dashboard(seeded, PERIOD)["totals"]
+    # Month-over-month deltas: the prior month's spend is reported alongside.
+    assert "prev_build_cost" in totals
+    assert "prev_inference_cost" in totals
+    # April carried inference cost in the base fixture, so prev inference > 0.
+    assert totals["prev_inference_cost"] > 0
+    # Token split for the current month, summed from connector/hook rows.
+    assert totals["tokens_in"] > 0
+    assert totals["tokens_out"] > 0
+
+
 def test_dashboard_executive_highlights(seeded):
     h = dashboard.dashboard(seeded, PERIOD)["highlights"]
 
