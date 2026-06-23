@@ -1,18 +1,16 @@
 /**
- * Overview "By provider" tab — tenant-wide spend by source over a selectable
- * window, in two never-blended sections (invariant 2): inference (run) cost by
- * provider, and build cost by coding tool. Each has its own trend + ranked bars.
+ * Overview "By provider" tab — tenant-wide spend by source over the Overview's
+ * selected review period, in two never-blended sections (invariant 2): inference
+ * (run) cost by provider, and build cost by coding tool. Each has a trend + bars.
  */
 import { useEffect, useState } from "react";
-import { api, type ProviderSpend } from "../api";
+import { api, type ProviderSpend, type ReviewRange } from "../api";
 import { money } from "../format";
 import { TrendChart } from "./TrendChart";
 
-const WINDOWS = ["month", "quarter", "year"] as const;
-type Window = (typeof WINDOWS)[number];
-
 const EMPTY: ProviderSpend = {
-  window: "month",
+  start: "",
+  end: "",
   total: 0,
   by_provider: [],
   trend: [],
@@ -51,20 +49,20 @@ function SpendBars({ rows }: { rows: Bar[] }) {
   );
 }
 
-export function ProviderBreakdown() {
-  const [window, setWindow] = useState<Window>("month");
+export function ProviderBreakdown({ range }: { range: ReviewRange }) {
   const [data, setData] = useState<ProviderSpend | null>(null);
 
   useEffect(() => {
     let active = true;
+    setData(null);
     api
-      .providerSpend(window)
+      .providerSpend(range)
       .then((d) => active && setData(d))
-      .catch(() => active && setData({ ...EMPTY, window }));
+      .catch(() => active && setData(EMPTY));
     return () => {
       active = false;
     };
-  }, [window]);
+  }, [range]);
 
   const nothing = data && data.by_provider.length === 0 && data.build_by_tool.length === 0;
 
@@ -76,13 +74,6 @@ export function ProviderBreakdown() {
           <span className="section-sub muted">
             Inference (run) and build cost, shown separately — never blended.
           </span>
-        </div>
-        <div className="window-filter" role="group" aria-label="Time window">
-          {WINDOWS.map((w) => (
-            <button key={w} className={w === window ? "active" : ""} onClick={() => setWindow(w)}>
-              {w[0].toUpperCase() + w.slice(1)}
-            </button>
-          ))}
         </div>
       </div>
 

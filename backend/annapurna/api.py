@@ -567,13 +567,20 @@ def create_app() -> FastAPI:
         return compute.allocate(user["tenant_id"], _parse_period(body.period), body.pool_id)
 
     # ---- The three screens (M6) ----------------------------------------
+    _RANGE_RE = "^(this_month|last_month|last_3_months|last_6_months|last_12_months)$"
+
     @app.get("/api/dashboard")
     def get_dashboard(
         user: CurrentUser,
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        range: Optional[str] = Query(default=None, pattern=_RANGE_RE),
+        start: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        end: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
-        resolved = _parse_period(period) if period else None
-        return dashboard.dashboard(user["tenant_id"], resolved)
+        # `period` kept for back-compat (single month); start/end is a custom range.
+        s = _parse_period(start) if start else (_parse_period(period) if period else None)
+        e = _parse_period(end) if end else None
+        return dashboard.dashboard(user["tenant_id"], s, e, range)
 
     @app.get("/api/features/{feature_id}/detail")
     def feature_detail(
@@ -598,9 +605,13 @@ def create_app() -> FastAPI:
     @app.get("/api/dashboard/providers")
     def dashboard_providers(
         user: CurrentUser,
-        window: str = Query(default="month", pattern="^(month|quarter|year)$"),
+        range: Optional[str] = Query(default=None, pattern=_RANGE_RE),
+        start: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        end: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
-        return dashboard.spend_by_provider(user["tenant_id"], window)
+        s = _parse_period(start) if start else None
+        e = _parse_period(end) if end else None
+        return dashboard.spend_by_provider(user["tenant_id"], s, e, range)
 
     @app.put("/api/features/{feature_id}/usage")
     def set_feature_usage(feature_id: str, body: UsageRequest, user: CurrentUser) -> dict:

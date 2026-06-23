@@ -45,6 +45,41 @@ def _resolve_period(conn, period: Optional[dt.date]) -> dt.date:
     return row[0] if row and row[0] else month_start(dt.date.today())
 
 
+#: Named review periods, as (months_back_for_start, months_back_for_end) from the
+#: latest month with data. Data is bucketed by month, so day-windows aren't exact.
+_RANGE_SPECS = {
+    "this_month": (0, 0),
+    "last_month": (1, 1),
+    "last_3_months": (2, 0),
+    "last_6_months": (5, 0),
+    "last_12_months": (11, 0),
+}
+
+
+def _resolve_range(
+    conn,
+    range_token: Optional[str],
+    start: Optional[dt.date],
+    end: Optional[dt.date],
+) -> tuple[dt.date, dt.date]:
+    """Resolve a review period to an inclusive (start_month, end_month).
+
+    Explicit start/end (a custom range) win; otherwise a named range token is
+    resolved relative to the latest month that has data. Both are first-of-month.
+    """
+    if start is not None:
+        s = month_start(start)
+        e = month_start(end) if end is not None else s
+        return (s, e) if s <= e else (e, s)
+    latest = _resolve_period(conn, None)
+    back_start, back_end = _RANGE_SPECS.get(range_token or "this_month", (0, 0))
+    return _months_back(latest, back_start), _months_back(latest, back_end)
+
+
+def _month_count(start: dt.date, end: dt.date) -> int:
+    return (end.year - start.year) * 12 + (end.month - start.month) + 1
+
+
 def _worth_indicator(inference: float, users: Optional[int]) -> str:
     """Directional only (not ROI). healthy / watch / unknown."""
     if not users:
@@ -53,9 +88,20 @@ def _worth_indicator(inference: float, users: Optional[int]) -> str:
     return "healthy" if cost_per_user <= 10.0 else "watch"
 
 
-def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
+def dashboard(
+    tenant_id: str,
+    start: Optional[dt.date] = None,
+    end: Optional[dt.date] = None,
+    range_token: Optional[str] = None,
+) -> dict:
+    """Money screen over an inclusive month range (default: the latest month).
+
+    Build and inference cost are summed over the range; active users are the
+    range's latest month (a point-in-time count), and the deltas compare to the
+    equal-length window immediately before.
+    """
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
-        start = _resolve_period(conn, period)
+        start, end = _resolve_range(conn, range_token, start, end)
 
         features = conn.execute(
             """
@@ -65,32 +111,38 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
             """
         ).fetchall()
 
-        build = _rollup(conn, "build_cost", start)
-        inference, inference_unattributed = _inference_rollup(conn, start)
+        build = _rollup(conn, "build_cost", start, end)
+        inference, inference_unattributed = _inference_rollup(conn, start, end)
+        # Active users is a point-in-time count, not additive across months — use
+        # the range's latest month.
         usage = {
             str(fid): users
             for fid, users in conn.execute(
-                "SELECT feature_id, active_users FROM feature_usage WHERE period = %s", (start,)
+                "SELECT feature_id, active_users FROM feature_usage WHERE period = %s", (end,)
             ).fetchall()
         }
 
-        # Prior month's totals (for the month-over-month deltas on the cards) and
-        # this month's token split (input vs output) from connector/hook rows.
-        prev = _months_back(start, 1)
+        # Prior equal-length window (for the deltas) + the range's token split.
+        n = _month_count(start, end)
+        prev_end = _months_back(start, 1)
+        prev_start = _months_back(prev_end, n - 1)
         prev_build = float(
             conn.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM build_cost WHERE period = %s", (prev,)
+                "SELECT COALESCE(SUM(amount), 0) FROM build_cost WHERE period BETWEEN %s AND %s",
+                (prev_start, prev_end),
             ).fetchone()[0]
         )
         prev_inference = float(
             conn.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM inference_cost WHERE period = %s", (prev,)
+                "SELECT COALESCE(SUM(amount), 0) FROM inference_cost "
+                "WHERE period BETWEEN %s AND %s",
+                (prev_start, prev_end),
             ).fetchone()[0]
         )
         tok = conn.execute(
             "SELECT COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0) "
-            "FROM inference_cost WHERE period = %s",
-            (start,),
+            "FROM inference_cost WHERE period BETWEEN %s AND %s",
+            (start, end),
         ).fetchone()
         tokens_in, tokens_out = int(tok[0]), int(tok[1])
 
@@ -130,7 +182,10 @@ def dashboard(tenant_id: str, period: Optional[dt.date] = None) -> dict:
         "tokens_out": tokens_out,
     }
     return {
-        "period": start.isoformat(),
+        "period": end.isoformat(),  # the range's latest month (back-compat)
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "months": n,
         "features": rows,
         "unattributed": unattributed,
         "highlights": _highlights(rows),
@@ -238,11 +293,13 @@ def _highlights(rows: list) -> dict:
     }
 
 
-def _rollup(conn, table: str, period: dt.date) -> dict:
-    """feature_id (str or None) -> {amount, confidence(min)} for a cost table/period."""
+def _rollup(conn, table: str, start: dt.date, end: Optional[dt.date] = None) -> dict:
+    """feature_id (str or None) -> {amount, confidence(min)} for a cost table/range."""
+    end = end or start
     rows = conn.execute(
-        f"SELECT feature_id, amount, confidence FROM {table} WHERE period = %s",  # noqa: S608
-        (period,),
+        f"SELECT feature_id, amount, confidence FROM {table} "  # noqa: S608
+        "WHERE period BETWEEN %s AND %s",
+        (start, end),
     ).fetchall()
     out: dict = {}
     for feature_id, amount, confidence in rows:
@@ -263,18 +320,20 @@ def _accum(
         entry["requests"] = (entry["requests"] or 0) + int(requests)
 
 
-def _inference_rollup(conn, period: dt.date) -> tuple[dict, float]:
-    """Hook-aware inference per feature + Unattributed amount.
+def _inference_rollup(conn, start: dt.date, end: Optional[dt.date] = None) -> tuple[dict, float]:
+    """Hook-aware inference per feature + Unattributed amount, over a month range.
 
     Where the hook is active for a provider, hook rows give the per-feature truth
     and the connector (cost_api) total is the bill; the gap (bill - hook) flows to
     Unattributed. Providers without a hook attribute via their connector rows as
-    before. This prevents double-counting the same spend.
+    before. This prevents double-counting the same spend. Reconciliation is over
+    the whole range (bill and hook totals are summed across months first).
     """
+    end = end or start
     rows = conn.execute(
         "SELECT feature_id, amount, confidence, source, provider, request_count "
-        "FROM inference_cost WHERE period = %s",
-        (period,),
+        "FROM inference_cost WHERE period BETWEEN %s AND %s",
+        (start, end),
     ).fetchall()
     hook_providers = {provider for (_f, _a, _c, src, provider, _r) in rows if src == "hook"}
 
@@ -512,20 +571,22 @@ def feature_inference(tenant_id: str, feature_id: str, window: str = "month") ->
     return {"window": window, "total": total, "by_model": by_model, "trend": trend}
 
 
-def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
-    """Tenant-wide spend by source over a window, with trends.
+def spend_by_provider(
+    tenant_id: str,
+    start: Optional[dt.date] = None,
+    end: Optional[dt.date] = None,
+    range_token: Optional[str] = None,
+) -> dict:
+    """Tenant-wide spend by source over a month range, with trends.
 
     Two parallel, never-blended views (invariant 2):
       - inference (run) cost grouped by provider — self-hosted pools appear
         under their provider label;
       - build cost grouped by coding tool.
-    Each carries its own total and monthly trend. ``window`` is month, quarter
-    (last 3 months), or year (12).
+    Each carries its own total and per-month trend across the range.
     """
-    months = _WINDOW_MONTHS.get(window, 1)
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
-        latest = _resolve_period(conn, None)
-        start = _months_back(latest, months - 1)
+        start, end = _resolve_range(conn, range_token, start, end)
 
         # ---- Inference: by provider + trend ----
         provider_rows = conn.execute(
@@ -535,7 +596,7 @@ def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
             WHERE period BETWEEN %s AND %s
             GROUP BY provider ORDER BY SUM(amount) DESC
             """,
-            (start, latest),
+            (start, end),
         ).fetchall()
         total = sum(float(amount) for _p, amount, _req in provider_rows) or 0.0
         by_provider = [
@@ -556,7 +617,7 @@ def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
                 WHERE period BETWEEN %s AND %s
                 GROUP BY period ORDER BY period
                 """,
-                (start, latest),
+                (start, end),
             ).fetchall()
         ]
 
@@ -568,7 +629,7 @@ def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
             WHERE period BETWEEN %s AND %s
             GROUP BY tool ORDER BY SUM(amount) DESC
             """,
-            (start, latest),
+            (start, end),
         ).fetchall()
         build_total = sum(float(amount) for _t, amount in tool_rows) or 0.0
         build_by_tool = [
@@ -588,12 +649,13 @@ def spend_by_provider(tenant_id: str, window: str = "month") -> dict:
                 WHERE period BETWEEN %s AND %s
                 GROUP BY period ORDER BY period
                 """,
-                (start, latest),
+                (start, end),
             ).fetchall()
         ]
 
     return {
-        "window": window,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
         "total": total,
         "by_provider": by_provider,
         "trend": trend,

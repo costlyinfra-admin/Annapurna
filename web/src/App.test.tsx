@@ -46,6 +46,9 @@ describe("App routing", () => {
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
     vi.mocked(api.dashboard).mockResolvedValue({
       period: "2026-05-01",
+      start: "2026-05-01",
+      end: "2026-05-01",
+      months: 1,
       features: [],
       unattributed: { build_cost: 0, inference_cost: 0 },
       highlights: { most_expensive: null, optimization: null, highest_cost_per_user: null },

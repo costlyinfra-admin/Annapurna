@@ -40,6 +40,18 @@ def test_dashboard_keeps_build_and_inference_separate(seeded):
     assert data["unattributed"]["inference_cost"] == 760.0
 
 
+def test_dashboard_range_sums_across_months(seeded):
+    # A 3-month range (Mar–May) sums more inference than the single latest month.
+    one = dashboard.dashboard(seeded, range_token="this_month")
+    three = dashboard.dashboard(seeded, range_token="last_3_months")
+    assert three["months"] == 3
+    assert one["months"] == 1
+    assert three["totals"]["inference_cost"] > one["totals"]["inference_cost"]
+    # The response reports the resolved window.
+    assert three["start"] < three["end"]
+    assert one["start"] == one["end"]
+
+
 def test_dashboard_totals_have_prev_month_and_token_split(seeded):
     totals = dashboard.dashboard(seeded, PERIOD)["totals"]
     # Month-over-month deltas: the prior month's spend is reported alongside.
@@ -139,7 +151,7 @@ def test_feature_inference_breakdown_and_window(seeded):
 def test_spend_by_provider_breakdown_and_window(seeded):
     # Month window: providers sum to the tenant's total inference for the month,
     # ordered by spend, with pct shares that add to 100.
-    month = dashboard.spend_by_provider(seeded, "month")
+    month = dashboard.spend_by_provider(seeded, range_token="this_month")
     by_provider = {p["provider"]: p for p in month["by_provider"]}
     assert set(by_provider) >= {"openai", "anthropic"}
     assert month["total"] == sum(p["amount"] for p in month["by_provider"])
@@ -158,8 +170,8 @@ def test_spend_by_provider_breakdown_and_window(seeded):
     # Build trend is its own series, not summed with inference.
     assert "build_trend" in month
 
-    # Quarter window pulls in prior months and yields three trend points.
-    quarter = dashboard.spend_by_provider(seeded, "quarter")
+    # A 3-month range pulls in prior months and yields three trend points.
+    quarter = dashboard.spend_by_provider(seeded, range_token="last_3_months")
     assert len(quarter["trend"]) == 3
     assert quarter["total"] >= month["total"]
 

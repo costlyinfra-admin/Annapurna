@@ -72,6 +72,9 @@ export interface Insight {
 
 export interface Dashboard {
   period: string;
+  start: string;
+  end: string;
+  months: number;
   features: DashboardRow[];
   unattributed: { build_cost: number; inference_cost: number };
   highlights: DashboardHighlights;
@@ -132,8 +135,32 @@ export interface FeatureInference {
   trend: { period: string; amount: number }[];
 }
 
+/** A review period: a named month-range, or an explicit custom month span. */
+export type RangeKind =
+  | "this_month"
+  | "last_month"
+  | "last_3_months"
+  | "last_6_months"
+  | "last_12_months"
+  | "custom";
+export interface ReviewRange {
+  kind: RangeKind;
+  start?: string; // YYYY-MM (custom only)
+  end?: string; // YYYY-MM (custom only)
+}
+
+export function rangeQuery(r?: ReviewRange): string {
+  if (!r) return "";
+  if (r.kind === "custom") {
+    // Until both months are picked, fall back to the backend default.
+    return r.start && r.end ? `?start=${r.start}&end=${r.end}` : "";
+  }
+  return `?range=${r.kind}`;
+}
+
 export interface ProviderSpend {
-  window: string;
+  start: string;
+  end: string;
   total: number;
   by_provider: { provider: string; amount: number; pct: number; requests: number | null }[];
   trend: { period: string; amount: number }[];
@@ -251,8 +278,7 @@ export const api = {
     }),
 
   // ---- The three screens (M6) ----
-  dashboard: (period?: string) =>
-    request<Dashboard>(`/dashboard${period ? `?period=${period}` : ""}`),
+  dashboard: (range?: ReviewRange) => request<Dashboard>(`/dashboard${rangeQuery(range)}`),
 
   featureDetail: (id: string, period?: string) =>
     request<FeatureDetail>(`/features/${id}/detail${period ? `?period=${period}` : ""}`),
@@ -260,8 +286,8 @@ export const api = {
   featureInference: (id: string, window: "month" | "quarter" | "year") =>
     request<FeatureInference>(`/features/${id}/inference?window=${window}`),
 
-  providerSpend: (window: "month" | "quarter" | "year") =>
-    request<ProviderSpend>(`/dashboard/providers?window=${window}`),
+  providerSpend: (range?: ReviewRange) =>
+    request<ProviderSpend>(`/dashboard/providers${rangeQuery(range)}`),
 
   setUsage: (id: string, activeUsers: number, period?: string) =>
     request<Feature>(`/features/${id}/usage`, {

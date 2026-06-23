@@ -24,6 +24,9 @@ const TRIAGE = {
 
 const DATA = {
   period: "2026-05-01",
+  start: "2026-05-01",
+  end: "2026-05-01",
+  months: 1,
   features: [TRIAGE],
   unattributed: { build_cost: 30, inference_cost: 760 },
   highlights: { most_expensive: TRIAGE, optimization: null, highest_cost_per_user: TRIAGE },
@@ -139,7 +142,8 @@ describe("Dashboard (Overview)", () => {
 
   it("switches to the By provider tab and shows provider spend + trend", async () => {
     vi.mocked(api.providerSpend).mockResolvedValue({
-      window: "month",
+      start: "2026-05-01",
+      end: "2026-05-01",
       total: 5450,
       by_provider: [
         { provider: "openai", amount: 4200, pct: 77.06, requests: 320000 },
@@ -161,7 +165,8 @@ describe("Dashboard (Overview)", () => {
     // Both an inference-by-provider and a build-by-tool section render.
     expect(await screen.findByText("Inference (run) cost by provider")).toBeInTheDocument();
     expect(screen.getByText("Build cost by tool")).toBeInTheDocument();
-    await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith("month"));
+    // The provider tab follows the Overview's selected period (default this month).
+    await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "this_month" }));
     expect(screen.getByText("openai")).toBeInTheDocument();
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
     // Build cost broken out by tool, with a friendly tool label.
@@ -171,5 +176,16 @@ describe("Dashboard (Overview)", () => {
     // so the feature table is gone but Key insights remains.
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.getByText("Key insights")).toBeInTheDocument();
+  });
+
+  it("refetches with the chosen review period", async () => {
+    renderDashboard();
+    await screen.findByText("Key insights");
+    expect(api.dashboard).toHaveBeenCalledWith({ kind: "this_month" });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Review period" }), {
+      target: { value: "last_3_months" },
+    });
+    await waitFor(() => expect(api.dashboard).toHaveBeenCalledWith({ kind: "last_3_months" }));
   });
 });
