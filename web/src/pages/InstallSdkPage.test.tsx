@@ -17,7 +17,10 @@ describe("InstallSdkPage", () => {
   it("renders the install instructions and the snippet", () => {
     render(<InstallSdkPage />);
     expect(screen.getByRole("heading", { name: "Install SDK" })).toBeInTheDocument();
-    expect(screen.getByText(/pip install annapurna-meter/)).toBeInTheDocument();
+    // Not on PyPI yet — the page must show the install-from-source command that
+    // actually works, never a `pip install annapurna-meter` that would fail.
+    expect(screen.getByText(/pip install "git\+https:\/\/github\.com/)).toBeInTheDocument();
+    expect(screen.queryByText(/pip install annapurna-meter$/m)).not.toBeInTheDocument();
   });
 
   it("generates an ingest token on demand", async () => {

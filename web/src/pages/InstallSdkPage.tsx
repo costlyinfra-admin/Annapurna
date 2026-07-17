@@ -62,10 +62,15 @@ export function InstallSdkPage() {
         <h2>2. Install and record calls</h2>
         <p className="muted">
           Pass the <code>feature_id</code> the call belongs to (anything unmapped lands in
-          Unattributed). Python first; a Node SDK follows the same shape.
+          Unattributed). Python first; a Node SDK follows the same shape. The SDK is stdlib-only
+          with no dependencies, reports on a background thread, and is a no-op until the token above
+          is set — it can't break your request path.
+        </p>
+        <p className="muted">
+          Not on PyPI yet — install from source (the repo is public, so this needs no auth):
         </p>
         <pre className="snippet">{`# Python
-pip install annapurna-meter
+pip install "git+https://github.com/costlyinfra-admin/Annapurna.git#subdirectory=sdk/python"
 
 from annapurna_meter import Meter
 meter = Meter(feature_id="<feature-id>")
