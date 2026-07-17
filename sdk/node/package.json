@@ -9,5 +9,12 @@
   "scripts": {
     "test": "node --test"
   },
-  "license": "AGPL-3.0-or-later"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/costlyinfra-admin/Annapurna.git",
+    "directory": "sdk/node"
+  },
+  "homepage": "https://github.com/costlyinfra-admin/Annapurna/tree/main/sdk/node",
+  "files": ["index.mjs", "LICENSE"],
+  "license": "Apache-2.0"
 }

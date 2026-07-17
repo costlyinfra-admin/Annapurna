@@ -3,17 +3,19 @@ name: Release SDK
 # Publishes the metering SDKs on a version tag:
 #   git tag sdk-v0.1.0 && git push origin sdk-v0.1.0
 #
-# PREREQUISITES (one-time, done by a human — see docs/deploy.md):
-#   1. Register the names so nobody else can squat them:
-#        - PyPI:  project `annapurna-meter`   (https://pypi.org/manage/projects/)
-#        - npm:   scope   `@annapurna`        (https://www.npmjs.com/org/create)
-#   2. Add repo secrets:
-#        - PYPI_API_TOKEN  (PyPI -> Account settings -> API tokens)
-#        - NPM_TOKEN       (npm -> Access Tokens -> Automation)
+# PyPI uses TRUSTED PUBLISHING (OpenID Connect) — no API token is stored
+# anywhere. One-time human setup (see docs/deploy.md):
+#   1. Create a PyPI account (2FA is mandatory) and, under Account -> Publishing,
+#      add a *pending* GitHub Actions publisher:
+#        project = annapurna-meter, owner = costlyinfra-admin,
+#        repo = Annapurna, workflow = release-sdk.yml, environment = pypi
+#   2. Create a GitHub Environment named `pypi` (repo Settings -> Environments).
+#   The name is CLAIMED on the first successful publish — it can't be reserved.
 #
-# Until those exist this workflow is inert: it only runs on `sdk-v*` tags, and
-# publishing is skipped when the corresponding secret is absent — so the build
-# and tests still act as a release dry-run.
+# npm currently uses a token (npm trusted publishing can replace it later):
+#   3. Create the @annapurna scope on npm, then add repo secret NPM_TOKEN
+#      (npm -> Access Tokens -> Automation). Without it the Node job just
+#      tests and skips publishing.
 
 on:
   push:
@@ -22,8 +24,11 @@ on:
 
 jobs:
   python:
-    name: Publish Python SDK
+    name: Publish Python SDK (PyPI trusted publishing)
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC — lets PyPI verify this workflow; no token needed
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,23 +50,18 @@ jobs:
           twine check dist/*
 
       - name: Publish to PyPI
-        if: ${{ env.PYPI_API_TOKEN != '' }}
-        working-directory: sdk/python
-        env:
-          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/*
-
-      - name: Skip note
-        if: ${{ env.PYPI_API_TOKEN == '' }}
-        env:
-          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: echo "PYPI_API_TOKEN not set — built and checked, skipped upload."
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist
 
   node:
     name: Publish Node SDK
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # for npm provenance attestation
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -77,12 +77,9 @@ jobs:
         if: ${{ env.NPM_TOKEN != '' }}
         working-directory: sdk/node
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --provenance --access public
 
       - name: Skip note
         if: ${{ env.NPM_TOKEN == '' }}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: echo "NPM_TOKEN not set — tested, skipped publish."
