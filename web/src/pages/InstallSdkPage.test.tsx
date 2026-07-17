@@ -17,8 +17,9 @@ describe("InstallSdkPage", () => {
   it("renders the install instructions and the snippet", () => {
     render(<InstallSdkPage />);
     expect(screen.getByRole("heading", { name: "Install SDK" })).toBeInTheDocument();
-    // Published on PyPI, so the page shows the plain install command.
+    // Published on PyPI and npm — both plain install commands are shown.
     expect(screen.getByText(/pip install annapurna-meter/)).toBeInTheDocument();
+    expect(screen.getByText(/npm install annapurna-meter/)).toBeInTheDocument();
   });
 
   it("generates an ingest token on demand", async () => {

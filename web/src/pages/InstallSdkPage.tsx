@@ -62,17 +62,25 @@ export function InstallSdkPage() {
         <h2>2. Install and record calls</h2>
         <p className="muted">
           Pass the <code>feature_id</code> the call belongs to (anything unmapped lands in
-          Unattributed). Python first; a Node SDK follows the same shape. The SDK is Apache-2.0,
-          stdlib-only with no dependencies, reports on a background thread, and is a no-op until the
-          token above is set — it can't break your request path.
+          Unattributed). Python and Node share the same shape. The SDK is Apache-2.0,
+          dependency-free, reports on a background thread, and is a no-op until the token above is
+          set — it can't break your request path.
         </p>
-        <pre className="snippet">{`# Python  (use pip3/python3 -m pip on macOS)
+        <span className="chart-title">Python</span>
+        <pre className="snippet">{`# use pip3 / python3 -m pip on macOS
 pip install annapurna-meter
 
 from annapurna_meter import Meter
 meter = Meter(feature_id="<feature-id>")
 resp = client.messages.create(model="claude-sonnet-4-6", ...)
 meter.record_anthropic(resp)`}</pre>
+        <span className="chart-title">Node</span>
+        <pre className="snippet">{`npm install annapurna-meter
+
+import { Meter } from "annapurna-meter";
+const meter = new Meter("<feature-id>");
+const resp = await openai.chat.completions.create({ model: "gpt-4o", ... });
+meter.recordOpenAI(resp);`}</pre>
       </section>
     </div>
   );
