@@ -11,7 +11,7 @@ every SDK call is a no-op.
 
 - [`python/`](python) — `annapurna_meter` (stdlib only). `Meter.record(...)`,
   `record_anthropic(resp)`, `record_openai(resp)`.
-- [`node/`](node) — `@annapurna/meter` (no deps, Node ≥ 18). Same surface:
+- [`node/`](node) — `annapurna-meter` (no deps, Node ≥ 18). Same surface:
   `record(...)`, `recordAnthropic(resp)`, `recordOpenAI(resp)`.
 
 Both are **fail-safe**: reporting is fire-and-forget and never raises into the
@@ -32,7 +32,7 @@ meter.record_anthropic(resp)   # <-- the whole hook
 Node:
 
 ```js
-import { Meter } from "@annapurna/meter";
+import { Meter } from "annapurna-meter";
 const meter = new Meter("feature-threat-triage");
 
 const resp = await openai.chat.completions.create({ model: "gpt-4o", ... });

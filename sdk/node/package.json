@@ -1,5 +1,5 @@
 {
-  "name": "@annapurna/meter",
+  "name": "annapurna-meter",
   "version": "0.1.0",
   "description": "Annapurna metering hook — emit per-call LLM usage events for per-feature cost attribution.",
   "type": "module",
