@@ -286,9 +286,15 @@ This is the same "reconcile against reality" ethos as bill reconciliation.
     OpenAI/Google), never OSS hosts we can't price; `cache_utilization` is derived
     from SDK prefix signals for now and will be strengthened by connector cache
     fields in M-opt-5.
-- **M-opt-4 — UI.** Measured vs estimated split on the feature page + SDK nudge.
+- **M-opt-4 — UI.** ✅ Done. The feature page's Optimization section now fetches
+  `/opportunities` and renders a **Measured** group (grounded-in-metered-calls tag,
+  cache-utilization note, per-lever cards with the evidence sentence, the specific
+  fix, a confidence badge, and an expandable evidence trail) above a demoted
+  **Estimated** group ("directional estimate"). Empty measured state shows an SDK
+  nudge linking to Install SDK. Demo seed adds `usage_signal` rows for AI threat
+  triage (3 duplicate fingerprints + a 4,100-token uncached prefix, ~8% cached).
   *Accept:* measured opportunities render with evidence, $ and confidence; demo
-  seed includes signal rows.
+  seed includes signal rows; browser-verified.
 - **M-opt-5 — Connector cache fields (Tier A).** Read provider cache tokens; show
   utilization. *Accept:* utilization surfaces without the SDK.
 - **M-opt-6 — Reconciliation loop.** `optimization_action` + projected-vs-realized.

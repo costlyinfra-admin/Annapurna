@@ -1595,6 +1595,128 @@ a.exec-value:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Optimization: measured (grounded) vs estimated (heuristic) groups */
+.opt-group {
+  margin-top: 0.4rem;
+}
+
+.opt-group-estimated {
+  margin-top: 1.1rem;
+  padding-top: 1.1rem;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.opt-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+
+.opt-group-title {
+  margin: 0 0 0.15rem;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.opt-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--bg, #f1f5f9);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+.opt-tag-measured {
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border-color: var(--accent-ring);
+}
+
+.opt-nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-sm);
+  padding: 0.8rem 1rem;
+}
+
+.opt-nudge p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.opt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.opt-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.9rem;
+}
+
+.opt-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.opt-item-lever {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.opt-item-savings {
+  font-weight: 700;
+  color: var(--success, #15803d);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.opt-item-evidence {
+  margin: 0.35rem 0 0.15rem;
+  font-size: 0.9rem;
+}
+
+.opt-item-fix {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.opt-trail {
+  margin-top: 0.5rem;
+}
+
+.opt-trail summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+
+.opt-trail summary:hover {
+  color: var(--accent-hover);
+}
+
 /* Window filter (Month / Quarter / Year) */
 .window-filter {
   display: inline-flex;

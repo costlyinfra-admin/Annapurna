@@ -121,16 +121,49 @@ export interface FeatureDetail {
     source: string | null;
   }[];
   inference_sources: string[];
-  optimization: {
-    opportunities: {
-      opportunity: string;
-      savings: number;
-      confidence: string;
-      rationale: string;
-    }[];
+  optimization: HeuristicOptimization;
+}
+
+/** The heuristic (estimated) optimization tier — directional rules of thumb. */
+export interface HeuristicOptimization {
+  opportunities: {
+    opportunity: string;
+    savings: number;
+    confidence: string;
+    rationale: string;
+  }[];
+  monthly_savings: number;
+  annual_savings: number;
+}
+
+/** A measured optimization opportunity — grounded in usage signals, priced from
+ * the price book. Every number is explainable via its evidence trail. */
+export interface MeasuredOpportunity {
+  lever: string;
+  savings: number;
+  confidence: string;
+  evidence: string;
+  fix: string;
+  trail: {
+    fingerprint: string;
+    provider: string;
+    model: string;
+    call_count?: number;
+    calls?: number;
+    prefix_tokens?: number;
+    cached?: number;
+  }[];
+}
+
+export interface FeatureOpportunities {
+  period: string;
+  measured: {
+    opportunities: MeasuredOpportunity[];
     monthly_savings: number;
     annual_savings: number;
   };
+  estimated: HeuristicOptimization;
+  cache_utilization: number | null;
 }
 
 export interface FeatureInference {
@@ -292,6 +325,11 @@ export const api = {
 
   featureInference: (id: string, window: "month" | "quarter" | "year") =>
     request<FeatureInference>(`/features/${id}/inference?window=${window}`),
+
+  featureOpportunities: (id: string, period?: string) =>
+    request<FeatureOpportunities>(
+      `/features/${id}/opportunities${period ? `?period=${period}` : ""}`,
+    ),
 
   providerSpend: (range?: ReviewRange) =>
     request<ProviderSpend>(`/dashboard/providers${rangeQuery(range)}`),

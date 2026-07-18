@@ -157,6 +157,48 @@ def _add_usage(conn, tenant_id, feature_id, active_users, events, period=DEFAULT
     )
 
 
+def _add_usage_signal(
+    conn,
+    tenant_id,
+    feature_id,
+    kind,
+    fingerprint,
+    call_count,
+    *,
+    provider="anthropic",
+    model="claude-sonnet-4-6",
+    tokens_in=0,
+    tokens_out=0,
+    prefix_tokens=None,
+    cached_count=0,
+    period=DEFAULT_PERIOD,
+):
+    """Seed one optimize-mode signal (opt spec §5). Demo-only — fingerprints are
+    illustrative opaque handles, not real salted hashes."""
+    conn.execute(
+        """
+        INSERT INTO usage_signal (tenant_id, feature_id, provider, model, period,
+                                  signal_kind, fingerprint, call_count, prefix_tokens,
+                                  tokens_in, tokens_out, cached_count)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            tenant_id,
+            feature_id,
+            provider,
+            model,
+            period,
+            kind,
+            fingerprint,
+            call_count,
+            prefix_tokens,
+            tokens_in,
+            tokens_out,
+            cached_count,
+        ),
+    )
+
+
 def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bool = False) -> dict:
     """Populate one tenant with sample features and costs. Returns a small summary.
 
@@ -686,6 +728,38 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         for provider, model, ref, latest, conf in f["models"]:
             _hist_inference(conn, tenant_id, fid, provider, model, ref, latest, full, conf)
         _add_usage(conn, tenant_id, fid, f["users"], f["events"])
+
+    # 2b) Optimize-mode signals for AI threat triage (opt spec §5) — so the demo
+    #     shows MEASURED opportunities, not just heuristic estimates. Duplicate
+    #     calls (avoidable repeats) + a large uncached system-prompt prefix.
+    for fp, calls, tin, tout in (
+        ("dup-alert-format", 620, 52_000_000, 3_000_000),
+        ("dup-enrich-lookup", 430, 30_000_000, 1_500_000),
+        ("dup-triage-batch", 190, 14_000_000, 900_000),
+    ):
+        _add_usage_signal(
+            conn,
+            tenant_id,
+            base["triage"],
+            "duplicate",
+            fp,
+            calls,
+            tokens_in=tin,
+            tokens_out=tout,
+        )
+    # A 4,100-token static system prompt across 26,000 calls, ~8% already cached.
+    _add_usage_signal(
+        conn,
+        tenant_id,
+        base["triage"],
+        "prefix",
+        "prefix-system-triage",
+        26_000,
+        prefix_tokens=4100,
+        cached_count=2080,
+        tokens_in=106_600_000,
+        tokens_out=5_200_000,
+    )
 
     # 3) A self-hosted / open-source feature: Llama-3.1-70B on the company's own
     #    GPUs. Its run cost is a $6,500/mo infra pool allocated by usage (med

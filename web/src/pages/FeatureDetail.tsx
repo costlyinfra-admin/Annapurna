@@ -7,10 +7,22 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, ApiError, type FeatureDetail as Detail, type FeatureInference } from "../api";
+import {
+  api,
+  ApiError,
+  type FeatureDetail as Detail,
+  type FeatureInference,
+  type FeatureOpportunities,
+  type MeasuredOpportunity,
+} from "../api";
 import { ConfidenceBadge } from "../components/badges";
 import { TrendChart } from "../components/TrendChart";
 import { compact, money, num } from "../format";
+
+const LEVER_LABELS: Record<string, string> = {
+  duplicate_calls: "Duplicate calls",
+  prompt_caching: "Prompt caching",
+};
 
 const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
 
@@ -121,7 +133,7 @@ export function FeatureDetail() {
           />
 
           {/* ---- Optimization opportunities ---- */}
-          <OptimizationSection optimization={detail.optimization} />
+          <OptimizationSection featureId={detail.feature_id} />
 
           {/* ---- Evidence trail ---- */}
           <section className="evidence-trail">
@@ -149,27 +161,156 @@ export function FeatureDetail() {
   );
 }
 
-function OptimizationSection({ optimization }: { optimization: Detail["optimization"] }) {
-  const { opportunities, monthly_savings, annual_savings } = optimization;
+function OptimizationSection({ featureId }: { featureId: string }) {
+  const [data, setData] = useState<FeatureOpportunities | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .featureOpportunities(featureId)
+      .then((d) => active && setData(d))
+      .catch(() => active && setFailed(true));
+    return () => {
+      active = false;
+    };
+  }, [featureId]);
+
   return (
     <section className="detail-section">
       <div className="section-head">
         <div>
           <h2>Optimization opportunities</h2>
           <span className="section-sub muted">
-            Directional estimates from this feature&apos;s usage — not guaranteed savings.
+            Measured findings from metered calls, plus directional estimates from usage.
+          </span>
+        </div>
+      </div>
+
+      {failed ? (
+        <p className="muted">Could not load optimization opportunities.</p>
+      ) : data === null ? (
+        <p className="muted">Loading…</p>
+      ) : (
+        <>
+          <MeasuredGroup measured={data.measured} cacheUtilization={data.cache_utilization} />
+          <EstimatedGroup estimated={data.estimated} />
+        </>
+      )}
+    </section>
+  );
+}
+
+function MeasuredGroup({
+  measured,
+  cacheUtilization,
+}: {
+  measured: FeatureOpportunities["measured"];
+  cacheUtilization: number | null;
+}) {
+  const { opportunities, monthly_savings, annual_savings } = measured;
+  return (
+    <div className="opt-group">
+      <div className="opt-group-head">
+        <div>
+          <h3 className="opt-group-title">
+            Measured <span className="opt-tag opt-tag-measured">grounded in metered calls</span>
+          </h3>
+          {cacheUtilization != null && (
+            <span className="section-sub muted">
+              {Math.round(cacheUtilization * 100)}% of prefixed input is already cached.
+            </span>
+          )}
+        </div>
+        {monthly_savings > 0 && (
+          <div className="savings-headline">
+            <span className="savings-label">Measured savings</span>
+            <span className="savings-month">{money(monthly_savings)}/mo</span>
+            <span className="savings-year muted">{money(annual_savings)}/yr</span>
+          </div>
+        )}
+      </div>
+
+      {opportunities.length === 0 ? (
+        <div className="opt-nudge">
+          <p>
+            No measured opportunities yet. Install the metering SDK with <code>optimize=True</code>{" "}
+            to turn the estimates below into measured, per-call findings.
+          </p>
+          <Link to="/install-sdk" className="link">
+            Install SDK →
+          </Link>
+        </div>
+      ) : (
+        <ul className="opt-list">
+          {opportunities.map((o) => (
+            <MeasuredRow key={o.lever} opp={o} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function MeasuredRow({ opp }: { opp: MeasuredOpportunity }) {
+  return (
+    <li className="opt-item">
+      <div className="opt-item-main">
+        <div className="opt-item-lever">
+          <strong>{LEVER_LABELS[opp.lever] ?? opp.lever}</strong>
+          <ConfidenceBadge level={opp.confidence} />
+        </div>
+        <span className="opt-item-savings">{money(opp.savings)}/mo</span>
+      </div>
+      <p className="opt-item-evidence">{opp.evidence}</p>
+      <p className="opt-item-fix muted">{opp.fix}</p>
+      {opp.trail.length > 0 && (
+        <details className="opt-trail">
+          <summary>Evidence trail ({opp.trail.length})</summary>
+          <ul className="evidence-list">
+            {opp.trail.map((t, i) => (
+              <li key={i} className="evidence-item">
+                <span className="evidence-type">{t.model}</span>
+                <span className="evidence-ref">{t.fingerprint}…</span>
+                {t.call_count != null && <span className="muted">{num(t.call_count)} repeats</span>}
+                {t.prefix_tokens != null && (
+                  <span className="muted">
+                    {num(t.prefix_tokens)}-tok prefix · {num(t.calls ?? 0)} calls
+                    {t.cached != null && ` · ${num(t.cached)} cached`}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </li>
+  );
+}
+
+function EstimatedGroup({ estimated }: { estimated: FeatureOpportunities["estimated"] }) {
+  const { opportunities, monthly_savings, annual_savings } = estimated;
+  return (
+    <div className="opt-group opt-group-estimated">
+      <div className="opt-group-head">
+        <div>
+          <h3 className="opt-group-title">
+            Estimated <span className="opt-tag">directional estimate</span>
+          </h3>
+          <span className="section-sub muted">
+            Rules of thumb from this feature&apos;s usage — not guaranteed savings.
           </span>
         </div>
         {monthly_savings > 0 && (
           <div className="savings-headline">
-            <span className="savings-label">Potential savings</span>
+            <span className="savings-label">Estimated savings</span>
             <span className="savings-month">{money(monthly_savings)}/mo</span>
             <span className="savings-year muted">{money(annual_savings)}/yr</span>
           </div>
         )}
       </div>
       {opportunities.length === 0 ? (
-        <p className="muted">No optimization opportunities identified for this period.</p>
+        <p className="muted">No estimated opportunities for this period.</p>
       ) : (
         <table className="mini-table">
           <thead>
@@ -192,7 +333,7 @@ function OptimizationSection({ optimization }: { optimization: Detail["optimizat
           </tbody>
         </table>
       )}
-    </section>
+    </div>
   );
 }
 
