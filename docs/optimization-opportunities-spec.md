@@ -295,8 +295,15 @@ This is the same "reconcile against reality" ethos as bill reconciliation.
   triage (3 duplicate fingerprints + a 4,100-token uncached prefix, ~8% cached).
   *Accept:* measured opportunities render with evidence, $ and confidence; demo
   seed includes signal rows; browser-verified.
-- **M-opt-5 — Connector cache fields (Tier A).** Read provider cache tokens; show
-  utilization. *Accept:* utilization surfaces without the SDK.
+- **M-opt-5 — Connector cache fields (Tier A).** ✅ Done. The Anthropic/OpenAI cost
+  parsers now read cache-read + token fields tolerantly (Anthropic
+  `cache_read_input_tokens`, OpenAI `cached_tokens`) into `CostRecord`; migration
+  0021 adds `inference_cost.cached_tokens_in`, threaded through `ingest_records`.
+  `optimize_measured` computes cache utilization from these connector/hook cache
+  tokens (cached input / total input — a floor), falling back to the SDK prefix
+  ratio. Demo: Report generator (no SDK) reports cached tokens, so it shows "8% of
+  input is already cached" from connector data alone. *Accept:* utilization
+  surfaces without the SDK; browser-verified on a signal-free feature.
 - **M-opt-6 — Reconciliation loop.** `optimization_action` + projected-vs-realized.
   *Accept:* marking applied and advancing a period shows the realized delta.
 

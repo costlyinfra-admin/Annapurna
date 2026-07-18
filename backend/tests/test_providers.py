@@ -100,6 +100,66 @@ def test_openai_parses_costs():
     assert records[0].amount == Decimal("1850.00")
 
 
+def test_anthropic_captures_cache_read_tokens():
+    # When the report includes usage, cache_read_input_tokens is captured (§8).
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "results": [
+                            {
+                                "workspace_id": "ws_triage",
+                                "model": "claude-sonnet-4-6",
+                                "amount": "4200.00",
+                                "input_tokens": 10_000_000,
+                                "output_tokens": 500_000,
+                                "cache_read_input_tokens": 800_000,
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    rec = client.fetch_costs(dt.date(2026, 5, 1))[0]
+    assert rec.tokens_in == 10_000_000
+    assert rec.cached_tokens_in == 800_000
+
+
+def test_openai_captures_cached_tokens():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "results": [
+                            {
+                                "project_id": "proj_reports",
+                                "line_item": "gpt-4o",
+                                "amount": {"value": "1850.00", "currency": "USD"},
+                                "input_tokens": 6_000_000,
+                                "input_tokens_details": {"cached_tokens": 480_000},
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+
+    client = OpenAICostClient(
+        "sk-openai-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    rec = client.fetch_costs(dt.date(2026, 5, 1))[0]
+    assert rec.tokens_in == 6_000_000
+    assert rec.cached_tokens_in == 480_000
+
+
 def test_google_gemini_parses_cost_by_project():
     from annapurna.providers import GoogleCostClient
 

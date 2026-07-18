@@ -121,13 +121,15 @@ def _add_inference_cost(
     confidence,
     source="cost_api",
     period=DEFAULT_PERIOD,
+    cached_tokens_in=None,
 ):
     conn.execute(
         """
         INSERT INTO inference_cost (tenant_id, feature_id, provider, model,
                                     api_key_ref, amount, period, tokens_in,
-                                    tokens_out, request_count, source, confidence)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    tokens_out, request_count, cached_tokens_in,
+                                    source, confidence)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
@@ -140,6 +142,7 @@ def _add_inference_cost(
             tokens_in,
             tokens_out,
             requests,
+            cached_tokens_in,
             source,
             confidence,
         ),
@@ -354,6 +357,9 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         "high",
     )
     # Report generator spans three models (the pie's showcase): gpt-4o dominant.
+    # gpt-4o reports cached input tokens from the cost API — so cache utilization
+    # surfaces for this feature WITHOUT the SDK (opt spec §8, Tier A): 720K / 9M
+    # total input ≈ 8% cached.
     _add_inference_cost(
         conn,
         tenant_id,
@@ -366,6 +372,7 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         750_000,
         60_000,
         "med",
+        cached_tokens_in=720_000,
     )
     _add_inference_cost(
         conn,

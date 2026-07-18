@@ -111,6 +111,34 @@ def _prefix_opportunity(rows: list) -> Optional[dict]:
     }
 
 
+def _cache_utilization(conn, feature_id, start, signal_rows) -> Optional[float]:
+    """Share of input already served from the provider's prompt cache (opt spec §8).
+
+    Prefers connector/hook cache token fields (Tier A — works WITHOUT the SDK):
+    cached input tokens / total input tokens. Falls back to the SDK prefix signals'
+    call-level ratio when no provider cache data is available. None when neither.
+    """
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(cached_tokens_in), 0),
+               COALESCE(SUM(tokens_in), 0),
+               COUNT(cached_tokens_in)
+        FROM inference_cost
+        WHERE feature_id = %s AND period = %s
+        """,
+        (feature_id, start),
+    ).fetchone()
+    # If any row reported cache tokens, the ratio is over ALL input (a floor —
+    # providers that don't report cache count as uncached, never overstated).
+    if row and row[2] and row[1]:
+        return round(int(row[0]) / int(row[1]), 4)
+
+    # Fallback: SDK prefix signals (share of prefixed calls served from cache).
+    total_calls = sum(int(r[4]) for r in signal_rows if r[0] == "prefix")
+    total_cached = sum(int(r[8]) for r in signal_rows if r[0] == "prefix")
+    return round(total_cached / total_calls, 4) if total_calls else None
+
+
 def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[float]]:
     rows = conn.execute(
         """
@@ -131,11 +159,7 @@ def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[flo
             opportunities.append(opp)
     opportunities.sort(key=lambda o: o["savings"], reverse=True)
 
-    # Current cache utilization from the prefix signals: share of prefixed calls
-    # already served from cache. None when the SDK has reported no prefix rows.
-    total_calls = sum(int(r[4]) for r in rows if r[0] == "prefix")
-    total_cached = sum(int(r[8]) for r in rows if r[0] == "prefix")
-    cache_utilization = round(total_cached / total_calls, 4) if total_calls else None
+    cache_utilization = _cache_utilization(conn, feature_id, start, rows)
 
     monthly = round(sum(o["savings"] for o in opportunities), 2)
     measured = {

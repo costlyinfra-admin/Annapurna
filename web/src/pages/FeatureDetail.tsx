@@ -218,7 +218,7 @@ function MeasuredGroup({
           </h3>
           {cacheUtilization != null && (
             <span className="section-sub muted">
-              {Math.round(cacheUtilization * 100)}% of prefixed input is already cached.
+              {Math.round(cacheUtilization * 100)}% of input is already cached.
             </span>
           )}
         </div>

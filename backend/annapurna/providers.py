@@ -40,6 +40,9 @@ class CostRecord:
     tokens_in: Optional[int] = None
     tokens_out: Optional[int] = None
     request_count: Optional[int] = None
+    # Input tokens served from the provider's prompt cache (opt spec §8). None when
+    # the provider doesn't report it; used for connector-only cache utilization.
+    cached_tokens_in: Optional[int] = None
 
 
 class ProviderError(Exception):
@@ -79,6 +82,8 @@ def aggregate(records: list[CostRecord]) -> list[CostRecord]:
         agg.tokens_in = (agg.tokens_in or 0) + (r.tokens_in or 0)
         agg.tokens_out = (agg.tokens_out or 0) + (r.tokens_out or 0)
         agg.request_count = (agg.request_count or 0) + (r.request_count or 0)
+        if r.cached_tokens_in is not None:
+            agg.cached_tokens_in = (agg.cached_tokens_in or 0) + r.cached_tokens_in
     return list(buckets.values())
 
 
@@ -212,12 +217,28 @@ def _parse_google(payload: dict, period: dt.date):
         )
 
 
+def _int_or_none(value) -> Optional[int]:
+    try:
+        return int(value) if value is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _parse_anthropic(payload: dict, period: dt.date):
     for bucket in payload.get("data", []):
         for item in bucket.get("results", []) or bucket.get("items", []):
             amount = _to_decimal(item.get("amount") or item.get("cost") or item.get("amount_usd"))
             if amount is None:
                 continue
+            # Cache/token fields when the report includes usage (parsed tolerantly;
+            # None when absent). cache_read_input_tokens = input served from cache.
+            cache_read = _int_or_none(item.get("cache_read_input_tokens"))
+            input_tokens = _int_or_none(item.get("input_tokens"))
+            if input_tokens is None and cache_read is not None:
+                # Some reports split input; total = uncached + cache read (+ creation).
+                uncached = _int_or_none(item.get("uncached_input_tokens")) or 0
+                creation = _int_or_none(item.get("cache_creation_input_tokens")) or 0
+                input_tokens = uncached + creation + cache_read
             yield CostRecord(
                 provider="anthropic",
                 period=period,
@@ -226,7 +247,19 @@ def _parse_anthropic(payload: dict, period: dt.date):
                 api_key_ref=item.get("api_key_id"),
                 project=item.get("workspace_id"),
                 model=item.get("model"),
+                tokens_in=input_tokens,
+                tokens_out=_int_or_none(item.get("output_tokens")),
+                cached_tokens_in=cache_read,
             )
+
+
+def _openai_cached_tokens(item: dict) -> Optional[int]:
+    details = item.get("input_tokens_details") or item.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        cached = _int_or_none(details.get("cached_tokens"))
+        if cached is not None:
+            return cached
+    return _int_or_none(item.get("cached_tokens"))
 
 
 def _parse_openai(payload: dict, period: dt.date):
@@ -249,6 +282,9 @@ def _parse_openai(payload: dict, period: dt.date):
                 api_key_ref=item.get("api_key_id"),
                 project=item.get("project_id"),
                 model=item.get("model") or item.get("line_item"),
+                tokens_in=_int_or_none(item.get("input_tokens") or item.get("prompt_tokens")),
+                tokens_out=_int_or_none(item.get("output_tokens") or item.get("completion_tokens")),
+                cached_tokens_in=_openai_cached_tokens(item),
             )
 
 

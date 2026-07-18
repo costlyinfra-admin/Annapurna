@@ -6,6 +6,7 @@ from __future__ import annotations
 import datetime as dt
 
 from annapurna import features, hook, optimize_measured
+from annapurna.db import app_dsn, connect, tenant_tx
 
 PERIOD = dt.date(2026, 6, 1)
 
@@ -126,6 +127,31 @@ def test_no_signals_yields_empty_measured_but_keeps_estimated(tenant_id):
     assert result["measured"]["monthly_savings"] == 0.0
     assert result["cache_utilization"] is None
     assert "estimated" in result
+
+
+def test_cache_utilization_surfaces_from_connector_without_sdk(tenant_id):
+    # Tier A (opt spec §8, M-opt-5): the provider cost API reported cached input
+    # tokens. Utilization must surface with NO SDK (usage_signal) rows at all.
+    report = features.add_feature(tenant_id, "Report generator")
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        # One row reports cache tokens (openai), one doesn't (anthropic). The ratio
+        # is over ALL input — a floor: 720k cached / (6M + 3M) input = 8%.
+        conn.execute(
+            """
+            INSERT INTO inference_cost (tenant_id, feature_id, provider, model, amount,
+                                        period, tokens_in, tokens_out, cached_tokens_in,
+                                        source, confidence)
+            VALUES
+              (%s, %s, 'openai', 'gpt-4o', 1250, %s, 6000000, 750000, 720000, 'cost_api', 'med'),
+              (%s, %s, 'anthropic', 'claude-haiku-4-5', 200, %s, 3000000, 100000, NULL,
+               'cost_api', 'med')
+            """,
+            (tenant_id, report["id"], PERIOD, tenant_id, report["id"], PERIOD),
+        )
+
+    result = optimize_measured.opportunities(tenant_id, report["id"], PERIOD)
+    assert result["cache_utilization"] == 0.08  # 720k / 9M, no usage_signal rows
+    assert result["measured"]["opportunities"] == []
 
 
 def test_unknown_feature_returns_none(tenant_id):

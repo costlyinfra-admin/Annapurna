@@ -86,8 +86,9 @@ def ingest_records(
                 """
                 INSERT INTO inference_cost
                     (tenant_id, feature_id, provider, model, api_key_ref, amount, currency,
-                     period, tokens_in, tokens_out, request_count, source, confidence)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cost_api', %s)
+                     period, tokens_in, tokens_out, request_count, cached_tokens_in,
+                     source, confidence)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cost_api', %s)
                 """,
                 (
                     tenant_id,
@@ -101,6 +102,7 @@ def ingest_records(
                     record.tokens_in,
                     record.tokens_out,
                     record.request_count,
+                    record.cached_tokens_in,
                     confidence,
                 ),
             )

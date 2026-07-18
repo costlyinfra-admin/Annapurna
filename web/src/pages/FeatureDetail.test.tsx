@@ -192,7 +192,7 @@ describe("FeatureDetail", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("$634/mo")).toBeInTheDocument(); // measured savings headline (rounded)
     // Current cache utilization context.
-    expect(screen.getByText(/8% of prefixed input is already cached/)).toBeInTheDocument();
+    expect(screen.getByText(/8% of input is already cached/)).toBeInTheDocument();
     // Estimated tier is present but clearly separate (the heuristic lever).
     expect(screen.getByText("Model downgrade")).toBeInTheDocument();
     expect(screen.getByText("directional estimate")).toBeInTheDocument();
