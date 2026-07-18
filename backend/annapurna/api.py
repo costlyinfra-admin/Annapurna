@@ -127,6 +127,8 @@ class HookEvent(BaseModel):
     tokens_out: int = Field(default=0, ge=0)
     feature_id: Optional[str] = None
     occurred_at: Optional[str] = None
+    latency_ms: Optional[int] = Field(default=None, ge=0)  # SDK v0.2 (optional)
+    metadata: Optional[dict] = None  # e.g. {"customer_id": "..."}
 
 
 class HookEventsRequest(BaseModel):

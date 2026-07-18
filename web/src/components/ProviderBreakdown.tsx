@@ -17,6 +17,8 @@ const EMPTY: ProviderSpend = {
   build_total: 0,
   build_by_tool: [],
   build_trend: [],
+  customer_total: 0,
+  by_customer: [],
 };
 
 /** "claude_code" -> "Claude Code". */
@@ -135,6 +137,23 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
               </div>
             )}
           </section>
+
+          {/* Only when the metering SDK has tagged customers (metadata.customer_id). */}
+          {data.by_customer.length > 0 && (
+            <section className="detail-section">
+              <h3 className="breakdown-subhead">Inference cost by customer</h3>
+              <p className="section-sub muted">
+                From metered (SDK) calls tagged with a customer — your top spenders.
+              </p>
+              <SpendBars
+                rows={data.by_customer.map((c) => ({
+                  label: c.customer_id,
+                  amount: c.amount,
+                  pct: c.pct,
+                }))}
+              />
+            </section>
+          )}
         </>
       )}
     </>

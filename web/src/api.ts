@@ -96,7 +96,12 @@ export interface FeatureDetail {
   status: string;
   discovery_confidence: string | null;
   period: string;
-  headline: { build_cost: number; inference_cost: number; active_users: number | null };
+  headline: {
+    build_cost: number;
+    inference_cost: number;
+    active_users: number | null;
+    avg_latency_ms: number | null;
+  };
   build_total: number;
   build_contributors: number;
   build_by_developer: {
@@ -167,6 +172,8 @@ export interface ProviderSpend {
   build_total: number;
   build_by_tool: { tool: string; amount: number; pct: number }[];
   build_trend: { period: string; amount: number }[];
+  customer_total: number;
+  by_customer: { customer_id: string; amount: number; pct: number; requests: number | null }[];
 }
 
 export interface SeatSource {

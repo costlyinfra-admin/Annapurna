@@ -20,7 +20,7 @@ const DETAIL = {
   status: "confirmed",
   discovery_confidence: "high",
   period: "2026-05-01",
-  headline: { build_cost: 181, inference_cost: 4200, active_users: 540 },
+  headline: { build_cost: 181, inference_cost: 4200, active_users: 540, avg_latency_ms: 820 },
   build_total: 181,
   build_contributors: 2,
   build_by_developer: [
@@ -99,6 +99,9 @@ describe("FeatureDetail", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "AI threat triage" })).toBeInTheDocument();
+
+    // Avg latency from metered (SDK) calls shows in the header.
+    expect(screen.getByText(/820 ms avg latency/)).toBeInTheDocument();
 
     // Developer cost section: total spend + per-developer breakdown.
     expect(screen.getByText("Developer cost")).toBeInTheDocument();

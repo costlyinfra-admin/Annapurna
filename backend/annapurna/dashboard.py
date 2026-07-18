@@ -392,6 +392,20 @@ def feature_detail(
             (feature_id, start),
         ).fetchone()
 
+        # Avg call latency (ms) from metered (hook) rows: sum / calls. None when
+        # the SDK hasn't reported latency for this feature/month.
+        lat_row = conn.execute(
+            "SELECT SUM(latency_ms_sum), SUM(request_count) FROM inference_cost "
+            "WHERE feature_id = %s AND period = %s AND source = 'hook' "
+            "AND latency_ms_sum IS NOT NULL",
+            (feature_id, start),
+        ).fetchone()
+        avg_latency_ms = (
+            round(float(lat_row[0]) / float(lat_row[1]))
+            if lat_row and lat_row[0] is not None and lat_row[1]
+            else None
+        )
+
         # PRs / commits / files each developer authored for this feature (evidence trail).
         pr_stats = {
             actor: {"prs": prs, "commits": commits, "files_changed": files}
@@ -502,6 +516,7 @@ def feature_detail(
             "build_cost": float(build_total),
             "inference_cost": float(inference_month),  # separate from build
             "active_users": active_users[0] if active_users else None,
+            "avg_latency_ms": avg_latency_ms,  # from metered calls; None if unknown
         },
         "build_total": float(build_total),  # total AI build spend for this feature
         "build_contributors": build_contributors,
@@ -653,6 +668,27 @@ def spend_by_provider(
             ).fetchall()
         ]
 
+        # ---- Per-customer metered spend (from SDK metadata.customer_id) ----
+        customer_rows = conn.execute(
+            """
+            SELECT customer_id, SUM(amount), SUM(request_count)
+            FROM customer_cost
+            WHERE period BETWEEN %s AND %s
+            GROUP BY customer_id ORDER BY SUM(amount) DESC
+            """,
+            (start, end),
+        ).fetchall()
+        customer_total = sum(float(a) for _c, a, _r in customer_rows) or 0.0
+        by_customer = [
+            {
+                "customer_id": cid,
+                "amount": float(a),
+                "pct": (float(a) / customer_total * 100.0) if customer_total else 0.0,
+                "requests": int(r) if r is not None else None,
+            }
+            for cid, a, r in customer_rows
+        ]
+
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
@@ -662,4 +698,6 @@ def spend_by_provider(
         "build_total": build_total,
         "build_by_tool": build_by_tool,
         "build_trend": build_trend,
+        "customer_total": customer_total,
+        "by_customer": by_customer,
     }

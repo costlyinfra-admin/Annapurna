@@ -156,6 +156,8 @@ describe("Dashboard (Overview)", () => {
         { tool: "cursor", amount: 89, pct: 32.96 },
       ],
       build_trend: [{ period: "2026-05-01", amount: 270 }],
+      customer_total: 900,
+      by_customer: [{ customer_id: "acme", amount: 900, pct: 100, requests: 1200 }],
     });
     renderDashboard();
     // Features tab is the default view.
@@ -172,6 +174,9 @@ describe("Dashboard (Overview)", () => {
     // Build cost broken out by tool, with a friendly tool label.
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
+    // Per-customer metered spend, shown only when the SDK tagged customers.
+    expect(screen.getByText("Inference cost by customer")).toBeInTheDocument();
+    expect(screen.getByText("acme")).toBeInTheDocument();
     // The summary/insights stay put across tabs; only the breakdown swaps,
     // so the feature table is gone but Key insights remains.
     expect(screen.queryByRole("table")).not.toBeInTheDocument();

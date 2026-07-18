@@ -73,6 +73,7 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
         pools = compute.pool_labels(conn)  # provider_label -> pool_id (self-hosted)
         accumulator: dict[tuple, dict] = {}
         pool_acc: dict[tuple, dict] = {}
+        customer_acc: dict[tuple, dict] = {}  # (customer_id, period) -> metered cost
         for event in events:
             provider = event.get("provider")
             is_pool = provider in pools
@@ -85,6 +86,8 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
             if feature_id is not None and str(feature_id) not in valid_features:
                 feature_id = None  # unknown/foreign feature -> Unattributed
             period = _period_of(event.get("occurred_at"))
+            latency_ms = event.get("latency_ms")
+            customer_id = _customer_of(event.get("metadata"))
 
             if is_pool:
                 # Self-hosted: no per-token price. Record usage; cost is allocated
@@ -100,17 +103,29 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
             cost = price(model, tokens_in, tokens_out, provider)
             key = (feature_id, provider, model, period)
             entry = accumulator.setdefault(
-                key, {"amount": Decimal("0"), "tin": 0, "tout": 0, "count": 0}
+                key, {"amount": Decimal("0"), "tin": 0, "tout": 0, "count": 0, "latency": 0}
             )
             entry["amount"] += cost
             entry["tin"] += tokens_in
             entry["tout"] += tokens_out
             entry["count"] += 1
+            if latency_ms is not None:
+                entry["latency"] += int(latency_ms)
+            # Per-customer metered spend (only when the SDK tagged a customer).
+            if customer_id is not None:
+                centry = customer_acc.setdefault(
+                    (customer_id, period), {"amount": Decimal("0"), "count": 0}
+                )
+                centry["amount"] += cost
+                centry["count"] += 1
             accepted += 1
 
         for (feature_id, provider, model, period), entry in accumulator.items():
             _upsert_hook_row(conn, tenant_id, feature_id, provider, model, period, entry)
             total += entry["amount"]
+
+        for (customer_id, period), centry in customer_acc.items():
+            _upsert_customer_cost(conn, tenant_id, customer_id, period, centry)
 
         for (pool_id, feature_id, model, period), entry in pool_acc.items():
             compute.record_usage(
@@ -128,7 +143,31 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
     return {"accepted": accepted, "cost": float(total)}
 
 
+def _customer_of(metadata) -> Optional[str]:
+    """Extract the customer identifier from an event's optional metadata."""
+    if isinstance(metadata, dict):
+        cid = metadata.get("customer_id")
+        if cid is not None and str(cid).strip():
+            return str(cid)
+    return None
+
+
+def _upsert_customer_cost(conn, tenant_id, customer_id, period, centry) -> None:
+    conn.execute(
+        """
+        INSERT INTO customer_cost (tenant_id, customer_id, period, amount, request_count)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (tenant_id, customer_id, period) DO UPDATE
+        SET amount = customer_cost.amount + EXCLUDED.amount,
+            request_count = customer_cost.request_count + EXCLUDED.request_count,
+            updated_at = now()
+        """,
+        (tenant_id, customer_id, period, centry["amount"], centry["count"]),
+    )
+
+
 def _upsert_hook_row(conn, tenant_id, feature_id, provider, model, period, entry) -> None:
+    latency = entry.get("latency", 0)
     existing = conn.execute(
         """
         SELECT id FROM inference_cost
@@ -145,18 +184,19 @@ def _upsert_hook_row(conn, tenant_id, feature_id, provider, model, period, entry
             UPDATE inference_cost
             SET amount = amount + %s, tokens_in = COALESCE(tokens_in, 0) + %s,
                 tokens_out = COALESCE(tokens_out, 0) + %s,
-                request_count = COALESCE(request_count, 0) + %s
+                request_count = COALESCE(request_count, 0) + %s,
+                latency_ms_sum = COALESCE(latency_ms_sum, 0) + %s
             WHERE id = %s
             """,
-            (entry["amount"], entry["tin"], entry["tout"], entry["count"], existing[0]),
+            (entry["amount"], entry["tin"], entry["tout"], entry["count"], latency, existing[0]),
         )
     else:
         conn.execute(
             """
             INSERT INTO inference_cost
                 (tenant_id, feature_id, provider, model, amount, period,
-                 tokens_in, tokens_out, request_count, source, confidence)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'hook', 'high')
+                 tokens_in, tokens_out, request_count, latency_ms_sum, source, confidence)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'hook', 'high')
             """,
             (
                 tenant_id,
@@ -168,6 +208,7 @@ def _upsert_hook_row(conn, tenant_id, feature_id, provider, model, period, entry
                 entry["tin"],
                 entry["tout"],
                 entry["count"],
+                latency,
             ),
         )
 

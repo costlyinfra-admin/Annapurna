@@ -62,6 +62,11 @@ export function FeatureDetail() {
                 {num(detail.headline.active_users)} active users this period
               </span>
             )}
+            {detail.headline.avg_latency_ms != null && (
+              <span className="muted" title="Average latency of metered (SDK) calls">
+                {num(detail.headline.avg_latency_ms)} ms avg latency
+              </span>
+            )}
           </p>
 
           {/* ---- Developer cost ---- */}
