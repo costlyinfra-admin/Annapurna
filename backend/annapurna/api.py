@@ -35,6 +35,7 @@ from . import (
     hook,
     inference,
     okta,
+    optimize_measured,
     seats,
 )
 from .github import GitHubError
@@ -630,6 +631,18 @@ def create_app() -> FastAPI:
         window: str = Query(default="month", pattern="^(month|quarter|year)$"),
     ) -> dict:
         return dashboard.feature_inference(user["tenant_id"], feature_id, window)
+
+    @app.get("/api/features/{feature_id}/opportunities")
+    def feature_opportunities(
+        feature_id: str,
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        resolved = _parse_period(period) if period else None
+        result = optimize_measured.opportunities(user["tenant_id"], feature_id, resolved)
+        if result is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found")
+        return result
 
     @app.get("/api/dashboard/providers")
     def dashboard_providers(

@@ -89,6 +89,35 @@ _OSS_PRICES: dict[tuple[str, str], tuple[str, str]] = {
 
 _MILLION = Decimal("1000000")
 
+# Cache/batch discount model (opt spec §7.1) — versioned with the price tables.
+# CACHE_READ_MULT is the fraction of the input rate charged when input tokens are
+# served from the provider's prompt cache. Only providers listed here support
+# prompt caching we can price; others are left out so the measured optimizer never
+# claims a caching saving we can't stand behind (drift shows up as a recon gap).
+CACHE_READ_MULT: dict[str, Decimal] = {
+    "anthropic": Decimal("0.10"),  # cache reads ~10% of input
+    "openai": Decimal("0.50"),  # cached input ~50% of input
+    "google": Decimal("0.25"),  # context cache ~25% of input
+}
+# Reserved for the later batch-eligibility detector (opt spec §12): async/
+# non-latency-sensitive calls run ~50% cheaper on batch APIs.
+BATCH_MULT = Decimal("0.50")
+
+
+def cache_read_mult(provider: Optional[str]) -> Optional[Decimal]:
+    """Cache-read discount multiplier for a provider, or None if it isn't priced."""
+    if provider is None:
+        return None
+    return CACHE_READ_MULT.get(provider)
+
+
+def rate_in(model: str, provider: Optional[str] = None) -> Decimal:
+    """USD per single input token for (model, provider), or 0 if unpriced."""
+    rates = _rates(model, provider)
+    if rates is None:
+        return Decimal("0")
+    return Decimal(rates[0]) / _MILLION
+
 
 def _rates(model: str, provider: Optional[str]) -> Optional[tuple[str, str]]:
     """Provider-specific OSS price first, then the provider-agnostic table."""

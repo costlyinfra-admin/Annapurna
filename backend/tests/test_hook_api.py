@@ -117,6 +117,39 @@ def test_hook_ingest_persists_optimization_signal(client, admin_conninfo):
     assert row == ("duplicate", "fp-api-1", 1)
 
 
+def test_opportunities_endpoint_surfaces_measured_savings(client):
+    # End-to-end: ingest a duplicate signal, then read measured opportunities.
+    feature = client.post("/api/features", json={"name": "AI threat triage"}).json()
+    token = client.post("/api/hook/token").json()["token"]
+
+    def dup():
+        return {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "tokens_in": 1_000_000,
+            "tokens_out": 0,
+            "feature_id": feature["id"],
+            "occurred_at": "2026-06-15T10:00:00Z",
+            "signal": {"kind": "duplicate", "fingerprint": "fp-a", "count": 1},
+        }
+
+    client.post(
+        "/api/hook/events",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"events": [dup(), dup()]},
+    )
+
+    resp = client.get(f"/api/features/{feature['id']}/opportunities?period=2026-06")
+    assert resp.status_code == 200
+    body = resp.json()
+    dup_opp = next(o for o in body["measured"]["opportunities"] if o["lever"] == "duplicate_calls")
+    assert dup_opp["savings"] == 6.0  # 2M input @ $3/M
+    assert "estimated" in body
+
+    missing = client.get("/api/features/00000000-0000-0000-0000-000000000000/opportunities")
+    assert missing.status_code == 404
+
+
 def test_hook_salt_endpoint_is_stable_and_token_gated(client):
     # The SDK's optimize mode fetches a per-tenant fingerprint salt with its token.
     token = client.post("/api/hook/token").json()["token"]

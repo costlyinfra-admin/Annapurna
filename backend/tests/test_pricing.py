@@ -19,6 +19,20 @@ def test_unknown_model_is_zero():
     assert not pricing.is_priced("mystery-model")
 
 
+def test_input_rate_per_token():
+    # $3 / 1M input tokens -> $0.000003 per token.
+    assert pricing.rate_in("claude-sonnet-4-6") == Decimal("3") / Decimal("1000000")
+    assert pricing.rate_in("mystery-model") == Decimal("0")
+
+
+def test_cache_read_multiplier_is_provider_specific():
+    assert pricing.cache_read_mult("anthropic") == Decimal("0.10")
+    assert pricing.cache_read_mult("openai") == Decimal("0.50")
+    # Providers with no priced cache discount return None (never claim a saving).
+    assert pricing.cache_read_mult("together") is None
+    assert pricing.cache_read_mult(None) is None
+
+
 def test_hosted_open_source_is_priced_per_provider():
     # Same open weights, different host -> different price; keyed by (provider, model).
     assert pricing.price(

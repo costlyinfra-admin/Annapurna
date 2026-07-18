@@ -271,9 +271,21 @@ This is the same "reconcile against reality" ethos as bill reconciliation.
   emitted without a salt. *Accept:* off by default, zero added latency on the
   call path, memory capped, duplicates and prefix summaries emitted; unit tests
   with a fake transport (Python + Node) pass.
-- **M-opt-3 — Detectors + API.** `optimize_measured.py` + pricing cache model +
-  `/features/{id}/opportunities`. *Accept:* duplicate and prefix savings computed
-  from seeded signals and match a hand-calc from the price book.
+- **M-opt-3 — Detectors + API.** ✅ Done. `optimize_measured.py` (duplicate + prefix
+  detectors) + pricing cache model (`CACHE_READ_MULT`, `BATCH_MULT`, `rate_in`,
+  `cache_read_mult`) + `GET /api/features/{id}/opportunities`. The heuristic block
+  was extracted to `dashboard.heuristic_optimization` and reused as the estimated
+  tier. *Accept:* duplicate and prefix savings computed from seeded signals match a
+  hand-calc from the price book (tests: 2M dup input @ $3/M = $6.00; 1,000×4,000-tok
+  uncached prefix @ $3/M × 0.90 = $10.80).
+  - *Deviations from this draft (deliberate):* the endpoint takes `?period=YYYY-MM`
+    (monthly, matching the feature drill-down) rather than `?range=`; the response is
+    symmetric — `{period, measured:{opportunities,monthly_savings,annual_savings},
+    estimated:{…same shape…}, cache_utilization}` — rather than bare lists; prefix
+    caching is only claimed for providers with a priced cache discount (Anthropic/
+    OpenAI/Google), never OSS hosts we can't price; `cache_utilization` is derived
+    from SDK prefix signals for now and will be strengthened by connector cache
+    fields in M-opt-5.
 - **M-opt-4 — UI.** Measured vs estimated split on the feature page + SDK nudge.
   *Accept:* measured opportunities render with evidence, $ and confidence; demo
   seed includes signal rows.
