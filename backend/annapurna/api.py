@@ -120,6 +120,21 @@ class UsageRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
+class HookSignal(BaseModel):
+    """Optional optimization signal on a metered event (opt spec §6, SDK v0.3).
+
+    Carries only hashes and counts — never prompt or response text.
+    """
+
+    kind: str = Field(pattern=r"^(duplicate|prefix)$")
+    fingerprint: str = Field(min_length=1, max_length=128)
+    count: int = Field(default=1, ge=0)
+    prefix_tokens: Optional[int] = Field(default=None, ge=0)
+    cached_count: int = Field(default=0, ge=0)
+    tokens_in: Optional[int] = Field(default=None, ge=0)
+    tokens_out: Optional[int] = Field(default=None, ge=0)
+
+
 class HookEvent(BaseModel):
     provider: str
     model: str = ""
@@ -129,6 +144,7 @@ class HookEvent(BaseModel):
     occurred_at: Optional[str] = None
     latency_ms: Optional[int] = Field(default=None, ge=0)  # SDK v0.2 (optional)
     metadata: Optional[dict] = None  # e.g. {"customer_id": "..."}
+    signal: Optional[HookSignal] = None  # SDK optimize mode (opt spec)
 
 
 class HookEventsRequest(BaseModel):

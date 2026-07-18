@@ -74,6 +74,7 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
         accumulator: dict[tuple, dict] = {}
         pool_acc: dict[tuple, dict] = {}
         customer_acc: dict[tuple, dict] = {}  # (customer_id, period) -> metered cost
+        signal_acc: dict[tuple, dict] = {}  # optimization signals (opt spec §6)
         for event in events:
             provider = event.get("provider")
             is_pool = provider in pools
@@ -97,6 +98,28 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
                 entry["tin"] += tokens_in
                 entry["tout"] += tokens_out
                 entry["count"] += 1
+                accepted += 1
+                continue
+
+            # Optional optimization signal (opt spec §6) — priced providers only;
+            # pool usage has no per-token price for the detectors to work from.
+            sig = event.get("signal")
+            sig_kind = sig.get("kind") if isinstance(sig, dict) else None
+            if sig_kind in ("duplicate", "prefix"):
+                _accumulate_signal(
+                    signal_acc,
+                    sig,
+                    sig_kind,
+                    feature_id,
+                    provider,
+                    model,
+                    period,
+                    tokens_in,
+                    tokens_out,
+                )
+            if sig_kind == "prefix":
+                # A prefix event is a flushed summary; its calls were already
+                # metered individually — record the signal, never re-cost it.
                 accepted += 1
                 continue
 
@@ -126,6 +149,12 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
 
         for (customer_id, period), centry in customer_acc.items():
             _upsert_customer_cost(conn, tenant_id, customer_id, period, centry)
+
+        for skey, sentry in signal_acc.items():
+            feature_id, provider, model, period, kind, fingerprint = skey
+            _upsert_signal(
+                conn, tenant_id, feature_id, provider, model, period, kind, fingerprint, sentry
+            )
 
         for (pool_id, feature_id, model, period), entry in pool_acc.items():
             compute.record_usage(
@@ -164,6 +193,100 @@ def _upsert_customer_cost(conn, tenant_id, customer_id, period, centry) -> None:
         """,
         (tenant_id, customer_id, period, centry["amount"], centry["count"]),
     )
+
+
+def _accumulate_signal(
+    signal_acc, sig, kind, feature_id, provider, model, period, tokens_in, tokens_out
+) -> None:
+    """Fold one optimization signal into the batch accumulator (opt spec §6).
+
+    A 'duplicate' signal rides on a real metered call, so its token sizes come
+    from the event itself; a 'prefix' signal is a flushed client-side summary
+    carrying its own aggregated counts and token sums (used to price a
+    representative call). Never any prompt text — only hashes and counts.
+    """
+    fingerprint = sig.get("fingerprint")
+    if not fingerprint:
+        return  # a signal with no fingerprint is unusable; drop it
+    key = (feature_id, provider, model, period, kind, str(fingerprint))
+    entry = signal_acc.setdefault(
+        key, {"call_count": 0, "tin": 0, "tout": 0, "cached": 0, "prefix_tokens": None}
+    )
+    if kind == "duplicate":
+        # count = number of avoidable repeats this event represents (default 1).
+        entry["call_count"] += int(sig.get("count") or 1)
+        entry["tin"] += int(tokens_in)
+        entry["tout"] += int(tokens_out)
+    else:  # prefix summary
+        entry["call_count"] += int(sig.get("count") or 0)
+        entry["tin"] += int(sig.get("tokens_in") or 0)
+        entry["tout"] += int(sig.get("tokens_out") or 0)
+        entry["cached"] += int(sig.get("cached_count") or 0)
+        ptok = sig.get("prefix_tokens")
+        if ptok is not None:
+            prev = entry["prefix_tokens"] or 0
+            entry["prefix_tokens"] = max(prev, int(ptok))
+
+
+def _upsert_signal(
+    conn, tenant_id, feature_id, provider, model, period, kind, fingerprint, entry
+) -> None:
+    existing = conn.execute(
+        """
+        SELECT id FROM usage_signal
+        WHERE period = %s AND provider = %s AND signal_kind = %s AND fingerprint = %s
+          AND feature_id IS NOT DISTINCT FROM %s
+          AND model IS NOT DISTINCT FROM %s
+        LIMIT 1
+        """,
+        (period, provider, kind, fingerprint, feature_id, model),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE usage_signal
+            SET call_count = call_count + %s,
+                tokens_in = tokens_in + %s,
+                tokens_out = tokens_out + %s,
+                cached_count = cached_count + %s,
+                prefix_tokens = CASE WHEN %s IS NULL THEN prefix_tokens
+                                     ELSE GREATEST(COALESCE(prefix_tokens, 0), %s) END,
+                updated_at = now()
+            WHERE id = %s
+            """,
+            (
+                entry["call_count"],
+                entry["tin"],
+                entry["tout"],
+                entry["cached"],
+                entry["prefix_tokens"],
+                entry["prefix_tokens"],
+                existing[0],
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO usage_signal
+                (tenant_id, feature_id, provider, model, period, signal_kind, fingerprint,
+                 call_count, prefix_tokens, tokens_in, tokens_out, cached_count)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                tenant_id,
+                feature_id,
+                provider,
+                model,
+                period,
+                kind,
+                fingerprint,
+                entry["call_count"],
+                entry["prefix_tokens"],
+                entry["tin"],
+                entry["tout"],
+                entry["cached"],
+            ),
+        )
 
 
 def _upsert_hook_row(conn, tenant_id, feature_id, provider, model, period, entry) -> None:

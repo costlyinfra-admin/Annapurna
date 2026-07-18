@@ -84,7 +84,8 @@ inherently bounded — not raw traffic.
 
 ## 5. Data model
 
-New table (migration **0018**), tenant-isolated with RLS like every other table:
+New table (migration **0019** — 0018 was taken by the latency/customer-cost work),
+tenant-isolated with RLS like every other table:
 
 ```sql
 CREATE TABLE usage_signal (
@@ -257,8 +258,10 @@ This is the same "reconcile against reality" ethos as bill reconciliation.
 
 ## 13. Milestones & acceptance criteria
 
-- **M-opt-1 — Schema + ingest.** Migration 0018 (`usage_signal` + RLS); extend
-  `hook.ingest_events` to accept `signal` blocks and upsert. *Accept:* signals
+- **M-opt-1 — Schema + ingest.** ✅ Done. Migration 0019 (`usage_signal` + RLS);
+  extended `hook.ingest_events` to accept `signal` blocks and upsert (duplicate
+  rides on the metered call; prefix is a summary that never re-costs). `HookEvent`
+  gained a typed `signal` field so the model never strips it. *Accept:* signals
   persist per-tenant; cost accounting unchanged; tenant isolation test passes.
 - **M-opt-2 — SDK optimize mode.** `optimize=True`: client-side duplicate LRU +
   prefix counters + salted hashing + flush; per-tenant salt endpoint. *Accept:*

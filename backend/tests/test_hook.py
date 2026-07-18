@@ -6,6 +6,7 @@ import datetime as dt
 from decimal import Decimal
 
 from annapurna import dashboard, features, hook, inference
+from annapurna.db import app_dsn, connect, tenant_tx
 from annapurna.providers import CostRecord
 
 PERIOD = dt.date(2026, 6, 1)
@@ -174,3 +175,101 @@ def test_hook_captures_latency_and_customer(tenant_id):
     assert by_customer["acme"]["requests"] == 2
     assert by_customer["globex"]["amount"] == 3.0
     assert prov["customer_total"] == 9.0
+
+
+def test_hook_records_optimization_signals(tenant_id):
+    # opt spec M-opt-1: duplicate + prefix signals persist; cost is unchanged.
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    summary = hook.ingest_events(
+        tenant_id,
+        [
+            # Two real metered calls that are also repeats of the same request.
+            {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "tokens_in": 1_000_000,
+                "tokens_out": 0,
+                "feature_id": triage["id"],
+                "occurred_at": "2026-06-15T10:00:00Z",
+                "signal": {"kind": "duplicate", "fingerprint": "fp-req-1", "count": 1},
+            },
+            {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "tokens_in": 1_000_000,
+                "tokens_out": 0,
+                "feature_id": triage["id"],
+                "occurred_at": "2026-06-16T10:00:00Z",
+                "signal": {"kind": "duplicate", "fingerprint": "fp-req-1", "count": 1},
+            },
+            # A flushed prefix summary — represents 320 already-metered calls, so it
+            # must NOT add cost (only the signal is recorded).
+            {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "feature_id": triage["id"],
+                "occurred_at": "2026-06-16T11:00:00Z",
+                "signal": {
+                    "kind": "prefix",
+                    "fingerprint": "fp-prefix-1",
+                    "count": 320,
+                    "prefix_tokens": 4100,
+                    "cached_count": 0,
+                    "tokens_in": 1_312_000,
+                    "tokens_out": 0,
+                },
+            },
+        ],
+    )
+    assert summary["accepted"] == 3
+
+    # Cost accounting UNCHANGED: only the two real calls (2M input @ $3/M) are
+    # costed; the prefix summary contributes nothing.
+    assert summary["cost"] == 6.0
+    detail = dashboard.feature_detail(tenant_id, triage["id"], PERIOD)
+    assert detail["headline"]["inference_cost"] == 6.0
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        rows = conn.execute(
+            "SELECT signal_kind, fingerprint, call_count, prefix_tokens, tokens_in, cached_count "
+            "FROM usage_signal ORDER BY signal_kind"
+        ).fetchall()
+    by_kind = {r[0]: r for r in rows}
+    assert set(by_kind) == {"duplicate", "prefix"}
+    # Two duplicate events of one fingerprint -> call_count 2, no prefix size.
+    assert by_kind["duplicate"][2] == 2
+    assert by_kind["duplicate"][3] is None
+    assert by_kind["duplicate"][4] == 2_000_000
+    # Prefix summary keeps its aggregated counts.
+    assert by_kind["prefix"][2] == 320
+    assert by_kind["prefix"][3] == 4100
+    assert by_kind["prefix"][4] == 1_312_000
+    assert by_kind["prefix"][5] == 0
+
+
+def test_usage_signal_is_tenant_isolated(tenant_id, app_env):
+    # A signal written for one tenant is invisible to another under RLS.
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    hook.ingest_events(
+        tenant_id,
+        [
+            {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "tokens_in": 1_000_000,
+                "tokens_out": 0,
+                "feature_id": triage["id"],
+                "occurred_at": "2026-06-15T10:00:00Z",
+                "signal": {"kind": "duplicate", "fingerprint": "fp-x", "count": 1},
+            }
+        ],
+    )
+    other = str(
+        app_env.execute("INSERT INTO tenant (name) VALUES ('Other') RETURNING id").fetchone()[0]
+    )
+    app_env.commit()
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        assert conn.execute("SELECT count(*) FROM usage_signal").fetchone()[0] == 1
+    with connect(app_dsn()) as conn, tenant_tx(conn, other):
+        assert conn.execute("SELECT count(*) FROM usage_signal").fetchone()[0] == 0

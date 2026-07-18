@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import psycopg
 import pytest
 from annapurna.api import create_app
 from fastapi.testclient import TestClient
@@ -85,3 +86,32 @@ def test_hook_ingest_captures_latency_and_customer(client):
     prov = client.get("/api/dashboard/providers?start=2026-06&end=2026-06").json()
     by_customer = {c["customer_id"]: c["amount"] for c in prov["by_customer"]}
     assert by_customer == {"Acme": 6.0, "Globex": 3.0}
+
+
+def test_hook_ingest_persists_optimization_signal(client, admin_conninfo):
+    # Regression: the API event model must NOT strip the optional `signal` block
+    # before it reaches the hook (same failure mode as latency_ms/metadata once had).
+    feature = client.post("/api/features", json={"name": "AI threat triage"}).json()
+    token = client.post("/api/hook/token").json()["token"]
+
+    resp = client.post(
+        "/api/hook/events",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "events": [
+                {
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-6",
+                    "tokens_in": 1_000_000,
+                    "tokens_out": 0,
+                    "feature_id": feature["id"],
+                    "signal": {"kind": "duplicate", "fingerprint": "fp-api-1", "count": 1},
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+
+    with psycopg.connect(admin_conninfo) as db:  # admin bypasses RLS for the assertion
+        row = db.execute("SELECT signal_kind, fingerprint, call_count FROM usage_signal").fetchone()
+    assert row == ("duplicate", "fp-api-1", 1)
