@@ -117,3 +117,81 @@ test("wrap detects the provider from the client class", () => {
   });
   assert.equal(typeof wrapped.chat.completions.create, "function");
 });
+
+// --- optimize mode (opt spec M-opt-2) --------------------------------------
+
+function optMeter(calls, opts = {}) {
+  // salt supplied directly so the optimizer never hits the network in tests.
+  return new Meter("f1", {
+    ingestUrl: "https://app.test/api/hook/events",
+    token: "tok",
+    optimize: true,
+    salt: "test-salt",
+    fetchImpl: (url, o) => {
+      calls.push({ url, opts: o });
+      return Promise.resolve({ ok: true });
+    },
+    ...opts,
+  });
+}
+
+const allEvents = (calls) => calls.flatMap((c) => JSON.parse(c.opts.body).events);
+const settle = () => new Promise((r) => setTimeout(r, 20));
+
+test("optimize is off by default", async () => {
+  const calls = [];
+  const meter = meterWithCapture(calls);
+  assert.equal(meter._optimizer, null);
+  const wrapped = wrap(new OpenAI({ model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } }), { meter });
+  await wrapped.chat.completions.create({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] });
+  await settle();
+  assert.equal("signal" in JSON.parse(calls[0].opts.body).events[0], false);
+});
+
+test("optimize flags a duplicate call", async () => {
+  const calls = [];
+  const resp = { model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } };
+  const wrapped = wrap(new OpenAI(resp), { meter: optMeter(calls) });
+  const req = { model: "gpt-4o", messages: [{ role: "user", content: "same" }] };
+
+  await wrapped.chat.completions.create({ ...req });
+  await settle();
+  await wrapped.chat.completions.create({ ...req });
+  await settle();
+
+  const events = allEvents(calls);
+  assert.equal("signal" in events[0], false); // first call is novel
+  assert.equal(events[1].signal.kind, "duplicate");
+  assert.equal(events[1].signal.count, 1);
+  assert.equal(events[1].signal.fingerprint.length, 64); // salted sha256 hex, no prompt text
+});
+
+test("optimize emits prefix summaries on flush", async () => {
+  const calls = [];
+  const resp = { model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } };
+  const wrapped = wrap(new OpenAI(resp), { meter: optMeter(calls, { flushInterval: 0 }) });
+  await wrapped.chat.completions.create({
+    model: "gpt-4o",
+    tools: [{ type: "function", function: { name: "triage", description: "x".repeat(400) } }],
+    messages: [{ role: "user", content: "alert 1" }],
+  });
+  await settle();
+
+  const prefixes = allEvents(calls).filter((e) => e.signal && e.signal.kind === "prefix");
+  assert.equal(prefixes.length, 1);
+  assert.equal(prefixes[0].signal.count, 1);
+  assert.ok(prefixes[0].signal.prefix_tokens > 0);
+  assert.equal(prefixes[0].signal.fingerprint.length, 64);
+});
+
+test("optimize emits nothing without a salt", async () => {
+  const calls = [];
+  const resp = { model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } };
+  const wrapped = wrap(new OpenAI(resp), { meter: optMeter(calls, { flushInterval: 0, salt: "" }) });
+  const req = { model: "gpt-4o", messages: [{ role: "user", content: "x" }] };
+  await wrapped.chat.completions.create({ ...req });
+  await settle();
+  await wrapped.chat.completions.create({ ...req });
+  await settle();
+  assert.ok(allEvents(calls).every((e) => !("signal" in e)));
+});

@@ -6,12 +6,14 @@
  * side from Annapurna's pricing tables — the SDK never sees prices.
  *
  *   - Never throws into the caller (errors are swallowed).
- *   - No dependencies (uses global fetch, Node >= 18).
+ *   - No third-party dependencies (Node builtins only: global fetch + crypto, Node >= 18).
  *   - A no-op when no ingest URL/token is configured, so the same code runs
  *     whether or not the hook is enabled.
  *
  * Config (constructor opts or env): ANNAPURNA_INGEST_URL, ANNAPURNA_INGEST_TOKEN.
  */
+import { createHash } from "node:crypto";
+
 export class Meter {
   constructor(featureId = null, opts = {}) {
     this.featureId = featureId;
@@ -21,6 +23,15 @@ export class Meter {
     // is merged on top. Optional — omit for the simplest setup.
     this.metadata = opts.metadata ?? {};
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    // Optimize mode (opt spec §4): measure traffic SHAPE — salted-hash
+    // fingerprints and counts, never prompt text — to find duplicate calls and
+    // uncached repeated prefixes. Off by default; work is off the call path,
+    // bounded, and fail-safe.
+    this.salt = opts.salt ?? null;
+    this._saltPromise = null;
+    this._optimizer = opts.optimize
+      ? new Optimizer({ prefixChars: opts.prefixChars, flushInterval: opts.flushInterval })
+      : null;
   }
 
   get enabled() {
@@ -79,7 +90,7 @@ export class Meter {
 
   /** Fire-and-forget. Resolves true/false; never rejects. */
   _send(events) {
-    if (!this.enabled) return Promise.resolve(false);
+    if (!this.enabled || !events.length) return Promise.resolve(false);
     return Promise.resolve()
       .then(() =>
         this.fetchImpl(this.ingestUrl, {
@@ -94,6 +105,57 @@ export class Meter {
       .then(() => true)
       .catch(() => false);
   }
+
+  _saltUrl() {
+    if (!this.ingestUrl) return null;
+    return this.ingestUrl.endsWith("/events")
+      ? this.ingestUrl.slice(0, -"/events".length) + "/salt"
+      : this.ingestUrl.replace(/\/+$/, "") + "/salt";
+  }
+
+  /** Fetch (once) the per-tenant fingerprint salt. Resolves to a salt or null. */
+  _ensureSalt() {
+    if (this._saltPromise) return this._saltPromise;
+    if (this.salt != null) {
+      this._saltPromise = Promise.resolve(this.salt);
+      return this._saltPromise;
+    }
+    this._saltPromise = Promise.resolve()
+      .then(() => this.fetchImpl(this._saltUrl(), { method: "GET", headers: { Authorization: `Bearer ${this.token}` } }))
+      .then((r) => r.json())
+      .then((d) => (this.salt = d && d.salt ? d.salt : null))
+      .catch(() => (this.salt = null));
+    return this._saltPromise;
+  }
+
+  /**
+   * Record an auto-instrumented (wrap()) call. Token extraction, optimize-mode
+   * hashing and the POST all run after the caller's call has returned/resolved,
+   * so the request path never pays for them.
+   */
+  _recordWrapped(provider, request, response, latencyMs) {
+    if (!this.enabled) return Promise.resolve(false);
+    const build = (salt) => {
+      const { model, tokensIn, tokensOut, cacheRead } = extractUsage(provider, response);
+      const event = {
+        provider,
+        model,
+        tokens_in: tokensIn | 0,
+        tokens_out: tokensOut | 0,
+        feature_id: this.featureId,
+        latency_ms: latencyMs | 0,
+      };
+      if (Object.keys(this.metadata).length) event.metadata = { ...this.metadata };
+      const extra = [];
+      if (this._optimizer) {
+        const signal = this._optimizer.onCall(salt, provider, model, request, tokensIn, tokensOut, cacheRead);
+        if (signal) event.signal = signal;
+        extra.push(...this._optimizer.dueSummaries(this.featureId));
+      }
+      return this._send([event, ...extra]);
+    };
+    return this._optimizer ? this._ensureSalt().then(build) : build(null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -106,10 +168,27 @@ const COMPLETION_PATHS = {
     ["responses", "create"],
   ],
 };
-const RECORDERS = {
-  anthropic: (m, r, lat) => m.recordAnthropic(r, { latencyMs: lat }),
-  openai: (m, r, lat) => m.recordOpenAI(r, { latencyMs: lat }),
-};
+
+/** Pull { model, tokensIn, tokensOut, cacheRead } from a provider response. */
+function extractUsage(provider, resp) {
+  const u = (resp && resp.usage) || {};
+  if (provider === "anthropic") {
+    return {
+      model: (resp && resp.model) || "",
+      tokensIn: u.input_tokens ?? 0,
+      tokensOut: u.output_tokens ?? 0,
+      cacheRead: (u.cache_read_input_tokens ?? 0) > 0,
+    };
+  }
+  // openai and OpenAI-compatible hosts
+  const details = u.prompt_tokens_details || {};
+  return {
+    model: (resp && resp.model) || "",
+    tokensIn: u.prompt_tokens ?? 0,
+    tokensOut: u.completion_tokens ?? 0,
+    cacheRead: (details.cached_tokens ?? 0) > 0,
+  };
+}
 
 function detectProvider(client) {
   const name = ((client && client.constructor && client.constructor.name) || "").toLowerCase();
@@ -143,7 +222,9 @@ function makeProxy(target, meter, provider, path = []) {
       const out = target(...args);
       const rec = (resp) => {
         try {
-          if (hasUsage(resp)) RECORDERS[provider](meter, resp, Date.now() - start);
+          // args[0] carries the request (messages/system/tools) optimize mode
+          // fingerprints; recording runs after the call so the path never pays.
+          if (hasUsage(resp)) meter._recordWrapped(provider, args[0] || {}, resp, Date.now() - start);
         } catch {
           /* metering must never throw into the caller */
         }
@@ -171,4 +252,115 @@ export function wrap(
 ) {
   const m = meter ?? new Meter(featureId, { ingestUrl, token, metadata });
   return makeProxy(client, m, provider ?? detectProvider(client));
+}
+
+// ---------------------------------------------------------------------------
+// Optimize mode — measured optimization signals (opt spec §4). Traffic SHAPE
+// only: salted-hash fingerprints and counts, never prompt or response text.
+// ---------------------------------------------------------------------------
+const sha = (...parts) => createHash("sha256").update(parts.join("\x1f")).digest("hex");
+
+// Deterministic JSON with object keys sorted at every level (array order kept).
+function stableStringify(value) {
+  return JSON.stringify(value, (_k, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))
+      : v,
+  );
+}
+
+function normalize(request) {
+  if (!request || typeof request !== "object") return "";
+  const payload = request.messages ?? request.input ?? request.contents ?? null;
+  try {
+    return stableStringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+function staticPrefix(request, prefixChars) {
+  let str = "";
+  if (request && typeof request === "object" && (request.system != null || request.tools != null)) {
+    str = stableStringify([request.system ?? null, request.tools ?? null]);
+  }
+  if (!str) str = normalize(request).slice(0, prefixChars);
+  return { str, prefixTokens: Math.max(0, Math.floor(str.length / 4)) };
+}
+
+/**
+ * Client-side, bounded signal collector (opt spec §4.1). Node is single-threaded,
+ * so no locking is needed. A duplicate LRU emits one-off 'duplicate' signals; a
+ * prefix counter map flushes 'prefix' summaries on a timer or at capacity.
+ */
+class Optimizer {
+  constructor({ prefixChars = 2000, flushInterval = 60000, dupCapacity = 5000, prefixCapacity = 512 } = {}) {
+    this.prefixChars = prefixChars;
+    this.flushInterval = flushInterval; // milliseconds
+    this.dupCapacity = dupCapacity;
+    this.prefixCapacity = prefixCapacity;
+    this.seen = new Map(); // request_fp -> true (insertion-ordered => LRU)
+    this.prefixes = new Map(); // prefix_fp -> counts
+    this.lastFlush = Date.now();
+  }
+
+  onCall(salt, provider, model, request, tokensIn, tokensOut, cacheRead) {
+    if (!salt) return null; // no salt -> no signals (never emit unsalted hashes)
+    const reqFp = sha(salt, provider, model, normalize(request));
+    const { str, prefixTokens } = staticPrefix(request, this.prefixChars);
+    const prefixFp = sha(salt, provider, model, str);
+
+    const duplicate = this.seen.has(reqFp);
+    if (duplicate) {
+      this.seen.delete(reqFp);
+      this.seen.set(reqFp, true);
+    } else {
+      this.seen.set(reqFp, true);
+      while (this.seen.size > this.dupCapacity) this.seen.delete(this.seen.keys().next().value);
+    }
+
+    const e = this.prefixes.get(prefixFp) || {
+      provider,
+      model,
+      count: 0,
+      prefixTokens,
+      cached: 0,
+      tin: 0,
+      tout: 0,
+    };
+    e.count += 1;
+    e.tin += tokensIn | 0;
+    e.tout += tokensOut | 0;
+    e.prefixTokens = Math.max(e.prefixTokens, prefixTokens);
+    if (cacheRead) e.cached += 1;
+    this.prefixes.set(prefixFp, e);
+
+    return duplicate ? { kind: "duplicate", fingerprint: reqFp, count: 1 } : null;
+  }
+
+  dueSummaries(featureId) {
+    const now = Date.now();
+    if (now - this.lastFlush < this.flushInterval && this.prefixes.size < this.prefixCapacity) return [];
+    this.lastFlush = now;
+    const items = this.prefixes;
+    this.prefixes = new Map();
+    const out = [];
+    for (const [fingerprint, e] of items) {
+      out.push({
+        provider: e.provider,
+        model: e.model,
+        feature_id: featureId,
+        signal: {
+          kind: "prefix",
+          fingerprint,
+          count: e.count,
+          prefix_tokens: e.prefixTokens,
+          cached_count: e.cached,
+          tokens_in: e.tin,
+          tokens_out: e.tout,
+        },
+      });
+    }
+    return out;
+  }
 }

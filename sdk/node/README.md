@@ -44,6 +44,15 @@ meter.recordOpenAI(resp);        // <- the whole hook
 Helpers: `recordAnthropic`, `recordOpenAI`, plus the generic
 `record({ provider, model, tokensIn, tokensOut, featureId })`.
 
+### Optimize mode (opt-in)
+
+`new Meter(featureId, { optimize: true })` additionally emits **privacy-safe**
+signals — salted hashes and counts, never prompt text — so Annapurna can surface
+*measured* optimization opportunities (duplicate calls, uncached repeated
+prefixes). Off by default; work is off the call path, memory-bounded, and
+fail-safe. The SDK fetches a per-tenant salt once (`GET /api/hook/salt`, same
+ingest token).
+
 ## Config
 
 | Env var                  | What it is                                        |

@@ -263,10 +263,14 @@ This is the same "reconcile against reality" ethos as bill reconciliation.
   rides on the metered call; prefix is a summary that never re-costs). `HookEvent`
   gained a typed `signal` field so the model never strips it. *Accept:* signals
   persist per-tenant; cost accounting unchanged; tenant isolation test passes.
-- **M-opt-2 — SDK optimize mode.** `optimize=True`: client-side duplicate LRU +
-  prefix counters + salted hashing + flush; per-tenant salt endpoint. *Accept:*
-  off by default, zero added latency on the call path, memory capped, duplicates
-  and prefix summaries emitted; unit tests with a fake transport.
+- **M-opt-2 — SDK optimize mode.** ✅ Done (SDK v0.3.0, Python + Node).
+  `optimize=True` adds a client-side duplicate LRU + prefix counters + salted
+  hashing + timer/cap flush; a per-tenant salt endpoint (`GET /api/hook/salt`,
+  migration 0020). All fingerprinting/hashing runs off the call path (background
+  thread in Python, deferred in Node); off by default; memory capped; no signals
+  emitted without a salt. *Accept:* off by default, zero added latency on the
+  call path, memory capped, duplicates and prefix summaries emitted; unit tests
+  with a fake transport (Python + Node) pass.
 - **M-opt-3 — Detectors + API.** `optimize_measured.py` + pricing cache model +
   `/features/{id}/opportunities`. *Accept:* duplicate and prefix savings computed
   from seeded signals and match a hand-calc from the price book.

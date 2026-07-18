@@ -115,3 +115,20 @@ def test_hook_ingest_persists_optimization_signal(client, admin_conninfo):
     with psycopg.connect(admin_conninfo) as db:  # admin bypasses RLS for the assertion
         row = db.execute("SELECT signal_kind, fingerprint, call_count FROM usage_signal").fetchone()
     assert row == ("duplicate", "fp-api-1", 1)
+
+
+def test_hook_salt_endpoint_is_stable_and_token_gated(client):
+    # The SDK's optimize mode fetches a per-tenant fingerprint salt with its token.
+    token = client.post("/api/hook/token").json()["token"]
+
+    unauth = client.get("/api/hook/salt")
+    assert unauth.status_code == 401
+
+    first = client.get("/api/hook/salt", headers={"Authorization": f"Bearer {token}"})
+    assert first.status_code == 200
+    salt = first.json()["salt"]
+    assert salt  # a non-empty secret
+
+    # Stable across calls (generated once, then reused).
+    again = client.get("/api/hook/salt", headers={"Authorization": f"Bearer {token}"})
+    assert again.json()["salt"] == salt

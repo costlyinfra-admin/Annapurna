@@ -51,6 +51,22 @@ def resolve_tenant(token: str) -> Optional[str]:
     return str(row[0]) if row else None
 
 
+def get_or_create_salt(tenant_id: str) -> str:
+    """Return the tenant's optimize-mode salt, generating one on first use.
+
+    A per-tenant secret (opt spec §4): the SDK fetches it once with its ingest
+    token and uses it to salt the request/prefix fingerprints, so the hashes are
+    useless to anyone without it. Never leaves the tenant's own RLS context.
+    """
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        row = conn.execute("SELECT opt_salt FROM tenant WHERE id = %s", (tenant_id,)).fetchone()
+        if row and row[0]:
+            return row[0]
+        salt = secrets.token_urlsafe(32)
+        conn.execute("UPDATE tenant SET opt_salt = %s WHERE id = %s", (salt, tenant_id))
+        return salt
+
+
 # --------------------------------------------------------------------------
 # Event ingest
 # --------------------------------------------------------------------------

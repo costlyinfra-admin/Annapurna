@@ -60,6 +60,27 @@ const resp = await openai.chat.completions.create({ model: "gpt-4o", ... });
 meter.recordOpenAI(resp);      // <-- the whole hook
 ```
 
+## Optimize mode (opt-in)
+
+Pass `optimize=True` (Python) / `{ optimize: true }` (Node) to additionally emit
+**privacy-safe optimization signals** — salted-hash fingerprints and counts that
+let Annapurna surface *measured* opportunities (duplicate calls, uncached repeated
+prompt prefixes) instead of rules-of-thumb. It **never sends prompt or response
+text** — only hashes and counts — and all the work is off the request path,
+memory-bounded, and fail-safe. Off by default.
+
+```python
+client = wrap(Anthropic(), feature_id="feature-threat-triage", meter=Meter(
+    feature_id="feature-threat-triage", optimize=True))
+```
+
+```js
+const client = wrap(new OpenAI(), { meter: new Meter("feature-threat-triage", { optimize: true }) });
+```
+
+The SDK fetches a per-tenant salt once (GET `/api/hook/salt`, same ingest token),
+so the fingerprints can't be dictionary-attacked or cross-referenced.
+
 ## Config
 
 | Env var                  | What it is                                            |

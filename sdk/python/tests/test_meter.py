@@ -209,3 +209,85 @@ def test_detect_provider_from_client_module():
         cls = type("Client", (), {})
         cls.__module__ = module
         assert _detect_provider(cls()) == expected
+
+
+# --- optimize mode (opt spec M-opt-2) --------------------------------------
+
+
+def _opt_meter(capture, **kw):
+    # salt is supplied directly so the optimizer never hits the network in tests.
+    kw.setdefault("salt", "test-salt")
+    return Meter(
+        ingest_url="https://app.test/api/hook/events",
+        token="tok",
+        feature_id="f1",
+        optimize=True,
+        transport=capture,
+        **kw,
+    )
+
+
+def _all_events(cap):
+    return [ev for call in cap.calls for ev in call["events"]]
+
+
+def test_optimize_is_off_by_default():
+    cap = _Capture()
+    m = _meter(cap)
+    assert m._optimizer is None
+    wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
+    wrapped.messages.create(model="claude-sonnet-4-6", messages=[{"role": "user", "content": "hi"}])
+    _wait(cap)
+    assert "signal" not in cap.calls[0]["events"][0]
+
+
+def test_optimize_flags_a_duplicate_call():
+    cap = _Capture()
+    m = _opt_meter(cap)
+    wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
+    req = {"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "same"}]}
+
+    wrapped.messages.create(**req)
+    _wait(cap, 1)  # first call lands before the second starts -> deterministic order
+    wrapped.messages.create(**req)
+    _wait(cap, 2)
+
+    events = _all_events(cap)
+    # The first call is novel (no signal); the repeat carries a duplicate signal.
+    assert "signal" not in events[0]
+    dup = events[1]["signal"]
+    assert dup["kind"] == "duplicate" and dup["count"] == 1
+    assert len(dup["fingerprint"]) == 64  # sha256 hex, salted — no prompt text
+
+
+def test_optimize_emits_prefix_summaries_on_flush():
+    cap = _Capture()
+    m = _opt_meter(cap, flush_interval=0.0)  # flush every call, for the test
+    wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
+    wrapped.messages.create(
+        model="claude-sonnet-4-6",
+        system="You are a security triage assistant. " * 50,
+        messages=[{"role": "user", "content": "alert 1"}],
+    )
+    _wait(cap)
+
+    events = _all_events(cap)
+    prefixes = [e for e in events if e.get("signal", {}).get("kind") == "prefix"]
+    assert len(prefixes) == 1
+    sig = prefixes[0]["signal"]
+    assert sig["count"] == 1
+    assert sig["prefix_tokens"] > 0  # the large static system prompt was measured
+    assert len(sig["fingerprint"]) == 64
+
+
+def test_optimize_emits_nothing_without_a_salt():
+    cap = _Capture()
+    # An empty salt models a failed salt fetch — never emit unsalted fingerprints.
+    m = _opt_meter(cap, flush_interval=0.0, salt="")
+    wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
+    req = {"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "x"}]}
+    wrapped.messages.create(**req)
+    _wait(cap, 1)
+    wrapped.messages.create(**req)
+    _wait(cap, 2)
+    assert all("signal" not in e for e in _all_events(cap))

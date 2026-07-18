@@ -46,6 +46,14 @@ Helpers: `record_anthropic`, `record_openai`, `record_gemini`,
 `record_openai_compatible`, or the generic `record(provider=…, model=…,
 tokens_in=…, tokens_out=…, feature_id=…)`.
 
+### Optimize mode (opt-in)
+
+`Meter(..., optimize=True)` additionally emits **privacy-safe** signals — salted
+hashes and counts, never prompt text — so Annapurna can surface *measured*
+optimization opportunities (duplicate calls, uncached repeated prefixes). Off by
+default; all work is off the call path, memory-bounded, and fail-safe. The SDK
+fetches a per-tenant salt once (`GET /api/hook/salt`, same ingest token).
+
 ## Config
 
 | Env var                  | What it is                                            |

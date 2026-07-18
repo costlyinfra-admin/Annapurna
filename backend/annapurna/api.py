@@ -446,9 +446,9 @@ def create_app() -> FastAPI:
         # Returned once; only its hash is stored.
         return {"token": hook.generate_token(user["tenant_id"])}
 
-    @app.post("/api/hook/events")
-    def ingest_hook_events(body: HookEventsRequest, request: Request) -> dict:
-        # Authenticated by the per-tenant ingest token, NOT the session cookie.
+    def _ingest_tenant(request: Request) -> str:
+        # Hook requests authenticate with the per-tenant ingest token, not the
+        # session cookie. Resolve it or 401.
         header = request.headers.get("authorization", "")
         token = header[7:] if header.lower().startswith("bearer ") else header
         tenant_id = hook.resolve_tenant(token) if token else None
@@ -456,7 +456,18 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ingest token"
             )
+        return tenant_id
+
+    @app.post("/api/hook/events")
+    def ingest_hook_events(body: HookEventsRequest, request: Request) -> dict:
+        tenant_id = _ingest_tenant(request)
         return hook.ingest_events(tenant_id, [e.model_dump() for e in body.events])
+
+    @app.get("/api/hook/salt")
+    def hook_salt(request: Request) -> dict:
+        # The SDK's optimize mode fetches its per-tenant fingerprint salt once.
+        tenant_id = _ingest_tenant(request)
+        return {"salt": hook.get_or_create_salt(tenant_id)}
 
     @app.post("/api/inference/reconcile")
     def reconcile_inference(body: ReconcileRequest, user: CurrentUser) -> list[dict]:
