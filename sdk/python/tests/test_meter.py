@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 
-from annapurna_meter import Meter
+from annapurna_meter import (
+    Meter,
+    _detect_provider,  # noqa: PLC2701  (tested on purpose)
+    wrap,
+)
 
 
 class _Capture:
@@ -112,3 +117,95 @@ def test_unconfigured_meter_is_a_noop():
     assert m.enabled is False
     assert m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1) is None
     assert cap.calls == []
+
+
+# --- wrap() auto-instrumentation, latency, metadata ------------------------
+
+
+def _wait(cap, n=1, timeout=2.0):
+    """Recording posts on a background thread; wait for it to land."""
+    end = time.time() + timeout
+    while time.time() < end and len(cap.calls) < n:
+        time.sleep(0.01)
+
+
+class _FakeMessages:
+    def __init__(self, resp):
+        self.resp = resp
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.resp
+
+
+class _FakeAnthropic:
+    def __init__(self, resp):
+        self.messages = _FakeMessages(resp)
+        self.api_key = "sk-real"
+
+
+def _anthropic_resp():
+    return type(
+        "R", (), {"model": "claude-sonnet-4-6", "usage": {"input_tokens": 10, "output_tokens": 2}}
+    )()
+
+
+def test_wrap_records_completion_and_passes_through():
+    cap = _Capture()
+    resp = _anthropic_resp()
+    client = _FakeAnthropic(resp)
+    m = Meter(
+        ingest_url="https://app.test/api/hook/events",
+        token="tok",
+        feature_id="f1",
+        transport=cap,
+    )
+    wrapped = wrap(client, provider="anthropic", meter=m)
+
+    out = wrapped.messages.create(model="claude-sonnet-4-6", messages=[])
+    assert out is resp  # returns the real response, unchanged
+    assert wrapped.api_key == "sk-real"  # non-instrumented attribute passes through
+    assert client.messages.calls  # the underlying call actually ran
+
+    _wait(cap)
+    ev = cap.calls[0]["events"][0]
+    assert ev["provider"] == "anthropic"
+    assert ev["feature_id"] == "f1"
+    assert ev["tokens_in"] == 10 and ev["tokens_out"] == 2
+    assert isinstance(ev["latency_ms"], int) and ev["latency_ms"] >= 0
+
+
+def test_wrap_merges_default_metadata():
+    cap = _Capture()
+    m = Meter(
+        ingest_url="https://app.test/api/hook/events",
+        token="tok",
+        metadata={"environment": "prod"},
+        transport=cap,
+    )
+    wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
+    wrapped.messages.create()
+    _wait(cap)
+    assert cap.calls[0]["events"][0]["metadata"] == {"environment": "prod"}
+
+
+def test_wrap_skips_streaming_or_async_responses():
+    cap = _Capture()
+    stream = iter([])  # no usage attribute -> looks like a stream
+    wrapped = wrap(_FakeAnthropic(stream), provider="anthropic", meter=_meter(cap))
+    out = wrapped.messages.create(stream=True)
+    assert out is stream
+    _wait(cap, timeout=0.3)
+    assert cap.calls == []  # nothing recorded for a non-usage response
+
+
+def test_detect_provider_from_client_module():
+    for module, expected in [
+        ("anthropic.resources.messages", "anthropic"),
+        ("openai._client", "openai"),
+        ("google.genai", "google"),
+    ]:
+        cls = type("Client", (), {})
+        cls.__module__ = module
+        assert _detect_provider(cls()) == expected

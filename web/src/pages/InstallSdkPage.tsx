@@ -61,26 +61,25 @@ export function InstallSdkPage() {
       <section className="source-section">
         <h2>2. Install and record calls</h2>
         <p className="muted">
-          Pass the <code>feature_id</code> the call belongs to (anything unmapped lands in
-          Unattributed). Python and Node share the same shape. The SDK is Apache-2.0,
-          dependency-free, reports on a background thread, and is a no-op until the token above is
-          set — it can't break your request path.
+          <code>wrap()</code> your LLM client once with the <code>feature_id</code> it belongs to —
+          every call is then metered automatically, with latency (anything unmapped lands in
+          Unattributed). The SDK is Apache-2.0, dependency-free, reports on a background thread, and
+          is a no-op until the token above is set — it can't break your request path. Streaming or
+          async calls use the explicit <code>record_*</code> form instead.
         </p>
         <span className="chart-title">Python</span>
         <pre className="snippet">{`# use pip3 / python3 -m pip on macOS
 pip install annapurna-meter
 
-from annapurna_meter import Meter
-meter = Meter(feature_id="<feature-id>")
-resp = client.messages.create(model="claude-sonnet-4-6", ...)
-meter.record_anthropic(resp)`}</pre>
+from annapurna_meter import wrap
+client = wrap(anthropic_client, feature_id="<feature-id>")
+resp = client.messages.create(model="claude-sonnet-4-6", ...)  # metered automatically`}</pre>
         <span className="chart-title">Node</span>
         <pre className="snippet">{`npm install annapurna-meter
 
-import { Meter } from "annapurna-meter";
-const meter = new Meter("<feature-id>");
-const resp = await openai.chat.completions.create({ model: "gpt-4o", ... });
-meter.recordOpenAI(resp);`}</pre>
+import { wrap } from "annapurna-meter";
+const client = wrap(openai, { featureId: "<feature-id>" });
+const resp = await client.chat.completions.create({ model: "gpt-4o", ... });  // metered`}</pre>
       </section>
     </div>
   );

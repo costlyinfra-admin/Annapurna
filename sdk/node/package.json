@@ -1,6 +1,6 @@
 {
   "name": "annapurna-meter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Annapurna metering hook — emit per-call LLM usage events for per-feature cost attribution.",
   "type": "module",
   "main": "index.mjs",

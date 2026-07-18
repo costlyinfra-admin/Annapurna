@@ -15,13 +15,28 @@ request path. With no ingest URL/token configured, every call is a no-op.
 npm install annapurna-meter
 ```
 
-## Use (one line per call)
+## Use
+
+**Recommended — wrap the client once (no per-call code):**
+
+```js
+import { wrap } from "annapurna-meter";
+
+const client = wrap(openai, { featureId: "feature-threat-triage" }); // reads ENV
+
+const resp = await client.chat.completions.create({ model: "gpt-4o", ... }); // metered
+```
+
+Provider is auto-detected; each call is recorded with its latency. Pass an
+optional `metadata` (e.g. `{ environment, customer_id }`) for extra attribution.
+Streaming responses use the explicit form below.
+
+**Explicit — one line per call:**
 
 ```js
 import { Meter } from "annapurna-meter";
 
-const meter = new Meter("feature-threat-triage"); // reads ANNAPURNA_INGEST_URL / _TOKEN
-
+const meter = new Meter("feature-threat-triage");
 const resp = await openai.chat.completions.create({ model: "gpt-4o", ... });
 meter.recordOpenAI(resp);        // <- the whole hook
 ```

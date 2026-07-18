@@ -16,13 +16,28 @@ call is a no-op.
 pip install annapurna-meter
 ```
 
-## Use (one line per call)
+## Use
+
+**Recommended — wrap the client once (no per-call code):**
+
+```python
+from annapurna_meter import wrap
+
+client = wrap(anthropic_client, feature_id="feature-threat-triage")  # reads ENV
+
+resp = client.messages.create(model="claude-sonnet-4-6", ...)   # metered automatically
+```
+
+Provider is auto-detected; each call is recorded with its latency. Pass an
+optional `metadata={…}` (e.g. `environment`, `customer_id`) for extra
+attribution. Streaming/async calls use the explicit form below.
+
+**Explicit — one line per call:**
 
 ```python
 from annapurna_meter import Meter
 
-meter = Meter(feature_id="feature-threat-triage")  # reads ANNAPURNA_INGEST_URL / _TOKEN
-
+meter = Meter(feature_id="feature-threat-triage")
 resp = anthropic_client.messages.create(model="claude-sonnet-4-6", ...)
 meter.record_anthropic(resp)   # <- the whole hook
 ```
