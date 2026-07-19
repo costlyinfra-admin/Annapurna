@@ -304,8 +304,15 @@ This is the same "reconcile against reality" ethos as bill reconciliation.
   ratio. Demo: Report generator (no SDK) reports cached tokens, so it shows "8% of
   input is already cached" from connector data alone. *Accept:* utilization
   surfaces without the SDK; browser-verified on a signal-free feature.
-- **M-opt-6 — Reconciliation loop.** `optimization_action` + projected-vs-realized.
-  *Accept:* marking applied and advancing a period shows the realized delta.
+- **M-opt-6 — Reconciliation loop.** ✅ Done. Migration 0022 (`optimization_action`,
+  tenant-isolated). Marking a measured opportunity applied freezes its projection
+  with the period; `opportunities` returns an `actions` list where, once past the
+  applied period, `realized = projected − the lever's current avoidable spend`.
+  API: POST/DELETE `/features/{id}/opportunities/apply`. UI: an "Applied" chip +
+  Undo on each measured card and an "Applied optimizations" table showing projected
+  vs realized (or "awaiting next period"). Demo: triage's dedup applied Apr 2026 at
+  $500/mo → realized $131/mo now. *Accept:* marking applied and advancing a period
+  shows the realized delta; browser-verified (apply persists + reconciles).
 
 ## 14. Risks & open questions
 

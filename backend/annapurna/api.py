@@ -156,6 +156,11 @@ class ReconcileRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
+class ApplyOpportunityRequest(BaseModel):
+    lever: str = Field(pattern=r"^(duplicate_calls|prompt_caching)$")
+    projected_monthly: float = Field(ge=0)
+
+
 class CopilotSyncRequest(BaseModel):
     owner: str = Field(min_length=1, max_length=120)
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
@@ -643,6 +648,32 @@ def create_app() -> FastAPI:
         if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found")
         return result
+
+    @app.post("/api/features/{feature_id}/opportunities/apply")
+    def apply_opportunity(
+        feature_id: str,
+        body: ApplyOpportunityRequest,
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        resolved = _parse_period(period) if period else None
+        result = optimize_measured.mark_applied(
+            user["tenant_id"], feature_id, body.lever, body.projected_monthly, resolved
+        )
+        if result is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found")
+        return result
+
+    @app.delete(
+        "/api/features/{feature_id}/opportunities/apply",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def unapply_opportunity(
+        feature_id: str,
+        user: CurrentUser,
+        lever: str = Query(pattern=r"^(duplicate_calls|prompt_caching)$"),
+    ) -> None:
+        optimize_measured.unmark_applied(user["tenant_id"], feature_id, lever)
 
     @app.get("/api/dashboard/providers")
     def dashboard_providers(

@@ -150,6 +150,29 @@ def test_opportunities_endpoint_surfaces_measured_savings(client):
     assert missing.status_code == 404
 
 
+def test_apply_and_unapply_opportunity(client):
+    feature = client.post("/api/features", json={"name": "AI threat triage"}).json()
+
+    # Mark the duplicate-calls opportunity applied for this period.
+    applied = client.post(
+        f"/api/features/{feature['id']}/opportunities/apply",
+        json={"lever": "duplicate_calls", "projected_monthly": 369.0},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["lever"] == "duplicate_calls"
+
+    body = client.get(f"/api/features/{feature['id']}/opportunities").json()
+    action = next(a for a in body["actions"] if a["lever"] == "duplicate_calls")
+    assert action["projected_monthly"] == 369.0
+    assert action["status"] == "pending"  # applied this period
+
+    # Undo it.
+    undo = client.delete(f"/api/features/{feature['id']}/opportunities/apply?lever=duplicate_calls")
+    assert undo.status_code == 204
+    body = client.get(f"/api/features/{feature['id']}/opportunities").json()
+    assert body["actions"] == []
+
+
 def test_hook_salt_endpoint_is_stable_and_token_gated(client):
     # The SDK's optimize mode fetches a per-tenant fingerprint salt with its token.
     token = client.post("/api/hook/token").json()["token"]

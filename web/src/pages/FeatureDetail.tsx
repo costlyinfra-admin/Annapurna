@@ -14,6 +14,7 @@ import {
   type FeatureInference,
   type FeatureOpportunities,
   type MeasuredOpportunity,
+  type OptimizationAction,
 } from "../api";
 import { ConfidenceBadge } from "../components/badges";
 import { TrendChart } from "../components/TrendChart";
@@ -161,20 +162,25 @@ export function FeatureDetail() {
   );
 }
 
+function monthLabel(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleString("en-US", { month: "short", year: "numeric" });
+}
+
 function OptimizationSection({ featureId }: { featureId: string }) {
   const [data, setData] = useState<FeatureOpportunities | null>(null);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    api
-      .featureOpportunities(featureId)
-      .then((d) => active && setData(d))
-      .catch(() => active && setFailed(true));
-    return () => {
-      active = false;
-    };
+  const load = useCallback(async () => {
+    try {
+      setData(await api.featureOpportunities(featureId));
+    } catch {
+      setFailed(true);
+    }
   }, [featureId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <section className="detail-section">
@@ -193,7 +199,13 @@ function OptimizationSection({ featureId }: { featureId: string }) {
         <p className="muted">Loading…</p>
       ) : (
         <>
-          <MeasuredGroup measured={data.measured} cacheUtilization={data.cache_utilization} />
+          <MeasuredGroup
+            featureId={featureId}
+            measured={data.measured}
+            cacheUtilization={data.cache_utilization}
+            actions={data.actions}
+            onChange={load}
+          />
           <EstimatedGroup estimated={data.estimated} />
         </>
       )}
@@ -202,13 +214,20 @@ function OptimizationSection({ featureId }: { featureId: string }) {
 }
 
 function MeasuredGroup({
+  featureId,
   measured,
   cacheUtilization,
+  actions,
+  onChange,
 }: {
+  featureId: string;
   measured: FeatureOpportunities["measured"];
   cacheUtilization: number | null;
+  actions: OptimizationAction[];
+  onChange: () => Promise<void>;
 }) {
   const { opportunities, monthly_savings, annual_savings } = measured;
+  const actionByLever = new Map(actions.map((a) => [a.lever, a]));
   return (
     <div className="opt-group">
       <div className="opt-group-head">
@@ -244,23 +263,63 @@ function MeasuredGroup({
       ) : (
         <ul className="opt-list">
           {opportunities.map((o) => (
-            <MeasuredRow key={o.lever} opp={o} />
+            <MeasuredRow
+              key={o.lever}
+              opp={o}
+              featureId={featureId}
+              action={actionByLever.get(o.lever) ?? null}
+              onChange={onChange}
+            />
           ))}
         </ul>
       )}
+
+      <AppliedActions actions={actions} />
     </div>
   );
 }
 
-function MeasuredRow({ opp }: { opp: MeasuredOpportunity }) {
+function MeasuredRow({
+  opp,
+  featureId,
+  action,
+  onChange,
+}: {
+  opp: MeasuredOpportunity;
+  featureId: string;
+  action: OptimizationAction | null;
+  onChange: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const applied = action != null;
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      if (applied) await api.unapplyOpportunity(featureId, opp.lever);
+      else await api.applyOpportunity(featureId, opp.lever, opp.savings);
+      await onChange();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <li className="opt-item">
       <div className="opt-item-main">
         <div className="opt-item-lever">
           <strong>{LEVER_LABELS[opp.lever] ?? opp.lever}</strong>
           <ConfidenceBadge level={opp.confidence} />
+          {applied && (
+            <span className="opt-applied-chip">✓ Applied {monthLabel(action.applied_on)}</span>
+          )}
         </div>
-        <span className="opt-item-savings">{money(opp.savings)}/mo</span>
+        <div className="opt-item-actions">
+          <span className="opt-item-savings">{money(opp.savings)}/mo</span>
+          <button className="opt-apply-btn" onClick={toggle} disabled={busy}>
+            {applied ? "Undo" : "Mark as applied"}
+          </button>
+        </div>
       </div>
       <p className="opt-item-evidence">{opp.evidence}</p>
       <p className="opt-item-fix muted">{opp.fix}</p>
@@ -285,6 +344,44 @@ function MeasuredRow({ opp }: { opp: MeasuredOpportunity }) {
         </details>
       )}
     </li>
+  );
+}
+
+function AppliedActions({ actions }: { actions: OptimizationAction[] }) {
+  if (actions.length === 0) return null;
+  return (
+    <div className="opt-applied">
+      <h4 className="opt-applied-title">Applied optimizations</h4>
+      <span className="section-sub muted">
+        Projected savings frozen at apply time, reconciled against the measured drop since.
+      </span>
+      <table className="mini-table">
+        <thead>
+          <tr>
+            <th>Optimization</th>
+            <th>Applied</th>
+            <th className="num">Projected</th>
+            <th className="num">Realized</th>
+          </tr>
+        </thead>
+        <tbody>
+          {actions.map((a) => (
+            <tr key={a.lever}>
+              <td>{LEVER_LABELS[a.lever] ?? a.lever}</td>
+              <td>{monthLabel(a.applied_on)}</td>
+              <td className="num">{money(a.projected_monthly)}/mo</td>
+              <td className="num">
+                {a.status === "measured" ? (
+                  <strong className="opt-realized">{money(a.realized_monthly ?? 0)}/mo</strong>
+                ) : (
+                  <span className="muted">awaiting next period</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

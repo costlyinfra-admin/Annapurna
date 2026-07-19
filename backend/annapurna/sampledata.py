@@ -767,6 +767,17 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         tokens_in=106_600_000,
         tokens_out=5_200_000,
     )
+    # An applied optimization (opt spec §11): dedup was applied in April with a
+    # $500/mo projection. This month's duplicate waste is ~$369, so the realized
+    # saving so far is ~$131/mo — projected-vs-realized ROID the CFO can see.
+    conn.execute(
+        """
+        INSERT INTO optimization_action (tenant_id, feature_id, lever, applied_on,
+                                         projected_monthly)
+        VALUES (%s, %s, 'duplicate_calls', %s, 500.00)
+        """,
+        (tenant_id, base["triage"], _dt.date(2026, 4, 1)),
+    )
 
     # 3) A self-hosted / open-source feature: Llama-3.1-70B on the company's own
     #    GPUs. Its run cost is a $6,500/mo infra pool allocated by usage (med

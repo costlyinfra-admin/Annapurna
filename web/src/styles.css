@@ -1717,6 +1717,61 @@ a.exec-value:hover {
   color: var(--accent-hover);
 }
 
+.opt-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
+.opt-apply-btn {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+
+.opt-apply-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-ring);
+}
+
+.opt-apply-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.opt-applied-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--success, #15803d);
+  background: rgba(21, 128, 61, 0.1);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+.opt-applied {
+  margin-top: 1rem;
+}
+
+.opt-applied-title {
+  margin: 0 0 0.1rem;
+  font-size: 0.95rem;
+}
+
+.opt-applied .mini-table {
+  margin-top: 0.5rem;
+}
+
+.opt-realized {
+  color: var(--success, #15803d);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Window filter (Month / Quarter / Year) */
 .window-filter {
   display: inline-flex;

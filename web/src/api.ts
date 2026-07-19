@@ -155,6 +155,16 @@ export interface MeasuredOpportunity {
   }[];
 }
 
+/** An applied optimization, reconciled projected-vs-realized (opt spec §11). */
+export interface OptimizationAction {
+  lever: string;
+  applied_on: string;
+  projected_monthly: number;
+  current_avoidable: number;
+  realized_monthly: number | null; // null until a later period can reconcile it
+  status: "pending" | "measured";
+}
+
 export interface FeatureOpportunities {
   period: string;
   measured: {
@@ -164,6 +174,7 @@ export interface FeatureOpportunities {
   };
   estimated: HeuristicOptimization;
   cache_utilization: number | null;
+  actions: OptimizationAction[];
 }
 
 export interface FeatureInference {
@@ -330,6 +341,15 @@ export const api = {
     request<FeatureOpportunities>(
       `/features/${id}/opportunities${period ? `?period=${period}` : ""}`,
     ),
+
+  applyOpportunity: (id: string, lever: string, projectedMonthly: number) =>
+    request<{ lever: string; applied_on: string }>(`/features/${id}/opportunities/apply`, {
+      method: "POST",
+      body: JSON.stringify({ lever, projected_monthly: projectedMonthly }),
+    }),
+
+  unapplyOpportunity: (id: string, lever: string) =>
+    request<void>(`/features/${id}/opportunities/apply?lever=${lever}`, { method: "DELETE" }),
 
   providerSpend: (range?: ReviewRange) =>
     request<ProviderSpend>(`/dashboard/providers${rangeQuery(range)}`),

@@ -14,6 +14,8 @@ vi.mock("../api", async (importActual) => {
       featureDetail: vi.fn(),
       featureInference: vi.fn(),
       featureOpportunities: vi.fn(),
+      applyOpportunity: vi.fn(),
+      unapplyOpportunity: vi.fn(),
       logout: vi.fn(),
     },
   };
@@ -72,6 +74,14 @@ const OPPORTUNITIES = {
     annual_savings: 840,
   },
   cache_utilization: 0.08,
+  actions: [] as {
+    lever: string;
+    applied_on: string;
+    projected_monthly: number;
+    current_avoidable: number;
+    realized_monthly: number | null;
+    status: "pending" | "measured";
+  }[],
 };
 
 const DETAIL = {
@@ -155,6 +165,11 @@ describe("FeatureDetail", () => {
     vi.mocked(api.featureDetail).mockResolvedValue(DETAIL);
     vi.mocked(api.featureInference).mockResolvedValue(INFERENCE);
     vi.mocked(api.featureOpportunities).mockResolvedValue(OPPORTUNITIES);
+    vi.mocked(api.applyOpportunity).mockResolvedValue({
+      lever: "duplicate_calls",
+      applied_on: "2026-05-01",
+    });
+    vi.mocked(api.unapplyOpportunity).mockResolvedValue(undefined);
   });
 
   it("organizes into Developer cost and Inference cost sections", async () => {
@@ -212,6 +227,42 @@ describe("FeatureDetail", () => {
     );
     // The estimated tier still shows below the nudge.
     expect(screen.getByText("Model downgrade")).toBeInTheDocument();
+  });
+
+  it("marks a measured opportunity as applied and reloads", async () => {
+    renderDetail();
+    // Two measured levers -> two "Mark as applied" buttons.
+    const buttons = await screen.findAllByRole("button", { name: "Mark as applied" });
+    fireEvent.click(buttons[0]);
+    // The first card is the prompt_caching lever (savings 264.79).
+    await waitFor(() =>
+      expect(api.applyOpportunity).toHaveBeenCalledWith("f1", "prompt_caching", 264.79),
+    );
+    // Reloads opportunities after applying.
+    await waitFor(() => expect(api.featureOpportunities).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows projected vs realized for an applied optimization", async () => {
+    vi.mocked(api.featureOpportunities).mockResolvedValue({
+      ...OPPORTUNITIES,
+      actions: [
+        {
+          lever: "duplicate_calls",
+          applied_on: "2026-04-01",
+          projected_monthly: 500,
+          current_avoidable: 369,
+          realized_monthly: 131,
+          status: "measured",
+        },
+      ],
+    });
+    renderDetail();
+    expect(await screen.findByText("Applied optimizations")).toBeInTheDocument();
+    expect(screen.getByText("$500/mo")).toBeInTheDocument(); // projected
+    expect(screen.getByText("$131/mo")).toBeInTheDocument(); // realized
+    // The matching measured card shows an "Applied" chip and an Undo control.
+    expect(screen.getByText(/✓ Applied Apr 2026/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
   });
 
   it("refetches the breakdown when the window changes", async () => {

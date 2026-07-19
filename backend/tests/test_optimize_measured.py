@@ -154,6 +154,60 @@ def test_cache_utilization_surfaces_from_connector_without_sdk(tenant_id):
     assert result["measured"]["opportunities"] == []
 
 
+def test_applied_action_shows_projected_vs_realized(tenant_id):
+    # opt spec §11: apply dedup in an earlier month; a later month reconciles
+    # realized = projected − the lever's current avoidable spend.
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    # This month's duplicates are worth $6 (2M input @ $3/M).
+    hook.ingest_events(
+        tenant_id,
+        [
+            _dup_event(triage["id"], "fp-a", 1_000_000),
+            _dup_event(triage["id"], "fp-a", 1_000_000),
+        ],
+    )
+    # Applied last month with a $100/mo projection.
+    applied = optimize_measured.mark_applied(
+        tenant_id, triage["id"], "duplicate_calls", 100.0, dt.date(2026, 5, 1)
+    )
+    assert applied["applied_on"] == "2026-05-01"
+
+    result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)  # June
+    action = next(a for a in result["actions"] if a["lever"] == "duplicate_calls")
+    assert action["status"] == "measured"
+    assert action["projected_monthly"] == 100.0
+    assert action["current_avoidable"] == 6.0
+    assert action["realized_monthly"] == 94.0  # 100 − 6
+
+
+def test_applied_this_period_is_pending_until_next(tenant_id):
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    hook.ingest_events(tenant_id, [_dup_event(triage["id"], "fp-a", 1_000_000)])
+    optimize_measured.mark_applied(tenant_id, triage["id"], "duplicate_calls", 50.0, PERIOD)
+
+    result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
+    action = result["actions"][0]
+    assert action["status"] == "pending"  # applied this period — nothing to reconcile yet
+    assert action["realized_monthly"] is None
+
+
+def test_unmark_removes_the_action(tenant_id):
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    optimize_measured.mark_applied(tenant_id, triage["id"], "prompt_caching", 20.0, PERIOD)
+    assert optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)["actions"]
+    optimize_measured.unmark_applied(tenant_id, triage["id"], "prompt_caching")
+    assert optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)["actions"] == []
+
+
+def test_mark_applied_unknown_feature_returns_none(tenant_id):
+    assert (
+        optimize_measured.mark_applied(
+            tenant_id, "00000000-0000-0000-0000-000000000000", "duplicate_calls", 10.0
+        )
+        is None
+    )
+
+
 def test_unknown_feature_returns_none(tenant_id):
     assert (
         optimize_measured.opportunities(tenant_id, "00000000-0000-0000-0000-000000000000", PERIOD)

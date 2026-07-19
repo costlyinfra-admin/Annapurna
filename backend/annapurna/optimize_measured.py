@@ -170,6 +170,45 @@ def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[flo
     return measured, cache_utilization
 
 
+def _actions(conn, feature_id, start, measured_by_lever: dict) -> list:
+    """Applied optimizations with projected-vs-realized savings (opt spec §11).
+
+    realized = frozen projection − the lever's CURRENT avoidable spend, but only
+    once we're past the period it was applied in (before that there's nothing to
+    reconcile yet).
+    """
+    rows = conn.execute(
+        """
+        SELECT lever, applied_on, projected_monthly
+        FROM optimization_action
+        WHERE feature_id = %s
+        ORDER BY applied_on
+        """,
+        (feature_id,),
+    ).fetchall()
+    out = []
+    for lever, applied_on, projected in rows:
+        projected = round(float(projected), 2)
+        current = round(float(measured_by_lever.get(lever, 0.0)), 2)
+        if start > applied_on:
+            realized = round(projected - current, 2)
+            status = "measured"
+        else:
+            realized = None  # applied this period — no later month to reconcile yet
+            status = "pending"
+        out.append(
+            {
+                "lever": lever,
+                "applied_on": applied_on.isoformat(),
+                "projected_monthly": projected,
+                "current_avoidable": current,
+                "realized_monthly": realized,
+                "status": status,
+            }
+        )
+    return out
+
+
 def opportunities(
     tenant_id: str, feature_id: str, period: Optional[dt.date] = None
 ) -> Optional[dict]:
@@ -183,9 +222,51 @@ def opportunities(
             return None
         measured, cache_utilization = _measured(conn, feature_id, start)
         estimated = dashboard.heuristic_optimization(conn, feature_id, start)
+        by_lever = {o["lever"]: o["savings"] for o in measured["opportunities"]}
+        actions = _actions(conn, feature_id, start, by_lever)
     return {
         "period": start.isoformat(),
         "measured": measured,  # grounded in usage_signal, priced from the price book
         "estimated": estimated,  # the heuristic tier, labelled as a directional estimate
         "cache_utilization": cache_utilization,
+        "actions": actions,  # applied optimizations: projected vs realized (opt spec §11)
     }
+
+
+def mark_applied(
+    tenant_id: str,
+    feature_id: str,
+    lever: str,
+    projected_monthly: float,
+    period: Optional[dt.date] = None,
+) -> Optional[dict]:
+    """Freeze a measured opportunity's projection as of a period (opt spec §11).
+
+    Returns None if the feature doesn't exist. Idempotent per (feature, lever):
+    re-applying updates the applied period and frozen projection.
+    """
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        if conn.execute("SELECT 1 FROM feature WHERE id = %s", (feature_id,)).fetchone() is None:
+            return None
+        applied_on = dashboard._resolve_period(conn, period)
+        conn.execute(
+            """
+            INSERT INTO optimization_action (tenant_id, feature_id, lever, applied_on,
+                                             projected_monthly)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, feature_id, lever) DO UPDATE
+            SET applied_on = EXCLUDED.applied_on,
+                projected_monthly = EXCLUDED.projected_monthly
+            """,
+            (tenant_id, feature_id, lever, applied_on, projected_monthly),
+        )
+    return {"lever": lever, "applied_on": applied_on.isoformat()}
+
+
+def unmark_applied(tenant_id: str, feature_id: str, lever: str) -> None:
+    """Remove an applied optimization action (undo)."""
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        conn.execute(
+            "DELETE FROM optimization_action WHERE feature_id = %s AND lever = %s",
+            (feature_id, lever),
+        )
