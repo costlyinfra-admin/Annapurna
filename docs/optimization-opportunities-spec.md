@@ -1,11 +1,15 @@
-# Spec — Measured optimization opportunities
+# Spec — Measured optimization & the AI Cost Optimization Copilot
 
-**Status:** Draft for review (not yet scheduled into the build plan)
-**Scope of this doc:** the first *real* (measured, not heuristic) cost-optimization
-slice, plus the architecture the later tiers plug into.
-**Relationship to existing work:** replaces nothing. The current heuristic
-estimator in [`optimize.py`](../backend/annapurna/optimize.py) stays as the
-zero-instrumentation fallback; this adds a **measured** tier above it.
+**Status:** Part I (§1–§16) built through M-opt-8. Part II (§17–§27) is the
+Copilot roadmap, added 2026-07-19 (see the changelog, §27).
+**Scope of this doc:** **Part I** — the measured (not heuristic) optimization
+foundation: detectors, pricing, ingest, reconciliation. **Part II** — repositions
+that foundation as an **AI Cost Optimization Copilot** (five pillars: Observe,
+Detect, Recommend, Optimize, Prove) and defines the next milestones, without
+redesigning the architecture.
+**Relationship to existing work:** replaces nothing. The heuristic estimator in
+[`optimize.py`](../backend/annapurna/optimize.py) stays as the zero-instrumentation
+*directional* tier; the measured tier sits above it; the Copilot is the layer on top.
 
 ---
 
@@ -361,14 +365,14 @@ directional estimate). Numbers in parentheses reference the 120-item source list
 | Duplicate calls / response cache (45, 63, 118) | B | Priced cost of avoidable repeats | Exact | ✅ M-opt-1..4 |
 | Prompt / prefix caching (41, 61, 69) | B | Repeated prefix × (input − cached rate) | Exact | ✅ M-opt-3 |
 | Cache utilization context (105) | A/B | cached ÷ total input | Measured | ✅ M-opt-5 |
-| Model downgrade (31) | A | % of premium spend | Estimate | ✅ (heuristic) |
-| Context / output reduction (11, 51, 52) | A | % of input / output cost | Estimate | ✅ (heuristic) |
-| Semantic caching (62) | A | % of total (volume-flagged) | Estimate (low) | ✅ (heuristic) |
-| **Cross-provider price arbitrage (40)** | A | Same model, cheaper provider — rate delta × spend | **Exact** | **Batch 1** |
-| **Model right-sizing ceiling (31, 32, 33, 116)** | A→B | Cost delta to a cheaper tier (quality-gated ceiling) | Ceiling | **Batch 1** |
-| **Batch-API eligibility (81, 82, 83)** | A + tag | ~50% off async-tolerant spend (`BATCH_MULT`) | Grounded | **Batch 1** |
-| **Conditional invocation / FAQ-static (85, 111–113)** | B | Calls eliminable (100% on exact-repeat share) | Grounded | **Batch 1** |
-| **Agent iteration reduction (71, 45, 78, 79)** | B (session id) | Redundant calls per session × priced cost | Grounded | **Batch 1** |
+| Cross-provider price arbitrage (40) | A | Same model, cheaper provider — rate delta × spend | Exact | ✅ M-opt-8 |
+| Model right-sizing ceiling (31, 32, 33, 116) | A→B | Cost delta to a cheaper tier (quality-gated) | Ceiling | ✅ M-opt-7 |
+| Context / output reduction (11, 51, 52) | A | % of input / output cost | Directional | ✅ (heuristic) |
+| Semantic caching (62) | A | % of total (volume-flagged) | Directional (low) | ✅ (heuristic) |
+| ~~Model downgrade flat %~~ | A | ~~10% of premium spend~~ | — | Superseded by M-opt-7 |
+| **Batch-API eligibility (81, 82, 83)** | A + tag | ~50% off async-tolerant spend (`BATCH_MULT`) | Grounded | Deferred (see §22) |
+| **Conditional invocation / FAQ-static (85, 111–113)** | B | Calls eliminable (100% on exact-repeat share) | Grounded | Deferred (see §22) |
+| **Agent iteration reduction (71, 45, 78, 79)** | B (session id) | Redundant calls per session × priced cost | Grounded | Deferred (see §22) |
 | Semantic (near-dup) cache (12, 62) | B + embeddings | Near-dup share × priced cost | Grounded | Batch 2 |
 | Session / tool-result cache (66, 67) | B | Repeated tool/session results | Grounded | Batch 2 |
 | Multi-model cascade / confidence escalation (33, 34) | B + eval | Share routable to a cheaper model | Ceiling | Batch 2 |
@@ -396,18 +400,31 @@ them would be a black-box number:
 Deferred to other product slices (design doc §11), not this workstream: cost
 anomaly detection (106) and budget alerts (107) → Slice 4.
 
-### 15.3 Batch plan (5 at a time)
+### 15.3 Batch plan (revised — see §17 onward for the Copilot repositioning)
 
-- **Batch 1 — biggest cost levers, on existing surfaces (M-opt-7..11).** See §16.
-- **Batch 2 — deeper measured detectors** (semantic/tool/session caching, cascades)
-  once Batch 1 lands and SDK adoption warrants the extra machinery.
-- **Batch 3 — GitHub code-analysis subsystem**: turns measured symptoms into
+- **Batch 1 — the four core levers (M-opt-7, M-opt-8).** ✅ Done: model right-sizing
+  and cross-provider arbitrage, joining the already-shipped duplicate and prompt
+  caching. These four are now the *world-class core* the Copilot layer builds on.
+- **Batch 2 — the Copilot layer (M-opt-9..13).** Make those four detectors excellent
+  and turn findings into *decisions*: a unified opportunity model, deterministic
+  prioritization + effort, guidance/validation templates, overlap rules, and a
+  Copilot Overview. **Prioritized ahead of new detectors** (see §17–§22).
+- **Batch 3 — new measured detectors (M-opt-14..16):** batch-API eligibility,
+  conditional/FAQ-static, agent iteration reduction — the three deferred from the
+  original Batch 1, now sequenced *after* the core is world-class.
+- **Batch 4 — GitHub code-analysis subsystem**: turns measured symptoms into
   file/line fixes (the highest-trust, most actionable tier).
+- **Later — deeper detectors** (semantic/tool/session caching, cascades) once SDK
+  adoption warrants the extra machinery.
 
-## 16. Batch 1 — highest cost benefit, buildable now (M-opt-7..11)
+## 16. Batch 1 — the four core levers (M-opt-7, M-opt-8) ✅
 
-Chosen for the largest dollar impact per unit of build effort, reusing the
-connector + SDK surfaces already in place (no new subsystem). Ordered by impact.
+The largest dollar levers, on existing surfaces (no new subsystem). Together with
+the already-shipped duplicate (M-opt-1..4) and prompt-caching (M-opt-3) detectors,
+these are the **four world-class core detectors** the Copilot layer (§17+) builds
+on. The three *new* detectors originally sketched here — batch-API eligibility,
+conditional/FAQ-static, agent iteration reduction — are **deferred to Batch 3
+(§22)**, per the detector strategy: make the core excellent before adding more.
 
 - **M-opt-7 — Model right-sizing ceiling.** ✅ Done. `pricing.py` gains
   `_DOWNGRADE_TARGET` (one step down per vendor: opus→sonnet→haiku, gpt-4o→mini,
@@ -433,18 +450,250 @@ connector + SDK surfaces already in place (no new subsystem). Ordered by impact.
   note). Demo: Log enrichment on Together Llama-70B → DeepInfra, $73.20/mo (59%).
   *Accept:* a feature on a non-cheapest host shows the exact saving of the
   lowest-cost provider; browser-verified on a signal-free feature.
-- **M-opt-9 — Batch-API eligibility.** ~50% off any async-tolerant spend (offline
-  reports, bulk enrichment/classification). Detect candidates from a latency-
-  tolerance signal (high volume + high/steady latency, or a user "async" tag);
-  price with the reserved `BATCH_MULT`. *Accept:* an async-tagged feature shows the
-  batch saving; latency-sensitive ones are excluded.
-- **M-opt-10 — Conditional invocation / FAQ-static.** The highest-percentage lever
-  (100% on the calls it removes): a high exact-duplicate share means those calls
-  can be served from a cache/static answer/rule with no model call at all. Grounds
-  out of the existing duplicate detector. *Accept:* a feature with a high repeat
-  rate surfaces "N% of calls could skip the LLM," priced from the duplicate rows.
-- **M-opt-11 — Agent iteration reduction.** Dominant cost for the agentic
-  security customers we target: many LLM calls per user action. Add an optional
-  `session`/`trace` id to the SDK, then flag features whose calls-per-session is an
-  outlier and price the redundant iterations. *Accept:* a feature tagged with
-  sessions shows avg calls/session and the priced cost of reducing it.
+
+---
+
+# Part II — The AI Cost Optimization Copilot
+
+*Added in the roadmap update of 2026-07-19. Part I (§1–§16) is the measured-
+optimization foundation and is complete through M-opt-8. Part II repositions that
+foundation as a Copilot and defines the next milestones. No architecture is
+redesigned; every item below extends existing modules and computes over the
+existing schema (`inference_cost`, `usage_signal`, `optimization_action`).*
+
+## 17. Positioning & the five pillars
+
+Annapurna is repositioned as an **AI Cost Optimization Copilot** — built *on top of*
+the cost-attribution product, not replacing it. The existing strengths stay load-
+bearing: feature attribution, build vs inference split, connector-first onboarding,
+optional SDK precision, reconciliation, privacy-first metadata.
+
+The **North Star** is a five-minute answer to six questions, and every Part II item
+must move a customer toward it:
+
+1. *Where is AI money being wasted?* → Copilot Overview (§21)
+2. *What should we optimize first?* → deterministic prioritization (§19)
+3. *How much could each save?* → measured / modeled-ceiling savings (§18)
+4. *Why does Annapurna believe this?* → evidence trail + confidence reason (§18)
+5. *How hard is the fix?* → per-lever engineering effort (§19)
+6. *Did it actually work?* → reconciliation, projected → realized → verified (§18, §20)
+
+Organizing frame — **five pillars**, mapped to what already exists:
+
+| Pillar | What it means | Where it lives today |
+|---|---|---|
+| **1. Observe** | Understand AI cost | build + inference attribution, provider usage (M0–M8) |
+| **2. Detect** | Find opportunities from measured evidence | the 4 core detectors (M-opt-1..8) |
+| **3. Recommend** | Turn findings into decisions | evidence + `fix` today → unified model + guidance (§18) |
+| **4. Optimize** | Support execution | `optimization_action` apply/undo → full status model (§18) |
+| **5. Prove** | Projected → realized → verified savings | reconciliation loop (M-opt-6) → verified state (§20) |
+
+Pillars 1–2 are largely built; Part II is mostly Recommend, Optimize, Prove.
+
+## 18. The unified opportunity model (M-opt-9)
+
+Today `GET /features/{id}/opportunities` returns two differently-shaped lists
+(measured cards: `lever/savings/confidence/evidence/fix/trail`; estimated rows:
+`opportunity/savings/confidence/rationale`) plus an `actions` list. M-opt-9 unifies
+them into **one opportunity shape**, computed at read time — **no new tables**.
+
+Fields (compute from existing data; omit what a given lever can't populate):
+
+| Field | Source |
+|---|---|
+| `title`, `lever` | lever → friendly label map |
+| `source` | which surface produced it: `connector` \| `sdk` \| `heuristic` |
+| `savings_type` | **`measured`** \| **`modeled_ceiling`** \| **`directional`** (see below) |
+| `projected_monthly_savings`, `projected_annual_savings` | detector output × 12 |
+| `confidence`, `confidence_reason` | per-lever template (e.g. "exact rate delta on identical weights") |
+| `engineering_effort` | per-lever constant — `very_low` \| `low` \| `medium` \| `high` (§19) |
+| `implementation_guidance`, `validation_guidance` | per-lever deterministic template (§20) |
+| `priority_score` | deterministic formula (§19) |
+| `status` | `detected` \| `investigating` \| `planned` \| `applied` \| `verified` \| `dismissed` |
+| `realized_savings` | from the reconciliation loop when applied |
+| `evidence_trail` | the existing `trail` |
+
+**Savings taxonomy — the single most important rule** (formalizes what M-opt-7/8
+already do implicitly via `confidence` + which group):
+
+- **Measured** — observed traffic × price book, guaranteed given the traffic
+  (duplicate, prompt caching, provider switch). *Sums into the headline total.*
+- **Modeled ceiling** — measured traffic but realization depends on an assumption
+  (model right-sizing: quality must hold). **Must render "up to …"** and is
+  **excluded from the measured total** (already true today).
+- **Directional** — a symptom, not a priced fix (the heuristic tier). **Must never
+  contribute to any measured total.**
+
+Making `savings_type` an explicit field (rather than inferring from `confidence`)
+is the concrete deliverable. *Accept:* every opportunity across both tiers carries
+`savings_type`; the three totals are computed separately and never combined.
+
+## 19. Prioritization & engineering effort (M-opt-10)
+
+Answers *"what should we optimize first?"* with a **deterministic, explainable**
+ranking — never a black box:
+
+```
+priority_score = projected_monthly_savings
+               × confidence_weight   (high 1.0 / med 0.6 / low 0.3)
+               × effort_weight        (very_low 1.0 / low 0.8 / medium 0.5 / high 0.3)
+```
+
+`engineering_effort` is a **per-lever constant**, not a per-instance estimate — the
+difficulty is inherent to the fix type, so it's deterministic and defensible:
+
+| Lever | Effort | Why |
+|---|---|---|
+| Cross-provider switch | Very Low | change a base URL / model id; identical weights |
+| Prompt caching | Low | set `cache_control` on the static block |
+| Duplicate / response cache | Low–Medium | add a cache keyed on the request hash |
+| Model right-sizing | Medium–High | needs a quality eval before switching |
+
+No hour estimates. The confidence weight naturally down-ranks modeled ceilings so a
+big-but-risky right-sizing number never dominates a guaranteed switch.
+
+**Non-goal (explicit):** no synthetic "Optimization Score" for a tenant. Real
+dollars — measured, modeled-ceiling, verified — are more honest and more useful. A
+per-opportunity `priority_score` (a transparent ranking key) is *not* that; the two
+must not be confused.
+
+## 20. Guidance, validation & the Prove loop (M-opt-11)
+
+Every recommendation carries a **deterministic, per-lever template** (no LLM, no
+guessed numbers) answering the seven questions:
+
+1. what was observed · 2. why it matters · 3. how savings were calculated ·
+4. recommended implementation · 5. engineering effort · 6. validation steps ·
+7. how Annapurna verifies success.
+
+Example (provider switch): *"3.1B tokens on Together for Llama-3.1-70B; DeepInfra
+serves identical weights at $0.35/$0.40 vs $0.88 → save $X (rate delta × your
+tokens). Point the client's base URL at DeepInfra. Very low effort. Validate: run
+your eval suite (weights are identical, so parity is expected). Annapurna verifies:
+next month's provider row shifts to DeepInfra and the reconciliation loop reports
+the realized drop."*
+
+The **Prove loop** extends the existing reconciliation (M-opt-6): projected →
+realized (already built) → **verified** (a new terminal status once realized savings
+hold for N periods within tolerance). *Accept:* an applied opportunity advances
+`detected → applied → verified`, and verified savings roll up in the Overview (§21).
+
+## 21. Copilot Overview (M-opt-12)
+
+A tenant-level screen — the flagship of the repositioning — answering "where's the
+money and what do I do first" across all features at once. A new read-only endpoint
+that aggregates the per-feature opportunities already computed; **no new tables**.
+
+Shows, with measured and modeled **kept strictly separate** (never one blended
+number):
+
+- **Measured savings identified** (guaranteed) · **Modeled ceiling** ("up to") ·
+  **Verified savings** (proven, annualized) — three distinct figures.
+- **Top recommendations** across the tenant, ranked by `priority_score`.
+- **Opportunities by feature** and **by lever** (where the money and the leverage are).
+- **Applied / verified** recommendations and their realized savings.
+
+*Accept:* the Overview renders the three savings figures separately, a ranked
+top-N recommendation list, and by-feature / by-lever rollups — all from the existing
+opportunity computations.
+
+## 22. Overlap & exclusion groups (M-opt-13)
+
+Prevents double-counting when two levers address the *same* spend. Implemented as
+**read-time exclusion groups**, not a graph engine: within a group, keep the
+highest-priority member and suppress the rest from the measured total (still shown,
+marked "overlaps X").
+
+Current reality first: today overlap is minimal — **arbitrage acts only on hosted
+open models, right-sizing only on single-vendor frontier models (disjoint sets)**,
+so those two never double-count. The real cases to encode:
+
+- **Duplicate calls ⊕ conditional-invocation/FAQ** — both remove whole calls; the
+  same avoidable call must be counted once. (Matters once the deferred
+  conditional detector lands, §22 batch.)
+- **Duplicate calls ⊕ prompt caching** — a duplicated call's prefix tokens appear in
+  both bases; when both fire on the same feature, don't sum them naively.
+- **Provider switch ⊕ model downgrade** — both change the model for a spend; pick one.
+- **Prompt cache ⊕ prompt compression** — same input-token waste (future).
+
+*Accept:* when two members of an exclusion group fire on one feature, the measured
+total counts the winner only; the loser is shown with an "overlaps" note.
+
+## 23. Deferred detectors — Batch 3 (M-opt-14..16)
+
+The three new detectors moved out of Batch 1, now sequenced after the core is
+world-class:
+
+- **M-opt-14 — Batch-API eligibility.** ~50% off async-tolerant spend (offline
+  reports, bulk enrichment). Detect from a latency-tolerance signal (high volume +
+  steady latency, or a user "async" tag); price with the reserved `BATCH_MULT`.
+- **M-opt-15 — Conditional invocation / FAQ-static.** 100% on the calls it removes:
+  a high exact-duplicate share means those calls can skip the LLM. Grounds out of
+  the duplicate detector; in an exclusion group with it (§22).
+- **M-opt-16 — Agent iteration reduction.** Many LLM calls per user action (dominant
+  for agentic security customers). Add an optional `session`/`trace` id to the SDK,
+  flag outlier calls-per-session, price the redundant iterations.
+
+## 24. Future milestones
+
+- **Simulator (M-opt-17).** A what-if calculator over existing pricing + a feature's
+  measured token mix: provider switch, model mix, prompt-cache rate, batch API,
+  input/output reduction. Reuses `pricing.py` and the feature's usage — **no new
+  architecture**. Directly serves "how much could each save?"
+- **Cost regression (M-opt-18).** Flag month-over-month regressions from existing
+  data: cost/request up, model changed to a pricier one, cache utilization dropped,
+  tokens/request grew. **Note:** this overlaps the design doc's deferred *Slice 4
+  (trends & anomaly)* — build it as the cost-focused subset of that slice, not a new
+  workstream, and only after the Prove loop (§20) is solid. This is also the
+  concrete form of the lifecycle's "institutionalized" state — a guardrail that
+  catches a verified win from silently regressing.
+
+## 25. Product KPIs
+
+North-star metric: **verified annualized customer savings**. Supporting:
+
+- measured savings identified · modeled-ceiling savings identified
+- applied opportunities · verified opportunities
+- projection accuracy (projected vs realized) · verified ROI
+- SDK adoption · opportunity action rate (detected → applied)
+
+These are all computable from `optimization_action` + the opportunity model; none
+requires new infrastructure.
+
+## 26. Architecture impact
+
+Deliberately minimal — Part II is a computation-and-UI layer, not new plumbing:
+
+- **New tables:** none required. The opportunity model, prioritization, guidance,
+  overlap rules, and Overview all **compute over** `inference_cost`, `usage_signal`,
+  and `optimization_action`. (A `status`/`dismissed` column on `optimization_action`
+  is the only plausible schema touch, and only if apply/verify needs more states.)
+- **Backend:** extend `optimize_measured.py` (unified shape, `savings_type`,
+  `priority_score`, effort, guidance, exclusion groups) and add one aggregation
+  endpoint for the Overview. `optimize.py` and `pricing.py` unchanged in shape.
+- **SDK:** unchanged until M-opt-16 (optional `session` id).
+- **Frontend:** one new Overview screen; the feature drill-down gains effort +
+  priority + guidance on the cards it already renders.
+- **Explicitly avoided:** microservices, warehouses, queues, vector DBs, a general
+  optimization-graph engine, ML ranking, and any LLM-generated financial number.
+
+## 27. Changelog (2026-07-19 roadmap update)
+
+- Repositioned the workstream as the **AI Cost Optimization Copilot** (Part II),
+  layered on the existing attribution product — nothing removed.
+- Marked **M-opt-7 (right-sizing)** and **M-opt-8 (arbitrage)** done in the catalog;
+  noted the flat heuristic "Model downgrade" is **superseded** by M-opt-7.
+- Added the **five-pillar** frame (Observe/Detect/Recommend/Optimize/Prove) mapped to
+  existing work, and the **optimization lifecycle** (detected → … → verified).
+- Added milestones **M-opt-9..13** (unified opportunity model + `savings_type`;
+  deterministic prioritization + per-lever effort; guidance/validation templates +
+  the verified state; **Copilot Overview**; overlap/exclusion groups).
+- **Re-sequenced** the three new detectors (batch, conditional, agent) out of Batch 1
+  to **Batch 3 (M-opt-14..16)** — core-detectors-first, per the detector strategy.
+- Added **future** milestones: Simulator (M-opt-17) and Cost regression (M-opt-18,
+  positioned as the cost subset of the already-deferred Slice 4).
+- Added **Product KPIs** (north star: verified annualized savings) and an
+  **Architecture impact** statement (no new tables/infra).
+- **Explicit non-goal:** no synthetic tenant "Optimization Score" — measured,
+  modeled-ceiling, and verified dollars instead. (A transparent per-opportunity
+  `priority_score` is separate and retained.)
