@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { api, type Opportunity } from "../api";
 import { AuthProvider } from "../auth/AuthContext";
 import { FeatureDetail } from "./FeatureDetail";
 
@@ -21,58 +21,54 @@ vi.mock("../api", async (importActual) => {
   };
 });
 
+function opp(over: Partial<Opportunity>): Opportunity {
+  const base: Opportunity = {
+    lever: "x",
+    title: "X",
+    source: "sdk",
+    savings_type: "measured",
+    confidence: "high",
+    confidence_reason: "reason",
+    projected_monthly_savings: 0,
+    projected_annual_savings: 0,
+    evidence: "",
+    fix: null,
+    status: "detected",
+    trail: [],
+  };
+  return { ...base, ...over };
+}
+
 const OPPORTUNITIES = {
   period: "2026-05-01",
-  measured: {
-    opportunities: [
-      {
-        lever: "prompt_caching",
-        savings: 264.79,
-        confidence: "high",
-        evidence: "a 4,100-token static prefix repeated across 23,920 uncached calls",
-        fix: "Enable prompt caching (set cache_control on the static system block).",
-        trail: [
-          {
-            fingerprint: "prefix-syste",
-            provider: "anthropic",
-            model: "claude-sonnet-4-6",
-            calls: 26000,
-            prefix_tokens: 4100,
-            cached: 2080,
-          },
-        ],
-      },
-      {
-        lever: "duplicate_calls",
-        savings: 369.0,
-        confidence: "high",
-        evidence: "1,240 duplicate calls across 3 distinct requests this month",
-        fix: "Add response caching for identical requests (e.g. keyed on the request hash).",
-        trail: [
-          {
-            fingerprint: "dup-alert-fo",
-            provider: "anthropic",
-            model: "claude-sonnet-4-6",
-            call_count: 620,
-          },
-        ],
-      },
-    ],
-    monthly_savings: 633.79,
-    annual_savings: 7605.48,
-  },
-  estimated: {
-    opportunities: [
-      {
-        opportunity: "Model downgrade",
-        savings: 70,
-        confidence: "med",
-        rationale: "Route cheaper.",
-      },
-    ],
-    monthly_savings: 70,
-    annual_savings: 840,
-  },
+  opportunities: [
+    opp({
+      lever: "prompt_caching",
+      title: "Prompt caching",
+      projected_monthly_savings: 264.79,
+      evidence: "a 4,100-token static prefix repeated across 23,920 uncached calls",
+      fix: "Enable prompt caching (set cache_control on the static system block).",
+      trail: [{ fingerprint: "prefix-syste", model: "claude-sonnet-4-6", prefix_tokens: 4100 }],
+    }),
+    opp({
+      lever: "duplicate_calls",
+      title: "Duplicate calls",
+      projected_monthly_savings: 369.0,
+      evidence: "1,240 duplicate calls across 3 distinct requests this month",
+      fix: "Add response caching for identical requests (e.g. keyed on the request hash).",
+      trail: [{ fingerprint: "dup-alert-fo", model: "claude-sonnet-4-6", call_count: 620 }],
+    }),
+    opp({
+      lever: "model_downgrade_est",
+      title: "Model downgrade",
+      source: "heuristic",
+      savings_type: "directional",
+      confidence: "med",
+      projected_monthly_savings: 70,
+      evidence: "Route cheaper.",
+    }),
+  ],
+  totals: { measured: 633.79, modeled_ceiling: 0, directional: 70 },
   cache_utilization: 0.08,
   actions: [] as {
     lever: string;
@@ -213,28 +209,23 @@ describe("FeatureDetail", () => {
     expect(screen.getByText("directional estimate")).toBeInTheDocument();
   });
 
-  it("shows a quality-gated ceiling ('up to') for a med-confidence lever", async () => {
+  it("shows a quality-gated ceiling ('up to') for a modeled_ceiling lever", async () => {
     vi.mocked(api.featureOpportunities).mockResolvedValue({
       ...OPPORTUNITIES,
-      measured: {
-        opportunities: [
-          {
-            lever: "model_rightsizing",
-            savings: 2566,
-            confidence: "med",
-            evidence: "claude-sonnet-4-6 handles this feature; claude-haiku-4-5 is ~73% cheaper",
-            fix: "Move claude-sonnet-4-6 → claude-haiku-4-5 where quality allows — up to $2,566.00/mo.",
-            trail: [
-              {
-                model: "claude-sonnet-4-6 → claude-haiku-4-5",
-                note: "up to $2,566.00/mo (73% cheaper)",
-              },
-            ],
-          },
-        ],
-        monthly_savings: 0, // quality-gated ceiling is excluded from the guaranteed headline
-        annual_savings: 0,
-      },
+      opportunities: [
+        opp({
+          lever: "model_rightsizing",
+          title: "Model right-sizing",
+          source: "connector",
+          savings_type: "modeled_ceiling",
+          confidence: "med",
+          projected_monthly_savings: 2566,
+          evidence: "claude-sonnet-4-6 handles this feature; claude-haiku-4-5 is ~73% cheaper",
+          fix: "Move claude-sonnet-4-6 → claude-haiku-4-5 where quality allows — up to $2,566.00/mo.",
+          trail: [{ model: "claude-sonnet-4-6 → claude-haiku-4-5", note: "up to $2,566.00/mo" }],
+        }),
+      ],
+      totals: { measured: 0, modeled_ceiling: 2566, directional: 0 },
     });
     renderDetail();
     expect(await screen.findByText("Model right-sizing")).toBeInTheDocument();
@@ -243,14 +234,16 @@ describe("FeatureDetail", () => {
     ).toBeInTheDocument();
     // The savings is prefixed "up to" (a quality-gated ceiling)...
     expect(document.querySelector(".opt-ceiling")?.textContent).toContain("up to");
-    // ...and is NOT counted in the guaranteed "Measured savings" headline.
+    // ...and the headline reads "Modeled ceiling", NOT guaranteed "Measured savings".
+    expect(screen.getByText("Modeled ceiling")).toBeInTheDocument();
     expect(screen.queryByText("Measured savings")).not.toBeInTheDocument();
   });
 
   it("nudges installing the SDK when there are no measured opportunities", async () => {
     vi.mocked(api.featureOpportunities).mockResolvedValue({
       ...OPPORTUNITIES,
-      measured: { opportunities: [], monthly_savings: 0, annual_savings: 0 },
+      opportunities: OPPORTUNITIES.opportunities.filter((o) => o.savings_type === "directional"),
+      totals: { measured: 0, modeled_ceiling: 0, directional: 70 },
       cache_utilization: null,
     });
     renderDetail();

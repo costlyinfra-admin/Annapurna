@@ -41,6 +41,19 @@ def _prefix_event(feature_id, fingerprint, count, prefix_tokens, cached_count, t
     }
 
 
+def _opp(result, lever):
+    return next(o for o in result["opportunities"] if o["lever"] == lever)
+
+
+def _measured_levers(result):
+    # Levers that carry real (measured or modeled-ceiling) dollars, not directional.
+    return {
+        o["lever"]
+        for o in result["opportunities"]
+        if o["savings_type"] in ("measured", "modeled_ceiling")
+    }
+
+
 def test_duplicate_savings_match_the_price_book(tenant_id):
     triage = features.add_feature(tenant_id, "AI threat triage")
     # Two repeats of the same request, 1M input tokens each -> 2M avoidable input.
@@ -53,11 +66,12 @@ def test_duplicate_savings_match_the_price_book(tenant_id):
     )
 
     result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
-    measured = result["measured"]["opportunities"]
-    dup = next(o for o in measured if o["lever"] == "duplicate_calls")
+    dup = _opp(result, "duplicate_calls")
 
     # 2M input tokens @ $3/M (claude-sonnet-4-6) = $6.00, exactly.
-    assert dup["savings"] == 6.0
+    assert dup["projected_monthly_savings"] == 6.0
+    assert dup["savings_type"] == "measured"
+    assert dup["source"] == "sdk"
     assert dup["confidence"] == "high"
     assert "2 duplicate calls across 1 distinct requests" in dup["evidence"]
     assert dup["trail"][0]["call_count"] == 2
@@ -74,11 +88,10 @@ def test_prefix_caching_savings_match_the_price_book(tenant_id):
     )
 
     result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
-    measured = result["measured"]["opportunities"]
-    prefix = next(o for o in measured if o["lever"] == "prompt_caching")
+    prefix = _opp(result, "prompt_caching")
 
     # 1,000 calls * 4,000 tokens * $3/M * (1 - 0.10 cache-read) = $10.80.
-    assert prefix["savings"] == 10.8
+    assert prefix["projected_monthly_savings"] == 10.8
     assert prefix["confidence"] == "high"
     assert "4,000-token static prefix" in prefix["evidence"]
     assert "1,000 uncached calls" in prefix["evidence"]
@@ -94,8 +107,7 @@ def test_prefix_below_threshold_is_not_flagged(tenant_id):
         [_prefix_event(triage["id"], "fp-small", 50, 900, 0, 45_000)],
     )
     result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
-    levers = {o["lever"] for o in result["measured"]["opportunities"]}
-    assert "prompt_caching" not in levers
+    assert "prompt_caching" not in _measured_levers(result)
 
 
 def test_combines_measured_and_estimated_tiers(tenant_id):
@@ -110,23 +122,24 @@ def test_combines_measured_and_estimated_tiers(tenant_id):
     )
     result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
 
-    # Measured monthly = duplicate $6 + prompt caching $10.80 = $16.80.
-    assert result["measured"]["monthly_savings"] == 16.8
-    assert result["measured"]["annual_savings"] == round(16.8 * 12, 2)
-    # Highest-savings lever sorts first.
-    assert result["measured"]["opportunities"][0]["lever"] == "prompt_caching"
-    # The heuristic (estimated) tier is present and clearly separate.
-    assert "opportunities" in result["estimated"]
-    assert "monthly_savings" in result["estimated"]
+    # Measured total = duplicate $6 + prompt caching $10.80 = $16.80 (guaranteed only).
+    assert result["totals"]["measured"] == 16.8
+    # Highest-savings measured lever sorts first.
+    measured = [o for o in result["opportunities"] if o["savings_type"] == "measured"]
+    assert measured[0]["lever"] == "prompt_caching"
+    # The three savings types are tracked separately and never combined. The Sonnet
+    # duplicate spend ($6) also surfaces a right-sizing ceiling ($6 × 0.733 = $4.40),
+    # counted in modeled_ceiling — NOT in the guaranteed measured total.
+    assert set(result["totals"]) == {"measured", "modeled_ceiling", "directional"}
+    assert result["totals"]["modeled_ceiling"] == 4.4
 
 
-def test_no_signals_yields_empty_measured_but_keeps_estimated(tenant_id):
+def test_no_signals_no_cost_yields_no_opportunities(tenant_id):
     triage = features.add_feature(tenant_id, "AI threat triage")
     result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
-    assert result["measured"]["opportunities"] == []
-    assert result["measured"]["monthly_savings"] == 0.0
+    assert result["opportunities"] == []  # no signals, no inference cost
+    assert result["totals"] == {"measured": 0.0, "modeled_ceiling": 0.0, "directional": 0.0}
     assert result["cache_utilization"] is None
-    assert "estimated" in result
 
 
 def test_cache_utilization_surfaces_from_connector_without_sdk(tenant_id):
@@ -152,7 +165,7 @@ def test_cache_utilization_surfaces_from_connector_without_sdk(tenant_id):
 
     result = optimize_measured.opportunities(tenant_id, report["id"], PERIOD)
     assert result["cache_utilization"] == 0.08  # 720k / 9M, no usage_signal rows
-    assert result["measured"]["opportunities"] == []
+    assert _measured_levers(result) == set()  # no measured/ceiling levers here
 
 
 def test_applied_action_shows_projected_vs_realized(tenant_id):
@@ -225,9 +238,10 @@ def test_cross_provider_arbitrage_from_connector_rows(tenant_id):
         )
 
     result = optimize_measured.opportunities(tenant_id, enrich["id"], PERIOD)
-    arb = next(o for o in result["measured"]["opportunities"] if o["lever"] == "provider_switch")
+    arb = _opp(result, "provider_switch")
     # 10M in: Together $0.88/M = $8.80 -> DeepInfra $0.35/M = $3.50, save $5.30 (60%).
-    assert arb["savings"] == 5.3
+    assert arb["projected_monthly_savings"] == 5.3
+    assert arb["savings_type"] == "measured" and arb["source"] == "connector"
     assert arb["confidence"] == "high"
     assert "deepinfra" in arb["evidence"]
     assert "60% less" in arb["evidence"]
@@ -251,14 +265,16 @@ def test_model_rightsizing_ceiling_from_real_spend(tenant_id):
         )
 
     result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
-    rs = next(o for o in result["measured"]["opportunities"] if o["lever"] == "model_rightsizing")
+    rs = _opp(result, "model_rightsizing")
     # sonnet $18 vs haiku $4.80 per (1M,1M) -> 73.33% saving on the $100 spend.
-    assert rs["savings"] == 73.33
+    assert rs["projected_monthly_savings"] == 73.33
     assert rs["confidence"] == "med"
+    assert rs["savings_type"] == "modeled_ceiling"  # quality-gated ceiling
     assert "claude-haiku-4-5" in rs["evidence"] and "73%" in rs["evidence"]
     assert rs["trail"][0]["note"].startswith("up to")
-    # The quality-gated ceiling is excluded from the guaranteed headline.
-    assert result["measured"]["monthly_savings"] == 0.0
+    # The ceiling is counted in the modeled total, NOT the guaranteed measured total.
+    assert result["totals"]["measured"] == 0.0
+    assert result["totals"]["modeled_ceiling"] == 73.33
 
 
 def test_unknown_feature_returns_none(tenant_id):

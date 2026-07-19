@@ -156,8 +156,12 @@ class ReconcileRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
+# The measured levers that can be marked applied (opt spec §18).
+_LEVER_PATTERN = r"^(duplicate_calls|prompt_caching|provider_switch|model_rightsizing)$"
+
+
 class ApplyOpportunityRequest(BaseModel):
-    lever: str = Field(pattern=r"^(duplicate_calls|prompt_caching)$")
+    lever: str = Field(pattern=_LEVER_PATTERN)
     projected_monthly: float = Field(ge=0)
 
 
@@ -671,7 +675,7 @@ def create_app() -> FastAPI:
     def unapply_opportunity(
         feature_id: str,
         user: CurrentUser,
-        lever: str = Query(pattern=r"^(duplicate_calls|prompt_caching)$"),
+        lever: str = Query(pattern=_LEVER_PATTERN),
     ) -> None:
         optimize_measured.unmark_applied(user["tenant_id"], feature_id, lever)
 

@@ -136,14 +136,20 @@ export interface HeuristicOptimization {
   annual_savings: number;
 }
 
-/** A measured optimization opportunity — grounded in usage signals, priced from
- * the price book. Every number is explainable via its evidence trail. */
-export interface MeasuredOpportunity {
+/** A unified optimization opportunity (opt spec §18). `savings_type` is the
+ * canonical taxonomy; the three totals are computed separately and never combined. */
+export interface Opportunity {
   lever: string;
-  savings: number;
+  title: string;
+  source: "connector" | "sdk" | "heuristic";
+  savings_type: "measured" | "modeled_ceiling" | "directional";
   confidence: string;
+  confidence_reason: string;
+  projected_monthly_savings: number;
+  projected_annual_savings: number;
   evidence: string;
-  fix: string;
+  fix: string | null;
+  status: string;
   trail: {
     fingerprint?: string;
     provider?: string;
@@ -168,12 +174,8 @@ export interface OptimizationAction {
 
 export interface FeatureOpportunities {
   period: string;
-  measured: {
-    opportunities: MeasuredOpportunity[];
-    monthly_savings: number;
-    annual_savings: number;
-  };
-  estimated: HeuristicOptimization;
+  opportunities: Opportunity[];
+  totals: { measured: number; modeled_ceiling: number; directional: number };
   cache_utilization: number | null;
   actions: OptimizationAction[];
 }

@@ -490,7 +490,25 @@ Organizing frame — **five pillars**, mapped to what already exists:
 
 Pillars 1–2 are largely built; Part II is mostly Recommend, Optimize, Prove.
 
-## 18. The unified opportunity model (M-opt-9)
+## 18. The unified opportunity model (M-opt-9) ✅ Done
+
+Shipped. `GET /features/{id}/opportunities` now returns **one `opportunities` array**
+(every measured/ceiling/directional item in a single shape with `savings_type`,
+`source`, `confidence_reason`, `title`, `projected_monthly/annual_savings`, `status`,
+`evidence`, `fix`, `trail`) plus a `totals: {measured, modeled_ceiling, directional}`
+object computed separately. `optimize_measured` gained `_LEVER_META` +
+`_unify_measured`/`_unify_directional`; `_measured` returns the raw list and
+`opportunities()` builds the unified response. The feature UI partitions by
+`savings_type` (measured + modeled-ceiling as cards, directional as the demoted
+table); the headline shows "Measured savings $X + up to $Y modeled" (or "Modeled
+ceiling up to $Y" when there's no guaranteed savings). Migration 0023 + the API
+patterns now allow **all four** measured levers to be applied (fixing a latent 422
+on the provider-switch / right-sizing "Mark as applied" buttons). Browser-verified;
+backend 162, frontend 31 green.
+
+---
+
+The original design of this milestone, for reference:
 
 Today `GET /features/{id}/opportunities` returns two differently-shaped lists
 (measured cards: `lever/savings/confidence/evidence/fix/trail`; estimated rows:

@@ -142,9 +142,10 @@ def test_opportunities_endpoint_surfaces_measured_savings(client):
     resp = client.get(f"/api/features/{feature['id']}/opportunities?period=2026-06")
     assert resp.status_code == 200
     body = resp.json()
-    dup_opp = next(o for o in body["measured"]["opportunities"] if o["lever"] == "duplicate_calls")
-    assert dup_opp["savings"] == 6.0  # 2M input @ $3/M
-    assert "estimated" in body
+    dup_opp = next(o for o in body["opportunities"] if o["lever"] == "duplicate_calls")
+    assert dup_opp["projected_monthly_savings"] == 6.0  # 2M input @ $3/M
+    assert dup_opp["savings_type"] == "measured"
+    assert body["totals"]["measured"] == 6.0
 
     missing = client.get("/api/features/00000000-0000-0000-0000-000000000000/opportunities")
     assert missing.status_code == 404

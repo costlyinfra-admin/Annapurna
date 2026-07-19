@@ -13,19 +13,12 @@ import {
   type FeatureDetail as Detail,
   type FeatureInference,
   type FeatureOpportunities,
-  type MeasuredOpportunity,
+  type Opportunity,
   type OptimizationAction,
 } from "../api";
 import { ConfidenceBadge } from "../components/badges";
 import { TrendChart } from "../components/TrendChart";
 import { compact, money, num } from "../format";
-
-const LEVER_LABELS: Record<string, string> = {
-  duplicate_calls: "Duplicate calls",
-  prompt_caching: "Prompt caching",
-  provider_switch: "Cheaper provider",
-  model_rightsizing: "Model right-sizing",
-};
 
 const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
 
@@ -168,6 +161,15 @@ function monthLabel(iso: string): string {
   return new Date(`${iso}T00:00:00`).toLocaleString("en-US", { month: "short", year: "numeric" });
 }
 
+// Lever → friendly title, for the Applied-optimizations table (whose rows carry
+// only a lever). Opportunity cards use the `title` the API now provides.
+const LEVER_TITLES: Record<string, string> = {
+  duplicate_calls: "Duplicate calls",
+  prompt_caching: "Prompt caching",
+  provider_switch: "Cheaper provider",
+  model_rightsizing: "Model right-sizing",
+};
+
 function OptimizationSection({ featureId }: { featureId: string }) {
   const [data, setData] = useState<FeatureOpportunities | null>(null);
   const [failed, setFailed] = useState(false);
@@ -190,7 +192,7 @@ function OptimizationSection({ featureId }: { featureId: string }) {
         <div>
           <h2>Optimization opportunities</h2>
           <span className="section-sub muted">
-            Measured findings from metered calls, plus directional estimates from usage.
+            Measured findings from your traffic, plus directional estimates from usage.
           </span>
         </div>
       </div>
@@ -203,12 +205,16 @@ function OptimizationSection({ featureId }: { featureId: string }) {
         <>
           <MeasuredGroup
             featureId={featureId}
-            measured={data.measured}
+            opps={data.opportunities.filter((o) => o.savings_type !== "directional")}
+            totals={data.totals}
             cacheUtilization={data.cache_utilization}
             actions={data.actions}
             onChange={load}
           />
-          <EstimatedGroup estimated={data.estimated} />
+          <DirectionalGroup
+            opps={data.opportunities.filter((o) => o.savings_type === "directional")}
+            total={data.totals.directional}
+          />
         </>
       )}
     </section>
@@ -217,18 +223,19 @@ function OptimizationSection({ featureId }: { featureId: string }) {
 
 function MeasuredGroup({
   featureId,
-  measured,
+  opps,
+  totals,
   cacheUtilization,
   actions,
   onChange,
 }: {
   featureId: string;
-  measured: FeatureOpportunities["measured"];
+  opps: Opportunity[];
+  totals: FeatureOpportunities["totals"];
   cacheUtilization: number | null;
   actions: OptimizationAction[];
   onChange: () => Promise<void>;
 }) {
-  const { opportunities, monthly_savings, annual_savings } = measured;
   const actionByLever = new Map(actions.map((a) => [a.lever, a]));
   return (
     <div className="opt-group">
@@ -243,16 +250,25 @@ function MeasuredGroup({
             </span>
           )}
         </div>
-        {monthly_savings > 0 && (
+        {totals.measured > 0 ? (
           <div className="savings-headline">
             <span className="savings-label">Measured savings</span>
-            <span className="savings-month">{money(monthly_savings)}/mo</span>
-            <span className="savings-year muted">{money(annual_savings)}/yr</span>
+            <span className="savings-month">{money(totals.measured)}/mo</span>
+            {totals.modeled_ceiling > 0 && (
+              <span className="savings-year muted">
+                + up to {money(totals.modeled_ceiling)}/mo modeled
+              </span>
+            )}
           </div>
-        )}
+        ) : totals.modeled_ceiling > 0 ? (
+          <div className="savings-headline">
+            <span className="savings-label">Modeled ceiling</span>
+            <span className="savings-month">up to {money(totals.modeled_ceiling)}/mo</span>
+          </div>
+        ) : null}
       </div>
 
-      {opportunities.length === 0 ? (
+      {opps.length === 0 ? (
         <div className="opt-nudge">
           <p>
             No measured opportunities yet. Install the metering SDK with <code>optimize=True</code>{" "}
@@ -264,7 +280,7 @@ function MeasuredGroup({
         </div>
       ) : (
         <ul className="opt-list">
-          {opportunities.map((o) => (
+          {opps.map((o) => (
             <MeasuredRow
               key={o.lever}
               opp={o}
@@ -287,19 +303,20 @@ function MeasuredRow({
   action,
   onChange,
 }: {
-  opp: MeasuredOpportunity;
+  opp: Opportunity;
   featureId: string;
   action: OptimizationAction | null;
   onChange: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const applied = action != null;
+  const ceiling = opp.savings_type === "modeled_ceiling";
 
   async function toggle() {
     setBusy(true);
     try {
       if (applied) await api.unapplyOpportunity(featureId, opp.lever);
-      else await api.applyOpportunity(featureId, opp.lever, opp.savings);
+      else await api.applyOpportunity(featureId, opp.lever, opp.projected_monthly_savings);
       await onChange();
     } finally {
       setBusy(false);
@@ -310,16 +327,18 @@ function MeasuredRow({
     <li className="opt-item">
       <div className="opt-item-main">
         <div className="opt-item-lever">
-          <strong>{LEVER_LABELS[opp.lever] ?? opp.lever}</strong>
-          <ConfidenceBadge level={opp.confidence} />
+          <strong>{opp.title}</strong>
+          <span title={opp.confidence_reason}>
+            <ConfidenceBadge level={opp.confidence} />
+          </span>
           {applied && (
             <span className="opt-applied-chip">✓ Applied {monthLabel(action.applied_on)}</span>
           )}
         </div>
         <div className="opt-item-actions">
           <span className="opt-item-savings">
-            {opp.confidence !== "high" && <span className="opt-ceiling">up to </span>}
-            {money(opp.savings)}/mo
+            {ceiling && <span className="opt-ceiling">up to </span>}
+            {money(opp.projected_monthly_savings)}/mo
           </span>
           <button className="opt-apply-btn" onClick={toggle} disabled={busy}>
             {applied ? "Undo" : "Mark as applied"}
@@ -327,7 +346,7 @@ function MeasuredRow({
         </div>
       </div>
       <p className="opt-item-evidence">{opp.evidence}</p>
-      <p className="opt-item-fix muted">{opp.fix}</p>
+      {opp.fix && <p className="opt-item-fix muted">{opp.fix}</p>}
       {opp.trail.length > 0 && (
         <details className="opt-trail">
           <summary>Evidence trail ({opp.trail.length})</summary>
@@ -373,7 +392,7 @@ function AppliedActions({ actions }: { actions: OptimizationAction[] }) {
         <tbody>
           {actions.map((a) => (
             <tr key={a.lever}>
-              <td>{LEVER_LABELS[a.lever] ?? a.lever}</td>
+              <td>{LEVER_TITLES[a.lever] ?? a.lever}</td>
               <td>{monthLabel(a.applied_on)}</td>
               <td className="num">{money(a.projected_monthly)}/mo</td>
               <td className="num">
@@ -391,8 +410,7 @@ function AppliedActions({ actions }: { actions: OptimizationAction[] }) {
   );
 }
 
-function EstimatedGroup({ estimated }: { estimated: FeatureOpportunities["estimated"] }) {
-  const { opportunities, monthly_savings, annual_savings } = estimated;
+function DirectionalGroup({ opps, total }: { opps: Opportunity[]; total: number }) {
   return (
     <div className="opt-group opt-group-estimated">
       <div className="opt-group-head">
@@ -404,15 +422,14 @@ function EstimatedGroup({ estimated }: { estimated: FeatureOpportunities["estima
             Rules of thumb from this feature&apos;s usage — not guaranteed savings.
           </span>
         </div>
-        {monthly_savings > 0 && (
+        {total > 0 && (
           <div className="savings-headline">
             <span className="savings-label">Estimated savings</span>
-            <span className="savings-month">{money(monthly_savings)}/mo</span>
-            <span className="savings-year muted">{money(annual_savings)}/yr</span>
+            <span className="savings-month">{money(total)}/mo</span>
           </div>
         )}
       </div>
-      {opportunities.length === 0 ? (
+      {opps.length === 0 ? (
         <p className="muted">No estimated opportunities for this period.</p>
       ) : (
         <table className="mini-table">
@@ -424,10 +441,10 @@ function EstimatedGroup({ estimated }: { estimated: FeatureOpportunities["estima
             </tr>
           </thead>
           <tbody>
-            {opportunities.map((o) => (
-              <tr key={o.opportunity}>
-                <td title={o.rationale}>{o.opportunity}</td>
-                <td className="num">{money(o.savings)}/mo</td>
+            {opps.map((o) => (
+              <tr key={o.lever}>
+                <td title={o.evidence}>{o.title}</td>
+                <td className="num">{money(o.projected_monthly_savings)}/mo</td>
                 <td>
                   <ConfidenceBadge level={o.confidence} />
                 </td>

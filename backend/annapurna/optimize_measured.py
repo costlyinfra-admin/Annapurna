@@ -30,6 +30,88 @@ _MIN_CACHEABLE_CALLS = 100  # ...and repeated enough to matter
 _MIN_SAVINGS = 1.0  # ignore sub-dollar noise, like the heuristic tier
 _MAX_TRAIL = 25  # cap the evidence trail payload
 
+# Per-lever presentation metadata for the unified opportunity model (opt spec §18).
+# `savings_type` is the canonical taxonomy:
+#   measured         — guaranteed given the traffic (sums into the measured total)
+#   modeled_ceiling  — measured traffic, realization depends on an assumption ("up to")
+#   directional      — a symptom/estimate; never contributes to a measured total
+_LEVER_META = {
+    "duplicate_calls": {
+        "title": "Duplicate calls",
+        "source": "sdk",
+        "savings_type": "measured",
+        "confidence_reason": "Exact count of repeated requests, priced from the price book.",
+    },
+    "prompt_caching": {
+        "title": "Prompt caching",
+        "source": "sdk",
+        "savings_type": "measured",
+        "confidence_reason": "Measured uncached prefix tokens priced at the cache-read discount.",
+    },
+    "provider_switch": {
+        "title": "Cheaper provider",
+        "source": "connector",
+        "savings_type": "measured",
+        "confidence_reason": "Exact rate delta on identical open weights — no quality change.",
+    },
+    "model_rightsizing": {
+        "title": "Model right-sizing",
+        "source": "connector",
+        "savings_type": "modeled_ceiling",
+        "confidence_reason": (
+            "Grounded ceiling; realization depends on quality holding after the downgrade."
+        ),
+    },
+}
+
+# Heuristic (directional) opportunity name -> a stable lever slug for the unified list.
+_DIRECTIONAL_LEVER = {
+    "Prompt caching": "prompt_caching_est",
+    "Context reduction": "context_reduction",
+    "Output token reduction": "output_reduction",
+    "Semantic caching": "semantic_caching",
+}
+
+
+def _unify_measured(opp: dict) -> dict:
+    """Normalize a measured/ceiling detector output into the unified shape (§18)."""
+    meta = _LEVER_META[opp["lever"]]
+    savings = opp["savings"]
+    return {
+        "lever": opp["lever"],
+        "title": meta["title"],
+        "source": meta["source"],
+        "savings_type": meta["savings_type"],
+        "confidence": opp["confidence"],
+        "confidence_reason": meta["confidence_reason"],
+        "projected_monthly_savings": savings,
+        "projected_annual_savings": round(savings * 12, 2),
+        "evidence": opp["evidence"],
+        "fix": opp["fix"],
+        "trail": opp["trail"],
+        "status": "detected",
+    }
+
+
+def _unify_directional(opp: dict) -> dict:
+    """Normalize a heuristic estimate into the unified shape — always directional."""
+    savings = opp["savings"]
+    slug = _DIRECTIONAL_LEVER.get(opp["opportunity"], opp["opportunity"].lower().replace(" ", "_"))
+    return {
+        "lever": slug,
+        "title": opp["opportunity"],
+        "source": "heuristic",
+        "savings_type": "directional",
+        "confidence": opp["confidence"],
+        "confidence_reason": "Directional rule of thumb from this feature's usage shape.",
+        "projected_monthly_savings": savings,
+        "projected_annual_savings": round(savings * 12, 2),
+        "evidence": opp["rationale"],
+        "fix": None,
+        "trail": [],
+        "status": "detected",
+    }
+
 
 def _fp(fingerprint: str) -> str:
     """A short, opaque handle for a salted hash (never any prompt content)."""
@@ -259,7 +341,7 @@ def _rightsizing_opportunity(conn, feature_id, start) -> Optional[dict]:
     }
 
 
-def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[float]]:
+def _measured(conn, feature_id: str, start: dt.date) -> tuple[list, Optional[float]]:
     rows = conn.execute(
         """
         SELECT signal_kind, provider, model, fingerprint,
@@ -273,28 +355,18 @@ def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[flo
     dup_rows = [(r[1], r[2], r[3], r[4], r[6], r[7]) for r in rows if r[0] == "duplicate"]
     pfx_rows = [(r[1], r[2], r[3], r[4], r[5], r[8]) for r in rows if r[0] == "prefix"]
 
-    opportunities = []
-    for opp in (
-        _duplicate_opportunity(dup_rows),
-        _prefix_opportunity(pfx_rows),
-        _arbitrage_opportunity(conn, feature_id, start),
-        _rightsizing_opportunity(conn, feature_id, start),
-    ):
-        if opp is not None:
-            opportunities.append(opp)
-    opportunities.sort(key=lambda o: o["savings"], reverse=True)
-
+    opportunities = [
+        opp
+        for opp in (
+            _duplicate_opportunity(dup_rows),
+            _prefix_opportunity(pfx_rows),
+            _arbitrage_opportunity(conn, feature_id, start),
+            _rightsizing_opportunity(conn, feature_id, start),
+        )
+        if opp is not None
+    ]
     cache_utilization = _cache_utilization(conn, feature_id, start, rows)
-
-    # Headline sums only GUARANTEED (high-confidence) savings; quality-gated
-    # ceilings (e.g. model right-sizing, med) show per-card as "up to $X".
-    monthly = round(sum(o["savings"] for o in opportunities if o["confidence"] == "high"), 2)
-    measured = {
-        "opportunities": opportunities,
-        "monthly_savings": monthly,
-        "annual_savings": round(monthly * 12, 2),
-    }
-    return measured, cache_utilization
+    return opportunities, cache_utilization
 
 
 def _actions(conn, feature_id, start, measured_by_lever: dict) -> list:
@@ -339,9 +411,11 @@ def _actions(conn, feature_id, start, measured_by_lever: dict) -> list:
 def opportunities(
     tenant_id: str, feature_id: str, period: Optional[dt.date] = None
 ) -> Optional[dict]:
-    """Measured + estimated optimization opportunities for one feature/month.
+    """Unified optimization opportunities for one feature/month (opt spec §18).
 
-    Returns None if the feature doesn't exist (the API turns that into a 404).
+    One list, one shape. Each opportunity carries a `savings_type`
+    (measured | modeled_ceiling | directional); the three totals are computed
+    separately and never combined. Returns None if the feature doesn't exist.
     """
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         start = dashboard._resolve_period(conn, period)
@@ -349,12 +423,34 @@ def opportunities(
             return None
         measured, cache_utilization = _measured(conn, feature_id, start)
         estimated = dashboard.heuristic_optimization(conn, feature_id, start)
-        by_lever = {o["lever"]: o["savings"] for o in measured["opportunities"]}
+
+        unified = [_unify_measured(o) for o in measured]
+        unified += [_unify_directional(o) for o in estimated["opportunities"]]
+
+        # Reconciliation reads the CURRENT avoidable spend per applied lever.
+        by_lever = {
+            o["lever"]: o["projected_monthly_savings"]
+            for o in unified
+            if o["savings_type"] in ("measured", "modeled_ceiling")
+        }
         actions = _actions(conn, feature_id, start, by_lever)
+        applied = {a["lever"] for a in actions}
+        for o in unified:
+            if o["lever"] in applied:
+                o["status"] = "applied"
+
+        unified.sort(key=lambda o: o["projected_monthly_savings"], reverse=True)
+        totals = {
+            kind: round(
+                sum(o["projected_monthly_savings"] for o in unified if o["savings_type"] == kind),
+                2,
+            )
+            for kind in ("measured", "modeled_ceiling", "directional")
+        }
     return {
         "period": start.isoformat(),
-        "measured": measured,  # grounded in usage_signal, priced from the price book
-        "estimated": estimated,  # the heuristic tier, labelled as a directional estimate
+        "opportunities": unified,
+        "totals": totals,  # measured / modeled_ceiling / directional — never combined
         "cache_utilization": cache_utilization,
         "actions": actions,  # applied optimizations: projected vs realized (opt spec §11)
     }
