@@ -329,3 +329,109 @@ This is the same "reconcile against reality" ethos as bill reconciliation.
 - **Scope vs the build plan.** This is a new workstream beyond the current v1
   milestones (design doc §11 lists trends/anomaly work as later slices). Proposed
   to slot *after* core ship, SDK adoption permitting.
+
+## 15. Opportunity catalog & build roadmap
+
+A structured triage of the broad optimization space (a 120-item industry list was
+the input). The filter is the product's own bar, not "is this a real technique":
+
+> **Annapurna may recommend an optimization only when it can both (a) DETECT it
+> from data it actually has, and (b) QUANTIFY the saving from the price book or a
+> measured count — never an invented percentage.** Detect-but-can't-quantify → a
+> low-confidence *symptom flag*. Neither → it's the customer's engineering team's
+> job, and we don't pretend to recommend it.
+
+**Three detection surfaces** (each opportunity is unlocked by one):
+
+- **A — Connector data** (provider cost/usage APIs): spend, tokens, cache tokens,
+  request counts, model mix, latency. Ships to every user, no instrumentation.
+- **B — SDK optimize signals**: request/prefix fingerprints, cache-read flags,
+  per-call token distributions, latency, and (small addition) a session/trace id.
+- **C — GitHub code analysis** (call sites): the actual `create(...)` calls —
+  models, `max_tokens`, `cache_control`, retry/agent-loop structure. A new
+  subsystem; grouped as its own batch.
+
+### 15.1 Catalog (doable only)
+
+Grouped by build status. "Grounded?" = is the dollar figure exact/measured (vs a
+directional estimate). Numbers in parentheses reference the 120-item source list.
+
+| Opportunity | Surface | Savings mechanism | Grounded? | Status |
+|---|---|---|---|---|
+| Duplicate calls / response cache (45, 63, 118) | B | Priced cost of avoidable repeats | Exact | ✅ M-opt-1..4 |
+| Prompt / prefix caching (41, 61, 69) | B | Repeated prefix × (input − cached rate) | Exact | ✅ M-opt-3 |
+| Cache utilization context (105) | A/B | cached ÷ total input | Measured | ✅ M-opt-5 |
+| Model downgrade (31) | A | % of premium spend | Estimate | ✅ (heuristic) |
+| Context / output reduction (11, 51, 52) | A | % of input / output cost | Estimate | ✅ (heuristic) |
+| Semantic caching (62) | A | % of total (volume-flagged) | Estimate (low) | ✅ (heuristic) |
+| **Cross-provider price arbitrage (40)** | A | Same model, cheaper provider — rate delta × spend | **Exact** | **Batch 1** |
+| **Model right-sizing ceiling (31, 32, 33, 116)** | A→B | Cost delta to a cheaper tier (quality-gated ceiling) | Ceiling | **Batch 1** |
+| **Batch-API eligibility (81, 82, 83)** | A + tag | ~50% off async-tolerant spend (`BATCH_MULT`) | Grounded | **Batch 1** |
+| **Conditional invocation / FAQ-static (85, 111–113)** | B | Calls eliminable (100% on exact-repeat share) | Grounded | **Batch 1** |
+| **Agent iteration reduction (71, 45, 78, 79)** | B (session id) | Redundant calls per session × priced cost | Grounded | **Batch 1** |
+| Semantic (near-dup) cache (12, 62) | B + embeddings | Near-dup share × priced cost | Grounded | Batch 2 |
+| Session / tool-result cache (66, 67) | B | Repeated tool/session results | Grounded | Batch 2 |
+| Multi-model cascade / confidence escalation (33, 34) | B + eval | Share routable to a cheaper model | Ceiling | Batch 2 |
+| `cache_control` missing on static prefix (41) | C | Upgrades prefix lever to a file/line fix | Exact | Batch 3 |
+| No `max_tokens` / stop sequences (48, 53) | C | Output-token waste at the call site | Grounded | Batch 3 |
+| Retry storms (89) | C | Redundant retried calls | Grounded | Batch 3 |
+| Recursive reflection / excess iterations (76, 77) | C | Redundant agent calls | Grounded | Batch 3 |
+| Redundant CoT / few-shot bloat (7, 8) | C | Input tokens trimmable at the call site | Grounded | Batch 3 |
+
+### 15.2 Explicitly out of scope (why)
+
+A cost-attribution tool can't see these or can't quantify them, so recommending
+them would be a black-box number:
+
+- **Inference-engine internals** (42–44, 46, 50 — KV-cache, continuous/dynamic
+  batching, speculative decoding, scheduling): invisible from cost data.
+- **RAG pipeline internals** (21–30 — chunking, hybrid search, re-ranking,
+  embeddings): we see the *result* (high input tokens), never the pipeline. Best
+  we do is flag the symptom ("input tokens/call is 3× peers") and hand it off.
+- **Prompt-writing craft** (1–6, 9, 10): symptom-detectable, technique not — except
+  where surface C spots it.
+- **Infra / GPU tuning** (91–99): the customer's platform team, beyond a
+  low-pool-utilization flag.
+
+Deferred to other product slices (design doc §11), not this workstream: cost
+anomaly detection (106) and budget alerts (107) → Slice 4.
+
+### 15.3 Batch plan (5 at a time)
+
+- **Batch 1 — biggest cost levers, on existing surfaces (M-opt-7..11).** See §16.
+- **Batch 2 — deeper measured detectors** (semantic/tool/session caching, cascades)
+  once Batch 1 lands and SDK adoption warrants the extra machinery.
+- **Batch 3 — GitHub code-analysis subsystem**: turns measured symptoms into
+  file/line fixes (the highest-trust, most actionable tier).
+
+## 16. Batch 1 — highest cost benefit, buildable now (M-opt-7..11)
+
+Chosen for the largest dollar impact per unit of build effort, reusing the
+connector + SDK surfaces already in place (no new subsystem). Ordered by impact.
+
+- **M-opt-7 — Model right-sizing ceiling.** The single biggest lever: model choice
+  is usually the dominant cost driver (Opus→Sonnet ≈ 5×, Sonnet→Haiku ≈ 4×,
+  gpt-4o→mini ≈ 15×). Per feature, compute the *ceiling* saving of moving its spend
+  to a named cheaper tier, from the price book. Framed as quality-gated ("up to $X
+  if quality holds"), med confidence, upgraded by an eval tier later (§12). *Accept:*
+  a premium-heavy feature shows a grounded downgrade ceiling vs a named target model.
+- **M-opt-8 — Cross-provider price arbitrage.** Zero-risk and exact: the same open
+  model billed by a pricier host than another in the price table (Llama-70B:
+  Together $0.88 vs DeepInfra $0.35). Savings = spend × rate delta, identical
+  weights → no quality change. Connector-only, ships to everyone. *Accept:* a
+  feature on a non-cheapest host shows the exact saving of the lowest-cost provider.
+- **M-opt-9 — Batch-API eligibility.** ~50% off any async-tolerant spend (offline
+  reports, bulk enrichment/classification). Detect candidates from a latency-
+  tolerance signal (high volume + high/steady latency, or a user "async" tag);
+  price with the reserved `BATCH_MULT`. *Accept:* an async-tagged feature shows the
+  batch saving; latency-sensitive ones are excluded.
+- **M-opt-10 — Conditional invocation / FAQ-static.** The highest-percentage lever
+  (100% on the calls it removes): a high exact-duplicate share means those calls
+  can be served from a cache/static answer/rule with no model call at all. Grounds
+  out of the existing duplicate detector. *Accept:* a feature with a high repeat
+  rate surfaces "N% of calls could skip the LLM," priced from the duplicate rows.
+- **M-opt-11 — Agent iteration reduction.** Dominant cost for the agentic
+  security customers we target: many LLM calls per user action. Add an optional
+  `session`/`trace` id to the SDK, then flag features whose calls-per-session is an
+  outlier and price the redundant iterations. *Accept:* a feature tagged with
+  sessions shows avg calls/session and the priced cost of reducing it.
