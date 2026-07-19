@@ -357,6 +357,15 @@ function MeasuredRow({
       </div>
       <p className="opt-item-evidence">{opp.evidence}</p>
       {opp.fix && <p className="opt-item-fix muted">{opp.fix}</p>}
+      <details className="opt-trail">
+        <summary>How to apply &amp; verify</summary>
+        <dl className="opt-guidance">
+          <dt>Validate</dt>
+          <dd>{opp.validation_guidance}</dd>
+          <dt>Annapurna verifies</dt>
+          <dd>{opp.verification}</dd>
+        </dl>
+      </details>
       {opp.trail.length > 0 && (
         <details className="opt-trail">
           <summary>Evidence trail ({opp.trail.length})</summary>
@@ -406,10 +415,13 @@ function AppliedActions({ actions }: { actions: OptimizationAction[] }) {
               <td>{monthLabel(a.applied_on)}</td>
               <td className="num">{money(a.projected_monthly)}/mo</td>
               <td className="num">
-                {a.status === "measured" ? (
-                  <strong className="opt-realized">{money(a.realized_monthly ?? 0)}/mo</strong>
-                ) : (
+                {a.status === "pending" ? (
                   <span className="muted">awaiting next period</span>
+                ) : (
+                  <>
+                    <strong className="opt-realized">{money(a.realized_monthly ?? 0)}/mo</strong>
+                    {a.status === "verified" && <span className="opt-verified">✓ Verified</span>}
+                  </>
                 )}
               </td>
             </tr>

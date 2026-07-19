@@ -767,16 +767,17 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         tokens_in=106_600_000,
         tokens_out=5_200_000,
     )
-    # An applied optimization (opt spec §11): dedup was applied in April with a
+    # An applied optimization (opt spec §11/§20): dedup was applied in March with a
     # $500/mo projection. This month's duplicate waste is ~$369, so the realized
-    # saving so far is ~$131/mo — projected-vs-realized ROID the CFO can see.
+    # saving is ~$131/mo — and it has held for 2 periods (Mar→May), so it's VERIFIED,
+    # the terminal Prove state a CFO can trust.
     conn.execute(
         """
         INSERT INTO optimization_action (tenant_id, feature_id, lever, applied_on,
                                          projected_monthly)
         VALUES (%s, %s, 'duplicate_calls', %s, 500.00)
         """,
-        (tenant_id, base["triage"], _dt.date(2026, 4, 1)),
+        (tenant_id, base["triage"], _dt.date(2026, 3, 1)),
     )
 
     # 2c) A feature on a HOSTED open model — cross-provider arbitrage (opt spec

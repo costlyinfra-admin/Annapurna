@@ -94,11 +94,47 @@ def _priority(monthly: float, confidence: str, effort: str) -> float:
     )
 
 
+# Per-lever guidance (opt spec §20) — deterministic templates, never an LLM. The
+# implementation one-liner is the detector's `fix`; these add "how to validate the
+# change is safe" and "how Annapurna confirms it worked".
+_DIRECTIONAL_GUIDANCE = {
+    "validation": "Investigate whether this usage pattern really applies before acting.",
+    "verification": "Install the metering SDK to turn this estimate into a measured, verifiable "
+    "finding.",
+}
+_LEVER_GUIDANCE = {
+    "provider_switch": {
+        "validation": "Run your eval suite — the weights are identical, so quality parity is "
+        "expected.",
+        "verification": "Next month's provider row shifts to the cheaper host and the "
+        "reconciliation loop reports the realized drop.",
+    },
+    "prompt_caching": {
+        "validation": "Confirm the cached prefix is byte-identical across calls; responses are "
+        "unaffected by caching.",
+        "verification": "Cache utilization rises and this feature's input cost falls next period.",
+    },
+    "duplicate_calls": {
+        "validation": "Confirm the duplicates aren't intentional (idempotent retries, distinct "
+        "users) before caching.",
+        "verification": "The duplicate count for this feature drops next period; the "
+        "reconciliation loop reports the realized saving.",
+    },
+    "model_rightsizing": {
+        "validation": "Run a quality eval on a sample before switching — this is a ceiling, not a "
+        "guaranteed saving.",
+        "verification": "After the switch, spend on the premium model drops and the reconciliation "
+        "loop reports realized savings.",
+    },
+}
+
+
 def _unify_measured(opp: dict) -> dict:
     """Normalize a measured/ceiling detector output into the unified shape (§18)."""
     meta = _LEVER_META[opp["lever"]]
     savings = opp["savings"]
     effort = _LEVER_EFFORT.get(opp["lever"], _DEFAULT_EFFORT)
+    guidance = _LEVER_GUIDANCE.get(opp["lever"], _DIRECTIONAL_GUIDANCE)
     return {
         "lever": opp["lever"],
         "title": meta["title"],
@@ -112,6 +148,8 @@ def _unify_measured(opp: dict) -> dict:
         "priority_score": _priority(savings, opp["confidence"], effort),
         "evidence": opp["evidence"],
         "fix": opp["fix"],
+        "validation_guidance": guidance["validation"],
+        "verification": guidance["verification"],
         "trail": opp["trail"],
         "status": "detected",
     }
@@ -134,6 +172,8 @@ def _unify_directional(opp: dict) -> dict:
         "priority_score": _priority(savings, opp["confidence"], _DEFAULT_EFFORT),
         "evidence": opp["rationale"],
         "fix": None,
+        "validation_guidance": _DIRECTIONAL_GUIDANCE["validation"],
+        "verification": _DIRECTIONAL_GUIDANCE["verification"],
         "trail": [],
         "status": "detected",
     }
@@ -395,12 +435,21 @@ def _measured(conn, feature_id: str, start: dt.date) -> tuple[list, Optional[flo
     return opportunities, cache_utilization
 
 
-def _actions(conn, feature_id, start, measured_by_lever: dict) -> list:
-    """Applied optimizations with projected-vs-realized savings (opt spec §11).
+def _months_between(a: dt.date, b: dt.date) -> int:
+    return (b.year - a.year) * 12 + (b.month - a.month)
 
-    realized = frozen projection − the lever's CURRENT avoidable spend, but only
-    once we're past the period it was applied in (before that there's nothing to
-    reconcile yet).
+
+# Periods a realized saving must hold before it's counted VERIFIED (opt spec §20).
+_VERIFY_PERIODS = 2
+
+
+def _actions(conn, feature_id, start, measured_by_lever: dict) -> list:
+    """Applied optimizations, reconciled projected → realized → verified (opt spec §20).
+
+    realized = frozen projection − the lever's CURRENT avoidable spend, once we're
+    past the applied period. Status advances: pending (applied this period) →
+    measured (one period reconciled) → verified (the realized drop has held for
+    `_VERIFY_PERIODS` periods), the terminal Prove state.
     """
     rows = conn.execute(
         """
@@ -415,12 +464,12 @@ def _actions(conn, feature_id, start, measured_by_lever: dict) -> list:
     for lever, applied_on, projected in rows:
         projected = round(float(projected), 2)
         current = round(float(measured_by_lever.get(lever, 0.0)), 2)
-        if start > applied_on:
-            realized = round(projected - current, 2)
-            status = "measured"
+        elapsed = _months_between(applied_on, start)
+        if elapsed <= 0:
+            realized, status = None, "pending"  # applied this period, nothing to reconcile
         else:
-            realized = None  # applied this period — no later month to reconcile yet
-            status = "pending"
+            realized = round(projected - current, 2)
+            status = "verified" if elapsed >= _VERIFY_PERIODS and realized > 0 else "measured"
         out.append(
             {
                 "lever": lever,
@@ -460,9 +509,14 @@ def opportunities(
             if o["savings_type"] in ("measured", "modeled_ceiling")
         }
         actions = _actions(conn, feature_id, start, by_lever)
-        applied = {a["lever"] for a in actions}
+        # An opportunity's lifecycle status follows its applied action: detected →
+        # applied → verified (opt spec §20).
+        action_status = {a["lever"]: a["status"] for a in actions}
         for o in unified:
-            if o["lever"] in applied:
+            st = action_status.get(o["lever"])
+            if st == "verified":
+                o["status"] = "verified"
+            elif st is not None:
                 o["status"] = "applied"
 
         # Rank by priority (savings × confidence × effort) — "what to fix first".

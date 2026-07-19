@@ -584,7 +584,18 @@ dollars — measured, modeled-ceiling, verified — are more honest and more use
 per-opportunity `priority_score` (a transparent ranking key) is *not* that; the two
 must not be confused.
 
-## 20. Guidance, validation & the Prove loop (M-opt-11)
+## 20. Guidance, validation & the Prove loop (M-opt-11) ✅ Done
+
+Shipped. Each opportunity now carries `validation_guidance` and `verification` from
+a deterministic per-lever template (`_LEVER_GUIDANCE`, with a directional fallback)
+— the card shows a "How to apply & verify" expander (Validate / Annapurna verifies)
+alongside the implementation one-liner (`fix`). The **Prove loop** gained the
+terminal `verified` state: `_actions` advances pending → measured → **verified**
+once the realized drop has held for `_VERIFY_PERIODS` (2) periods with a positive
+delta, and the opportunity's `status` follows (detected → applied → verified). The
+UI shows a "✓ Verified" badge in the Applied-optimizations table. Demo: triage's
+dedup, applied Mar 2026, is now verified ($131/mo realized, held 2 periods).
+Browser-verified; backend 165, frontend 32 green.
 
 Every recommendation carries a **deterministic, per-lever template** (no LLM, no
 guessed numbers) answering the seven questions:

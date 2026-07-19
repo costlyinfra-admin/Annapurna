@@ -35,6 +35,8 @@ function opp(over: Partial<Opportunity>): Opportunity {
     priority_score: 0,
     evidence: "",
     fix: null,
+    validation_guidance: "validate it",
+    verification: "we verify it",
     status: "detected",
     trail: [],
   };
@@ -273,17 +275,17 @@ describe("FeatureDetail", () => {
     await waitFor(() => expect(api.featureOpportunities).toHaveBeenCalledTimes(2));
   });
 
-  it("shows projected vs realized for an applied optimization", async () => {
+  it("shows projected → realized → verified for an applied optimization", async () => {
     vi.mocked(api.featureOpportunities).mockResolvedValue({
       ...OPPORTUNITIES,
       actions: [
         {
           lever: "duplicate_calls",
-          applied_on: "2026-04-01",
+          applied_on: "2026-03-01",
           projected_monthly: 500,
           current_avoidable: 369,
           realized_monthly: 131,
-          status: "measured",
+          status: "verified",
         },
       ],
     });
@@ -291,9 +293,18 @@ describe("FeatureDetail", () => {
     expect(await screen.findByText("Applied optimizations")).toBeInTheDocument();
     expect(screen.getByText("$500/mo")).toBeInTheDocument(); // projected
     expect(screen.getByText("$131/mo")).toBeInTheDocument(); // realized
+    // Held for 2 periods -> the terminal Prove state, verified.
+    expect(screen.getByText(/✓ Verified/)).toBeInTheDocument();
     // The matching measured card shows an "Applied" chip and an Undo control.
-    expect(screen.getByText(/✓ Applied Apr 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/✓ Applied Mar 2026/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+  });
+
+  it("shows validate/verify guidance on each measured card", async () => {
+    renderDetail();
+    expect(await screen.findAllByText("How to apply & verify")).toHaveLength(2);
+    expect(screen.getAllByText("validate it").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("we verify it").length).toBeGreaterThan(0);
   });
 
   it("refetches the breakdown when the window changes", async () => {

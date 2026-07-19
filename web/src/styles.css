@@ -1805,6 +1805,34 @@ a.exec-value:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.opt-verified {
+  margin-left: 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--success, #15803d);
+  background: rgba(21, 128, 61, 0.1);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  white-space: nowrap;
+}
+
+/* Deterministic guidance (validate / verify) inside a measured card's details. */
+.opt-guidance {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
+.opt-guidance dt {
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 0.4rem;
+}
+
+.opt-guidance dd {
+  margin: 0.1rem 0 0;
+  color: var(--muted);
+}
+
 /* Window filter (Month / Quarter / Year) */
 .window-filter {
   display: inline-flex;

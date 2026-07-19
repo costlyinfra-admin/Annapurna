@@ -151,6 +151,8 @@ export interface Opportunity {
   priority_score: number;
   evidence: string;
   fix: string | null;
+  validation_guidance: string;
+  verification: string;
   status: string;
   trail: {
     fingerprint?: string;
@@ -171,7 +173,7 @@ export interface OptimizationAction {
   projected_monthly: number;
   current_avoidable: number;
   realized_monthly: number | null; // null until a later period can reconcile it
-  status: "pending" | "measured";
+  status: "pending" | "measured" | "verified";
 }
 
 export interface FeatureOpportunities {

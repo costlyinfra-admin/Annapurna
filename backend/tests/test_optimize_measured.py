@@ -76,6 +76,10 @@ def test_duplicate_savings_match_the_price_book(tenant_id):
     # Per-lever effort + deterministic priority (6.0 × high 1.0 × medium 0.5 = 3.0).
     assert dup["engineering_effort"] == "medium"
     assert dup["priority_score"] == 3.0
+    # Guidance templates (opt spec §20): how to validate + how Annapurna verifies.
+    assert "idempotent retries" in dup["validation_guidance"]
+    assert "duplicate count" in dup["verification"]
+    assert dup["status"] == "detected"
     assert "2 duplicate calls across 1 distinct requests" in dup["evidence"]
     assert dup["trail"][0]["call_count"] == 2
     # Fingerprints in the trail are short salted-hash handles, never prompt text.
@@ -195,6 +199,25 @@ def test_applied_action_shows_projected_vs_realized(tenant_id):
     assert action["projected_monthly"] == 100.0
     assert action["current_avoidable"] == 6.0
     assert action["realized_monthly"] == 94.0  # 100 − 6
+
+
+def test_realized_saving_verifies_after_two_periods(tenant_id):
+    # opt spec §20: applied in April, viewed in June (2 periods later) with a
+    # positive realized drop -> the action and its opportunity are VERIFIED.
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    hook.ingest_events(
+        tenant_id,
+        [_dup_event(triage["id"], "fp-a", 1_000_000), _dup_event(triage["id"], "fp-a", 1_000_000)],
+    )
+    optimize_measured.mark_applied(
+        tenant_id, triage["id"], "duplicate_calls", 100.0, dt.date(2026, 4, 1)
+    )
+    result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)  # June
+    action = next(a for a in result["actions"] if a["lever"] == "duplicate_calls")
+    assert action["status"] == "verified"  # 2 periods elapsed, realized > 0
+    assert action["realized_monthly"] == 94.0
+    # The opportunity's lifecycle status reflects the verified action.
+    assert _opp(result, "duplicate_calls")["status"] == "verified"
 
 
 def test_applied_this_period_is_pending_until_next(tenant_id):
