@@ -390,14 +390,13 @@ def heuristic_optimization(conn, feature_id: str, start: dt.date) -> dict:
     in_tokens = sum(int(ti) for _m, _a, ti, _to, _r in opt_rows)
     out_tokens = sum(int(to) for _m, _a, _ti, to, _r in opt_rows)
     requests = sum(int(r) for _m, _a, _ti, _to, r in opt_rows)
-    premium_cost = sum(float(a) for m, a, _ti, _to, _r in opt_rows if m in optimize.PREMIUM_MODELS)
     # Split spend into input/output by token share (fallback 70/30 when tokens
     # are unknown, e.g. connector-only rows that don't report token counts).
     token_sum = in_tokens + out_tokens
     input_share = (in_tokens / token_sum) if token_sum else 0.7
     input_cost = opt_total * input_share
     output_cost = opt_total - input_cost
-    return optimize.estimate(opt_total, input_cost, output_cost, premium_cost, requests)
+    return optimize.estimate(opt_total, input_cost, output_cost, requests)
 
 
 def feature_detail(

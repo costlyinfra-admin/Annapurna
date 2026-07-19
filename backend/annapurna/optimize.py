@@ -12,21 +12,21 @@ The percentages below are deliberately conservative rules of thumb.
 
 from __future__ import annotations
 
-# Models considered "premium" — candidates for a downgrade to a cheaper tier.
-PREMIUM_MODELS = {"claude-opus-4-8", "claude-sonnet-4-6", "gpt-4o"}
+# NOTE: model right-sizing (formerly a flat "Model downgrade" estimate here) is now
+# a GROUNDED measured opportunity computed from the real token mix + price book —
+# see optimize_measured._rightsizing_opportunity (opt spec §16, M-opt-7).
 
 
 def estimate(
     total: float,
     input_cost: float,
     output_cost: float,
-    premium_cost: float,
     requests: int | None,
 ) -> dict:
     """Return {opportunities, monthly_savings, annual_savings} for one feature/month.
 
-    `input_cost` / `output_cost` are the cost split by token type; `premium_cost`
-    is spend on premium models; `requests` is the monthly call count.
+    `input_cost` / `output_cost` are the cost split by token type; `requests` is
+    the monthly call count.
     """
     opportunities: list[dict] = []
 
@@ -47,13 +47,6 @@ def estimate(
 
     input_share = input_cost / total if total else 0.0
 
-    if premium_cost > 0:
-        add(
-            "Model downgrade",
-            premium_cost * 0.10,
-            "med",
-            "Route a share of premium-model calls to a cheaper model where quality allows.",
-        )
     if input_share >= 0.5:
         add(
             "Prompt caching",

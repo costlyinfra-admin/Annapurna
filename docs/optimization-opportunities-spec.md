@@ -409,12 +409,19 @@ anomaly detection (106) and budget alerts (107) → Slice 4.
 Chosen for the largest dollar impact per unit of build effort, reusing the
 connector + SDK surfaces already in place (no new subsystem). Ordered by impact.
 
-- **M-opt-7 — Model right-sizing ceiling.** The single biggest lever: model choice
-  is usually the dominant cost driver (Opus→Sonnet ≈ 5×, Sonnet→Haiku ≈ 4×,
-  gpt-4o→mini ≈ 15×). Per feature, compute the *ceiling* saving of moving its spend
-  to a named cheaper tier, from the price book. Framed as quality-gated ("up to $X
-  if quality holds"), med confidence, upgraded by an eval tier later (§12). *Accept:*
-  a premium-heavy feature shows a grounded downgrade ceiling vs a named target model.
+- **M-opt-7 — Model right-sizing ceiling.** ✅ Done. `pricing.py` gains
+  `_DOWNGRADE_TARGET` (one step down per vendor: opus→sonnet→haiku, gpt-4o→mini,
+  gemini pro→flash→flash-lite) and `downgrade_ceiling()` returning the target + the
+  cost-saving *fraction* at the token mix. `optimize_measured._rightsizing_opportunity`
+  applies that fraction to the feature's REAL spend (so the ceiling tracks displayed
+  cost, not the demo's token counts), med confidence, with a per-model trail. It's a
+  measured card but **excluded from the guaranteed "Measured savings" headline** —
+  that now sums high-confidence only — and the UI prefixes med/low cards with
+  "up to". This *replaces* the flat heuristic "Model downgrade" (removed from
+  `optimize.py`; `estimate()` dropped its `premium_cost` arg). Demo: triage's
+  sonnet+opus surface a $3,126.67/mo ceiling (opus→sonnet $560, sonnet→haiku
+  $2,566.67), headline stays $634. *Accept:* a premium-heavy feature shows a grounded
+  downgrade ceiling vs a named target model; browser-verified.
 - **M-opt-8 — Cross-provider price arbitrage.** ✅ Done. `pricing.py` gains a
   `_MODEL_FAMILY` map (same open weights under each host's different model id) and
   `cheapest_equivalent()`, which reprices the feature's own token mix at every

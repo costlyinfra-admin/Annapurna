@@ -213,6 +213,40 @@ describe("FeatureDetail", () => {
     expect(screen.getByText("directional estimate")).toBeInTheDocument();
   });
 
+  it("shows a quality-gated ceiling ('up to') for a med-confidence lever", async () => {
+    vi.mocked(api.featureOpportunities).mockResolvedValue({
+      ...OPPORTUNITIES,
+      measured: {
+        opportunities: [
+          {
+            lever: "model_rightsizing",
+            savings: 2566,
+            confidence: "med",
+            evidence: "claude-sonnet-4-6 handles this feature; claude-haiku-4-5 is ~73% cheaper",
+            fix: "Move claude-sonnet-4-6 → claude-haiku-4-5 where quality allows — up to $2,566.00/mo.",
+            trail: [
+              {
+                model: "claude-sonnet-4-6 → claude-haiku-4-5",
+                note: "up to $2,566.00/mo (73% cheaper)",
+              },
+            ],
+          },
+        ],
+        monthly_savings: 0, // quality-gated ceiling is excluded from the guaranteed headline
+        annual_savings: 0,
+      },
+    });
+    renderDetail();
+    expect(await screen.findByText("Model right-sizing")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Move claude-sonnet-4-6 → claude-haiku-4-5 where quality allows/),
+    ).toBeInTheDocument();
+    // The savings is prefixed "up to" (a quality-gated ceiling)...
+    expect(document.querySelector(".opt-ceiling")?.textContent).toContain("up to");
+    // ...and is NOT counted in the guaranteed "Measured savings" headline.
+    expect(screen.queryByText("Measured savings")).not.toBeInTheDocument();
+  });
+
   it("nudges installing the SDK when there are no measured opportunities", async () => {
     vi.mocked(api.featureOpportunities).mockResolvedValue({
       ...OPPORTUNITIES,

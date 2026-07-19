@@ -1693,6 +1693,13 @@ a.exec-value:hover {
   white-space: nowrap;
 }
 
+/* "up to" on a quality-gated ceiling (e.g. model right-sizing) — de-emphasized. */
+.opt-ceiling {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .opt-item-evidence {
   margin: 0.35rem 0 0.15rem;
   font-size: 0.9rem;

@@ -24,6 +24,7 @@ const LEVER_LABELS: Record<string, string> = {
   duplicate_calls: "Duplicate calls",
   prompt_caching: "Prompt caching",
   provider_switch: "Cheaper provider",
+  model_rightsizing: "Model right-sizing",
 };
 
 const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
@@ -316,7 +317,10 @@ function MeasuredRow({
           )}
         </div>
         <div className="opt-item-actions">
-          <span className="opt-item-savings">{money(opp.savings)}/mo</span>
+          <span className="opt-item-savings">
+            {opp.confidence !== "high" && <span className="opt-ceiling">up to </span>}
+            {money(opp.savings)}/mo
+          </span>
           <button className="opt-apply-btn" onClick={toggle} disabled={busy}>
             {applied ? "Undo" : "Mark as applied"}
           </button>

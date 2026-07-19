@@ -201,6 +201,64 @@ def _usd(value) -> str:
     return f"${float(value):,.2f}"
 
 
+def _rightsizing_opportunity(conn, feature_id, start) -> Optional[dict]:
+    """Model right-sizing ceiling (opt spec §16, M-opt-7).
+
+    Model choice is usually the dominant cost driver. For each model with a cheaper
+    same-vendor tier, the ceiling = the feature's REAL spend on that model × the
+    rate saving at its token mix (from the price book). Quality-gated: a ceiling
+    ("up to $X where quality holds"), med confidence — never summed into the
+    guaranteed savings headline.
+    """
+    rows = conn.execute(
+        """
+        SELECT model, SUM(amount),
+               SUM(COALESCE(tokens_in, 0)), SUM(COALESCE(tokens_out, 0))
+        FROM inference_cost
+        WHERE feature_id = %s AND period = %s AND model IS NOT NULL
+        GROUP BY model
+        """,
+        (feature_id, start),
+    ).fetchall()
+
+    total = Decimal("0")
+    trail = []
+    top = None
+    for model, amount, tin, tout in rows:
+        dc = pricing.downgrade_ceiling(model, int(tin or 0), int(tout or 0))
+        if dc is None:
+            continue
+        saving = Decimal(str(amount)) * Decimal(str(dc["save_fraction"]))
+        if saving <= 0:
+            continue
+        total += saving
+        pct = round(dc["save_fraction"] * 100)
+        trail.append(
+            {
+                "model": f"{model} → {dc['target']}",
+                "note": f"up to {_usd(saving)}/mo ({pct}% cheaper)",
+            }
+        )
+        if top is None or saving > top["saving"]:
+            top = {"model": model, "target": dc["target"], "pct": pct, "saving": saving}
+
+    if top is None or float(total) < _MIN_SAVINGS:
+        return None
+    return {
+        "lever": "model_rightsizing",
+        "savings": round(float(total), 2),
+        "confidence": "med",  # a quality-gated ceiling, not a guaranteed saving
+        "evidence": (
+            f"{top['model']} handles this feature; {top['target']} is ~{top['pct']}% "
+            f"cheaper at the same token mix"
+        ),
+        "fix": (
+            f"Move {top['model']} → {top['target']} where quality allows — up to {_usd(total)}/mo."
+        ),
+        "trail": trail[:_MAX_TRAIL],
+    }
+
+
 def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[float]]:
     rows = conn.execute(
         """
@@ -220,6 +278,7 @@ def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[flo
         _duplicate_opportunity(dup_rows),
         _prefix_opportunity(pfx_rows),
         _arbitrage_opportunity(conn, feature_id, start),
+        _rightsizing_opportunity(conn, feature_id, start),
     ):
         if opp is not None:
             opportunities.append(opp)
@@ -227,7 +286,9 @@ def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[flo
 
     cache_utilization = _cache_utilization(conn, feature_id, start, rows)
 
-    monthly = round(sum(o["savings"] for o in opportunities), 2)
+    # Headline sums only GUARANTEED (high-confidence) savings; quality-gated
+    # ceilings (e.g. model right-sizing, med) show per-card as "up to $X".
+    monthly = round(sum(o["savings"] for o in opportunities if o["confidence"] == "high"), 2)
     measured = {
         "opportunities": opportunities,
         "monthly_savings": monthly,

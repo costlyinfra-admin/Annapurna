@@ -117,8 +117,10 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
     # Optimization opportunities: heuristic, derived from this month's inference.
     opt = detail["optimization"]
     names = {o["opportunity"] for o in opt["opportunities"]}
-    # Triage runs on premium models (sonnet + opus), input-heavy, high volume.
-    assert {"Model downgrade", "Prompt caching"} <= names
+    # Triage is input-heavy, high volume -> the heuristic surfaces prompt caching.
+    # (Model downgrade is now a grounded MEASURED opportunity, not a heuristic here.)
+    assert "Prompt caching" in names
+    assert "Model downgrade" not in names
     assert opt["monthly_savings"] > 0
     assert opt["annual_savings"] == round(opt["monthly_savings"] * 12, 2)
     # Conservative: combined estimate stays well under the $4,200 bill.

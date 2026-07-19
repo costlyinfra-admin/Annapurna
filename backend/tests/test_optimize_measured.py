@@ -142,7 +142,8 @@ def test_cache_utilization_surfaces_from_connector_without_sdk(tenant_id):
                                         period, tokens_in, tokens_out, cached_tokens_in,
                                         source, confidence)
             VALUES
-              (%s, %s, 'openai', 'gpt-4o', 1250, %s, 6000000, 750000, 720000, 'cost_api', 'med'),
+              (%s, %s, 'openai', 'gpt-4o-mini', 1250, %s, 6000000, 750000, 720000,
+               'cost_api', 'med'),
               (%s, %s, 'anthropic', 'claude-haiku-4-5', 200, %s, 3000000, 100000, NULL,
                'cost_api', 'med')
             """,
@@ -231,6 +232,33 @@ def test_cross_provider_arbitrage_from_connector_rows(tenant_id):
     assert "deepinfra" in arb["evidence"]
     assert "60% less" in arb["evidence"]
     assert arb["trail"][0]["note"].startswith("together → deepinfra")
+
+
+def test_model_rightsizing_ceiling_from_real_spend(tenant_id):
+    # opt spec §16 M-opt-7: a Sonnet feature could move to Haiku. The ceiling is
+    # the feature's REAL spend × the rate saving at its token mix — quality-gated,
+    # med confidence, and NOT counted in the guaranteed savings headline.
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        conn.execute(
+            """
+            INSERT INTO inference_cost (tenant_id, feature_id, provider, model, amount,
+                                        period, tokens_in, tokens_out, source, confidence)
+            VALUES (%s, %s, 'anthropic', 'claude-sonnet-4-6', 100.00, %s,
+                    1000000, 1000000, 'cost_api', 'high')
+            """,
+            (tenant_id, triage["id"], PERIOD),
+        )
+
+    result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
+    rs = next(o for o in result["measured"]["opportunities"] if o["lever"] == "model_rightsizing")
+    # sonnet $18 vs haiku $4.80 per (1M,1M) -> 73.33% saving on the $100 spend.
+    assert rs["savings"] == 73.33
+    assert rs["confidence"] == "med"
+    assert "claude-haiku-4-5" in rs["evidence"] and "73%" in rs["evidence"]
+    assert rs["trail"][0]["note"].startswith("up to")
+    # The quality-gated ceiling is excluded from the guaranteed headline.
+    assert result["measured"]["monthly_savings"] == 0.0
 
 
 def test_unknown_feature_returns_none(tenant_id):

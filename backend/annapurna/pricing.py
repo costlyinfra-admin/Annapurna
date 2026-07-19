@@ -115,6 +115,17 @@ _FAMILY_LABEL: dict[str, str] = {
     "mixtral-8x7b-instruct": "Mixtral 8x7B Instruct",
 }
 
+# One-step model right-sizing: a cheaper same-vendor tier that often preserves
+# quality for simpler tasks (opt spec §16, M-opt-7). Quality-gated — a CEILING,
+# not a guaranteed saving. One step down keeps the recommendation credible.
+_DOWNGRADE_TARGET: dict[str, str] = {
+    "claude-opus-4-8": "claude-sonnet-4-6",
+    "claude-sonnet-4-6": "claude-haiku-4-5",
+    "gpt-4o": "gpt-4o-mini",
+    "gemini-2.5-pro": "gemini-2.5-flash",
+    "gemini-2.5-flash": "gemini-2.5-flash-lite",
+}
+
 # Cache/batch discount model (opt spec §7.1) — versioned with the price tables.
 # CACHE_READ_MULT is the fraction of the input rate charged when input tokens are
 # served from the provider's prompt cache. Only providers listed here support
@@ -205,3 +216,19 @@ def cheapest_equivalent(
         "alt_cost": best["cost"],
         "savings": current_cost - best["cost"],
     }
+
+
+def downgrade_ceiling(model: str, tokens_in: int, tokens_out: int) -> Optional[dict]:
+    """Cheaper same-vendor tier for `model`, plus the FRACTION of cost it would save
+    at this token mix (opt spec §16, M-opt-7). None if there's no cheaper tier or no
+    tokens to price the ratio. Quality-gated — the caller applies the fraction to the
+    feature's real spend to get a ceiling, not a guaranteed saving. Rates are
+    provider-agnostic here (these are single-vendor frontier models)."""
+    target = _DOWNGRADE_TARGET.get(model)
+    if target is None:
+        return None
+    current = price(model, tokens_in, tokens_out)
+    cheaper = price(target, tokens_in, tokens_out)
+    if current <= 0 or cheaper >= current:
+        return None
+    return {"target": target, "save_fraction": float((current - cheaper) / current)}

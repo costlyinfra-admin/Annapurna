@@ -54,6 +54,18 @@ def test_cheapest_equivalent_none_when_already_cheapest_or_unknown():
     assert pricing.cheapest_equivalent("anthropic", "claude-sonnet-4-6", 1_000_000, 0) is None
 
 
+def test_downgrade_ceiling_fraction():
+    # sonnet ($3/$15) -> haiku ($0.80/$4) at 1M in / 1M out:
+    # sonnet = $18, haiku = $4.80 -> saves (18-4.8)/18 = 0.7333...
+    dc = pricing.downgrade_ceiling("claude-sonnet-4-6", 1_000_000, 1_000_000)
+    assert dc["target"] == "claude-haiku-4-5"
+    assert round(dc["save_fraction"], 4) == 0.7333
+    # gpt-4o -> gpt-4o-mini exists; the cheapest tier has no target.
+    assert pricing.downgrade_ceiling("gpt-4o", 1_000_000, 0)["target"] == "gpt-4o-mini"
+    assert pricing.downgrade_ceiling("gpt-4o-mini", 1_000_000, 0) is None
+    assert pricing.downgrade_ceiling("claude-haiku-4-5", 1_000_000, 0) is None
+
+
 def test_hosted_open_source_is_priced_per_provider():
     # Same open weights, different host -> different price; keyed by (provider, model).
     assert pricing.price(
