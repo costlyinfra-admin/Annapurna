@@ -145,9 +145,10 @@ export interface MeasuredOpportunity {
   evidence: string;
   fix: string;
   trail: {
-    fingerprint: string;
-    provider: string;
+    fingerprint?: string;
+    provider?: string;
     model: string;
+    note?: string;
     call_count?: number;
     calls?: number;
     prefix_tokens?: number;

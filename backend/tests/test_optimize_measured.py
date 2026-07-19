@@ -208,6 +208,31 @@ def test_mark_applied_unknown_feature_returns_none(tenant_id):
     )
 
 
+def test_cross_provider_arbitrage_from_connector_rows(tenant_id):
+    # opt spec §16 M-opt-8: a feature on Together's Llama-70B is cheaper on
+    # DeepInfra (same weights). Surfaces from connector data, no SDK signals.
+    enrich = features.add_feature(tenant_id, "Log enrichment")
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        conn.execute(
+            """
+            INSERT INTO inference_cost (tenant_id, feature_id, provider, model, amount,
+                                        period, tokens_in, tokens_out, source, confidence)
+            VALUES (%s, %s, 'together', 'meta-llama-3.1-70b-instruct', 8.80, %s,
+                    10000000, 0, 'cost_api', 'med')
+            """,
+            (tenant_id, enrich["id"], PERIOD),
+        )
+
+    result = optimize_measured.opportunities(tenant_id, enrich["id"], PERIOD)
+    arb = next(o for o in result["measured"]["opportunities"] if o["lever"] == "provider_switch")
+    # 10M in: Together $0.88/M = $8.80 -> DeepInfra $0.35/M = $3.50, save $5.30 (60%).
+    assert arb["savings"] == 5.3
+    assert arb["confidence"] == "high"
+    assert "deepinfra" in arb["evidence"]
+    assert "60% less" in arb["evidence"]
+    assert arb["trail"][0]["note"].startswith("together → deepinfra")
+
+
 def test_unknown_feature_returns_none(tenant_id):
     assert (
         optimize_measured.opportunities(tenant_id, "00000000-0000-0000-0000-000000000000", PERIOD)

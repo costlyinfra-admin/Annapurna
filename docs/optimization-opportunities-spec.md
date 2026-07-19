@@ -415,11 +415,17 @@ connector + SDK surfaces already in place (no new subsystem). Ordered by impact.
   to a named cheaper tier, from the price book. Framed as quality-gated ("up to $X
   if quality holds"), med confidence, upgraded by an eval tier later (§12). *Accept:*
   a premium-heavy feature shows a grounded downgrade ceiling vs a named target model.
-- **M-opt-8 — Cross-provider price arbitrage.** Zero-risk and exact: the same open
-  model billed by a pricier host than another in the price table (Llama-70B:
-  Together $0.88 vs DeepInfra $0.35). Savings = spend × rate delta, identical
-  weights → no quality change. Connector-only, ships to everyone. *Accept:* a
-  feature on a non-cheapest host shows the exact saving of the lowest-cost provider.
+- **M-opt-8 — Cross-provider price arbitrage.** ✅ Done. `pricing.py` gains a
+  `_MODEL_FAMILY` map (same open weights under each host's different model id) and
+  `cheapest_equivalent()`, which reprices the feature's own token mix at every
+  host serving that family and returns the cheapest. `optimize_measured`'s new
+  `provider_switch` detector reads the feature's connector rows and surfaces a
+  grounded, high-confidence measured opportunity — no SDK needed. UI renders it as
+  a "Cheaper provider" card (the Measured tag is now "grounded in measured usage",
+  and the evidence trail carries a `together → deepinfra · save $X (N% less)`
+  note). Demo: Log enrichment on Together Llama-70B → DeepInfra, $73.20/mo (59%).
+  *Accept:* a feature on a non-cheapest host shows the exact saving of the
+  lowest-cost provider; browser-verified on a signal-free feature.
 - **M-opt-9 — Batch-API eligibility.** ~50% off any async-tolerant spend (offline
   reports, bulk enrichment/classification). Detect candidates from a latency-
   tolerance signal (high volume + high/steady latency, or a user "async" tag);

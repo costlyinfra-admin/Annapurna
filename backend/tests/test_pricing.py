@@ -33,6 +33,27 @@ def test_cache_read_multiplier_is_provider_specific():
     assert pricing.cache_read_mult(None) is None
 
 
+def test_cheapest_equivalent_finds_a_cheaper_host():
+    # Same Llama-3.1-70B weights: Together $0.88/$0.88 vs DeepInfra $0.35/$0.40.
+    alt = pricing.cheapest_equivalent("together", "meta-llama-3.1-70b-instruct", 1_000_000, 0)
+    assert alt is not None
+    assert alt["to_provider"] == "deepinfra"
+    assert alt["current_cost"] == Decimal("0.8800")  # 1M in @ $0.88
+    assert alt["alt_cost"] == Decimal("0.3500")  # 1M in @ $0.35
+    assert alt["savings"] == Decimal("0.5300")
+    assert alt["family_label"] == "Llama 3.1 70B Instruct"
+
+
+def test_cheapest_equivalent_none_when_already_cheapest_or_unknown():
+    # DeepInfra is already the cheapest host for this model.
+    assert (
+        pricing.cheapest_equivalent("deepinfra", "meta-llama-3.1-70b-instruct", 1_000_000, 0)
+        is None
+    )
+    # Frontier models aren't multi-host in the table -> no arbitrage.
+    assert pricing.cheapest_equivalent("anthropic", "claude-sonnet-4-6", 1_000_000, 0) is None
+
+
 def test_hosted_open_source_is_priced_per_provider():
     # Same open weights, different host -> different price; keyed by (provider, model).
     assert pricing.price(

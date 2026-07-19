@@ -23,6 +23,7 @@ import { compact, money, num } from "../format";
 const LEVER_LABELS: Record<string, string> = {
   duplicate_calls: "Duplicate calls",
   prompt_caching: "Prompt caching",
+  provider_switch: "Cheaper provider",
 };
 
 const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
@@ -233,7 +234,7 @@ function MeasuredGroup({
       <div className="opt-group-head">
         <div>
           <h3 className="opt-group-title">
-            Measured <span className="opt-tag opt-tag-measured">grounded in metered calls</span>
+            Measured <span className="opt-tag opt-tag-measured">grounded in measured usage</span>
           </h3>
           {cacheUtilization != null && (
             <span className="section-sub muted">
@@ -330,7 +331,8 @@ function MeasuredRow({
             {opp.trail.map((t, i) => (
               <li key={i} className="evidence-item">
                 <span className="evidence-type">{t.model}</span>
-                <span className="evidence-ref">{t.fingerprint}…</span>
+                {t.fingerprint && <span className="evidence-ref">{t.fingerprint}…</span>}
+                {t.note && <span className="muted">{t.note}</span>}
                 {t.call_count != null && <span className="muted">{num(t.call_count)} repeats</span>}
                 {t.prefix_tokens != null && (
                   <span className="muted">

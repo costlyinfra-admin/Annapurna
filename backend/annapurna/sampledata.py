@@ -779,12 +779,40 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         (tenant_id, base["triage"], _dt.date(2026, 4, 1)),
     )
 
+    # 2c) A feature on a HOSTED open model — cross-provider arbitrage (opt spec
+    #     §16, M-opt-8). The same Llama-3.1-70B is ~59% cheaper on DeepInfra
+    #     ($0.35/$0.40) than on Together ($0.88/$0.88), at identical weights.
+    enrich = _add_feature(
+        conn,
+        tenant_id,
+        "Log enrichment",
+        "Enriches raw alerts with context via a hosted Llama-3.1-70B endpoint.",
+        "confirmed",
+        "med",
+    )
+    _add_signal(conn, tenant_id, enrich, "branch", "feature/enrich-*", "high")
+    _add_build_cost(conn, tenant_id, enrich, "grace", "claude_code", "acme/core#1560", 68.00, "med")
+    _add_inference_cost(
+        conn,
+        tenant_id,
+        enrich,
+        "together",
+        "meta-llama-3.1-70b-instruct",
+        "key:enrich-prod",
+        123.20,  # 120M in @ $0.88 + 20M out @ $0.88
+        120_000_000,
+        20_000_000,
+        90_000,
+        "med",
+    )
+    _add_usage(conn, tenant_id, enrich, 300, 90_000)
+
     # 3) A self-hosted / open-source feature: Llama-3.1-70B on the company's own
     #    GPUs. Its run cost is a $6,500/mo infra pool allocated by usage (med
     #    confidence), and it carries a one-time fine-tuning run as BUILD cost.
     _add_self_hosted_demo(conn, tenant_id)
 
-    return len(_NEW_FEATURES) + 1
+    return len(_NEW_FEATURES) + 2
 
 
 def _add_self_hosted_demo(conn, tenant_id) -> None:

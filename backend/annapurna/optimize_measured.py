@@ -139,6 +139,68 @@ def _cache_utilization(conn, feature_id, start, signal_rows) -> Optional[float]:
     return round(total_cached / total_calls, 4) if total_calls else None
 
 
+def _arbitrage_opportunity(conn, feature_id, start) -> Optional[dict]:
+    """Cross-provider price arbitrage (opt spec §16, M-opt-8).
+
+    The same open weights are served by multiple hosts at different rates. For each
+    of the feature's hosted-open-model rows, if a cheaper host serves the identical
+    model, the saving is the exact rate delta at the feature's own token mix — no
+    quality change. Connector data only; no SDK needed.
+    """
+    rows = conn.execute(
+        """
+        SELECT provider, model,
+               SUM(COALESCE(tokens_in, 0)), SUM(COALESCE(tokens_out, 0))
+        FROM inference_cost
+        WHERE feature_id = %s AND period = %s AND provider IS NOT NULL AND model IS NOT NULL
+        GROUP BY provider, model
+        """,
+        (feature_id, start),
+    ).fetchall()
+
+    total_savings = Decimal("0")
+    trail = []
+    top = None  # the single largest switch, for the headline sentence
+    for provider, model, tin, tout in rows:
+        alt = pricing.cheapest_equivalent(provider, model, int(tin or 0), int(tout or 0))
+        if alt is None or alt["savings"] <= 0:
+            continue
+        total_savings += alt["savings"]
+        pct = round(float(alt["savings"] / alt["current_cost"]) * 100)
+        trail.append(
+            {
+                "model": alt["family_label"],
+                "note": (
+                    f"{alt['from_provider']} → {alt['to_provider']} · "
+                    f"save {_usd(alt['savings'])}/mo ({pct}% less)"
+                ),
+            }
+        )
+        if top is None or alt["savings"] > top["savings"]:
+            top = {**alt, "pct": pct}
+
+    if top is None or float(total_savings) < _MIN_SAVINGS:
+        return None
+    return {
+        "lever": "provider_switch",
+        "savings": round(float(total_savings), 2),
+        "confidence": "high",  # exact rate delta on identical weights
+        "evidence": (
+            f"{top['family_label']} runs on {top['from_provider']}; {top['to_provider']} "
+            f"serves the same weights for ~{top['pct']}% less"
+        ),
+        "fix": (
+            f"Route {top['family_label']} to {top['to_provider']} — identical open "
+            f"weights, ~{top['pct']}% cheaper at list prices."
+        ),
+        "trail": trail[:_MAX_TRAIL],
+    }
+
+
+def _usd(value) -> str:
+    return f"${float(value):,.2f}"
+
+
 def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[float]]:
     rows = conn.execute(
         """
@@ -154,7 +216,11 @@ def _measured(conn, feature_id: str, start: dt.date) -> tuple[dict, Optional[flo
     pfx_rows = [(r[1], r[2], r[3], r[4], r[5], r[8]) for r in rows if r[0] == "prefix"]
 
     opportunities = []
-    for opp in (_duplicate_opportunity(dup_rows), _prefix_opportunity(pfx_rows)):
+    for opp in (
+        _duplicate_opportunity(dup_rows),
+        _prefix_opportunity(pfx_rows),
+        _arbitrage_opportunity(conn, feature_id, start),
+    ):
         if opp is not None:
             opportunities.append(opp)
     opportunities.sort(key=lambda o: o["savings"], reverse=True)

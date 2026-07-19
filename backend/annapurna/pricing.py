@@ -89,6 +89,32 @@ _OSS_PRICES: dict[tuple[str, str], tuple[str, str]] = {
 
 _MILLION = Decimal("1000000")
 
+# The SAME open weights are served by multiple hosts under DIFFERENT model ids.
+# This maps each host's specific (provider, model) to a canonical family so we can
+# compare the price of identical weights across providers — cross-provider
+# arbitrage (opt spec §16, M-opt-8). Frontier models (one vendor) aren't here.
+_MODEL_FAMILY: dict[tuple[str, str], str] = {
+    ("together", "meta-llama-3.1-70b-instruct"): "llama-3.1-70b-instruct",
+    ("deepinfra", "meta-llama-3.1-70b-instruct"): "llama-3.1-70b-instruct",
+    ("openrouter", "meta-llama-3.1-70b-instruct"): "llama-3.1-70b-instruct",
+    ("fireworks", "llama-v3p1-70b-instruct"): "llama-3.1-70b-instruct",
+    ("groq", "llama-3.1-70b-versatile"): "llama-3.1-70b-instruct",
+    ("bedrock", "meta.llama3-1-70b-instruct-v1:0"): "llama-3.1-70b-instruct",
+    ("together", "meta-llama-3.1-8b-instruct"): "llama-3.1-8b-instruct",
+    ("fireworks", "llama-v3p1-8b-instruct"): "llama-3.1-8b-instruct",
+    ("groq", "llama-3.1-8b-instant"): "llama-3.1-8b-instruct",
+    ("bedrock", "meta.llama3-1-8b-instruct-v1:0"): "llama-3.1-8b-instruct",
+    ("together", "mixtral-8x7b-instruct"): "mixtral-8x7b-instruct",
+    ("fireworks", "mixtral-8x7b-instruct"): "mixtral-8x7b-instruct",
+}
+
+# Human-friendly family labels for the UI.
+_FAMILY_LABEL: dict[str, str] = {
+    "llama-3.1-70b-instruct": "Llama 3.1 70B Instruct",
+    "llama-3.1-8b-instruct": "Llama 3.1 8B Instruct",
+    "mixtral-8x7b-instruct": "Mixtral 8x7B Instruct",
+}
+
 # Cache/batch discount model (opt spec §7.1) — versioned with the price tables.
 # CACHE_READ_MULT is the fraction of the input rate charged when input tokens are
 # served from the provider's prompt cache. Only providers listed here support
@@ -142,3 +168,40 @@ def price(model: str, tokens_in: int, tokens_out: int, provider: Optional[str] =
         Decimal(tokens_out) / _MILLION
     ) * Decimal(rate_out)
     return cost.quantize(Decimal("0.0001"))
+
+
+def cheapest_equivalent(
+    provider: str, model: str, tokens_in: int, tokens_out: int
+) -> Optional[dict]:
+    """The cheapest same-weights host for (provider, model) at this token mix.
+
+    Returns None when the model isn't a known multi-host open model, or when the
+    current host is already the cheapest. Both costs are list-price, price-book
+    numbers priced at the feature's ACTUAL token mix, so the saving is the exact
+    rate advantage of identical weights — no quality change, no invented percentage.
+    """
+    family = _MODEL_FAMILY.get((provider, model))
+    if family is None:
+        return None
+    current_cost = price(model, tokens_in, tokens_out, provider)
+    if current_cost <= 0:
+        return None
+    best = None
+    for (alt_provider, alt_model), fam in _MODEL_FAMILY.items():
+        if fam != family or (alt_provider, alt_model) == (provider, model):
+            continue
+        alt_cost = price(alt_model, tokens_in, tokens_out, alt_provider)
+        if best is None or alt_cost < best["cost"]:
+            best = {"provider": alt_provider, "model": alt_model, "cost": alt_cost}
+    if best is None or best["cost"] >= current_cost:
+        return None
+    return {
+        "family": family,
+        "family_label": _FAMILY_LABEL.get(family, family),
+        "from_provider": provider,
+        "to_provider": best["provider"],
+        "to_model": best["model"],
+        "current_cost": current_cost,
+        "alt_cost": best["cost"],
+        "savings": current_cost - best["cost"],
+    }
