@@ -31,6 +31,8 @@ function opp(over: Partial<Opportunity>): Opportunity {
     confidence_reason: "reason",
     projected_monthly_savings: 0,
     projected_annual_savings: 0,
+    engineering_effort: "low",
+    priority_score: 0,
     evidence: "",
     fix: null,
     status: "detected",
@@ -202,6 +204,8 @@ describe("FeatureDetail", () => {
       screen.getByText(/1,240 duplicate calls across 3 distinct requests/),
     ).toBeInTheDocument();
     expect(screen.getByText("$634/mo")).toBeInTheDocument(); // measured savings headline (rounded)
+    // Each measured card shows its engineering-effort chip (how hard the fix is).
+    expect(screen.getAllByText("Low effort").length).toBeGreaterThan(0);
     // Current cache utilization context.
     expect(screen.getByText(/8% of input is already cached/)).toBeInTheDocument();
     // Estimated tier is present but clearly separate (the heuristic lever).

@@ -170,6 +170,13 @@ const LEVER_TITLES: Record<string, string> = {
   model_rightsizing: "Model right-sizing",
 };
 
+const EFFORT_LABELS: Record<string, string> = {
+  very_low: "Very low effort",
+  low: "Low effort",
+  medium: "Medium effort",
+  high: "High effort",
+};
+
 function OptimizationSection({ featureId }: { featureId: string }) {
   const [data, setData] = useState<FeatureOpportunities | null>(null);
   const [failed, setFailed] = useState(false);
@@ -330,6 +337,9 @@ function MeasuredRow({
           <strong>{opp.title}</strong>
           <span title={opp.confidence_reason}>
             <ConfidenceBadge level={opp.confidence} />
+          </span>
+          <span className={`opt-effort effort-${opp.engineering_effort}`}>
+            {EFFORT_LABELS[opp.engineering_effort] ?? opp.engineering_effort}
           </span>
           {applied && (
             <span className="opt-applied-chip">✓ Applied {monthLabel(action.applied_on)}</span>

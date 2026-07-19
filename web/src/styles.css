@@ -1761,6 +1761,32 @@ a.exec-value:hover {
   padding: 0.1rem 0.5rem;
 }
 
+/* Engineering-effort chip — how hard the fix is (opt spec §19). */
+.opt-effort {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  color: var(--muted);
+  background: var(--bg, #f1f5f9);
+  border: 1px solid var(--line);
+}
+
+.opt-effort.effort-very_low,
+.opt-effort.effort-low {
+  color: #15803d;
+  background: rgba(21, 128, 61, 0.1);
+  border-color: rgba(21, 128, 61, 0.2);
+}
+
+.opt-effort.effort-high {
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.1);
+  border-color: rgba(180, 83, 9, 0.2);
+}
+
 .opt-applied {
   margin-top: 1rem;
 }

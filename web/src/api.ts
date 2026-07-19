@@ -147,6 +147,8 @@ export interface Opportunity {
   confidence_reason: string;
   projected_monthly_savings: number;
   projected_annual_savings: number;
+  engineering_effort: "very_low" | "low" | "medium" | "high";
+  priority_score: number;
   evidence: string;
   fix: string | null;
   status: string;

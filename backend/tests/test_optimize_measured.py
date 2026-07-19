@@ -73,6 +73,9 @@ def test_duplicate_savings_match_the_price_book(tenant_id):
     assert dup["savings_type"] == "measured"
     assert dup["source"] == "sdk"
     assert dup["confidence"] == "high"
+    # Per-lever effort + deterministic priority (6.0 × high 1.0 × medium 0.5 = 3.0).
+    assert dup["engineering_effort"] == "medium"
+    assert dup["priority_score"] == 3.0
     assert "2 duplicate calls across 1 distinct requests" in dup["evidence"]
     assert dup["trail"][0]["call_count"] == 2
     # Fingerprints in the trail are short salted-hash handles, never prompt text.
@@ -243,6 +246,9 @@ def test_cross_provider_arbitrage_from_connector_rows(tenant_id):
     assert arb["projected_monthly_savings"] == 5.3
     assert arb["savings_type"] == "measured" and arb["source"] == "connector"
     assert arb["confidence"] == "high"
+    # Provider switch is the lowest-effort lever (config change, identical weights).
+    assert arb["engineering_effort"] == "very_low"
+    assert arb["priority_score"] == 5.3  # 5.30 × high 1.0 × very_low 1.0
     assert "deepinfra" in arb["evidence"]
     assert "60% less" in arb["evidence"]
     assert arb["trail"][0]["note"].startswith("together → deepinfra")
@@ -270,11 +276,22 @@ def test_model_rightsizing_ceiling_from_real_spend(tenant_id):
     assert rs["projected_monthly_savings"] == 73.33
     assert rs["confidence"] == "med"
     assert rs["savings_type"] == "modeled_ceiling"  # quality-gated ceiling
+    # High effort (needs a quality eval); priority = 73.33 × med 0.6 × high 0.3 = 13.2.
+    assert rs["engineering_effort"] == "high"
+    assert rs["priority_score"] == 13.2
     assert "claude-haiku-4-5" in rs["evidence"] and "73%" in rs["evidence"]
     assert rs["trail"][0]["note"].startswith("up to")
     # The ceiling is counted in the modeled total, NOT the guaranteed measured total.
     assert result["totals"]["measured"] == 0.0
     assert result["totals"]["modeled_ceiling"] == 73.33
+
+
+def test_priority_favors_easy_high_confidence_wins():
+    # opt spec §19: priority = savings × confidence × effort. A cheap, guaranteed,
+    # very-low-effort fix should outrank a bigger but risky, high-effort one.
+    easy = optimize_measured._priority(100.0, "high", "very_low")  # 100
+    risky = optimize_measured._priority(300.0, "low", "high")  # 300 × 0.3 × 0.3 = 27
+    assert easy > risky
 
 
 def test_unknown_feature_returns_none(tenant_id):

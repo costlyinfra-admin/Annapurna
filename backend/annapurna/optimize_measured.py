@@ -72,11 +72,33 @@ _DIRECTIONAL_LEVER = {
     "Semantic caching": "semantic_caching",
 }
 
+# Engineering effort is a per-lever CONSTANT (opt spec §19) — the difficulty is
+# inherent to the fix type, so it's deterministic, not a per-instance guess.
+_LEVER_EFFORT = {
+    "provider_switch": "very_low",  # point the client at a cheaper host
+    "prompt_caching": "low",  # set cache_control on the static block
+    "duplicate_calls": "medium",  # add a response cache keyed on the request hash
+    "model_rightsizing": "high",  # needs a quality eval before switching models
+}
+_DEFAULT_EFFORT = "medium"  # directional/heuristic levers: fix effort is unknown
+
+# Deterministic priority = savings × confidence weight × effort weight (opt spec §19).
+# Never a black box; the two weight tables are the whole model.
+_CONFIDENCE_WEIGHT = {"high": 1.0, "med": 0.6, "low": 0.3}
+_EFFORT_WEIGHT = {"very_low": 1.0, "low": 0.8, "medium": 0.5, "high": 0.3}
+
+
+def _priority(monthly: float, confidence: str, effort: str) -> float:
+    return round(
+        monthly * _CONFIDENCE_WEIGHT.get(confidence, 0.3) * _EFFORT_WEIGHT.get(effort, 0.5), 2
+    )
+
 
 def _unify_measured(opp: dict) -> dict:
     """Normalize a measured/ceiling detector output into the unified shape (§18)."""
     meta = _LEVER_META[opp["lever"]]
     savings = opp["savings"]
+    effort = _LEVER_EFFORT.get(opp["lever"], _DEFAULT_EFFORT)
     return {
         "lever": opp["lever"],
         "title": meta["title"],
@@ -86,6 +108,8 @@ def _unify_measured(opp: dict) -> dict:
         "confidence_reason": meta["confidence_reason"],
         "projected_monthly_savings": savings,
         "projected_annual_savings": round(savings * 12, 2),
+        "engineering_effort": effort,
+        "priority_score": _priority(savings, opp["confidence"], effort),
         "evidence": opp["evidence"],
         "fix": opp["fix"],
         "trail": opp["trail"],
@@ -106,6 +130,8 @@ def _unify_directional(opp: dict) -> dict:
         "confidence_reason": "Directional rule of thumb from this feature's usage shape.",
         "projected_monthly_savings": savings,
         "projected_annual_savings": round(savings * 12, 2),
+        "engineering_effort": _DEFAULT_EFFORT,
+        "priority_score": _priority(savings, opp["confidence"], _DEFAULT_EFFORT),
         "evidence": opp["rationale"],
         "fix": None,
         "trail": [],
@@ -439,7 +465,8 @@ def opportunities(
             if o["lever"] in applied:
                 o["status"] = "applied"
 
-        unified.sort(key=lambda o: o["projected_monthly_savings"], reverse=True)
+        # Rank by priority (savings × confidence × effort) — "what to fix first".
+        unified.sort(key=lambda o: o["priority_score"], reverse=True)
         totals = {
             kind: round(
                 sum(o["projected_monthly_savings"] for o in unified if o["savings_type"] == kind),

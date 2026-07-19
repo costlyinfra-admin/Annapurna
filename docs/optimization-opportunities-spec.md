@@ -546,7 +546,16 @@ Making `savings_type` an explicit field (rather than inferring from `confidence`
 is the concrete deliverable. *Accept:* every opportunity across both tiers carries
 `savings_type`; the three totals are computed separately and never combined.
 
-## 19. Prioritization & engineering effort (M-opt-10)
+## 19. Prioritization & engineering effort (M-opt-10) ✅ Done
+
+Shipped. Each opportunity now carries `engineering_effort` (a per-lever constant:
+provider switch `very_low`, prompt caching `low`, duplicate calls `medium`, model
+right-sizing `high`; directional levers default `medium`) and a deterministic
+`priority_score = savings × confidence_weight × effort_weight` (weights below). The
+unified list is ranked by `priority_score`, so an easy guaranteed win outranks a
+bigger, riskier, higher-effort one — e.g. the demo now shows Prompt caching (low
+effort, $265) above Duplicate calls (medium effort, $369). The feature cards show a
+colour-coded effort chip. Browser-verified; backend 163, frontend 31 green.
 
 Answers *"what should we optimize first?"* with a **deterministic, explainable**
 ranking — never a black box:
