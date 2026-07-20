@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 
 const NAV = [
   { to: "/", label: "Overview", end: true },
+  { to: "/optimize", label: "Optimize", end: false },
   { to: "/cost-sources", label: "Cost sources", end: false },
   { to: "/features", label: "Features", end: false },
   { to: "/install-sdk", label: "Install SDK", end: false },

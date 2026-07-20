@@ -151,6 +151,40 @@ def test_opportunities_endpoint_surfaces_measured_savings(client):
     assert missing.status_code == 404
 
 
+def test_copilot_overview_aggregates_across_features(client):
+    # Two features, each with a duplicate signal -> tenant-wide rollup.
+    token = client.post("/api/hook/token").json()["token"]
+    ids = []
+    for name in ("AI threat triage", "Report generator"):
+        fid = client.post("/api/features", json={"name": name}).json()["id"]
+        ids.append(fid)
+        ev = {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "tokens_in": 1_000_000,
+            "tokens_out": 0,
+            "feature_id": fid,
+            "occurred_at": "2026-06-15T10:00:00Z",
+            "signal": {"kind": "duplicate", "fingerprint": "fp-a", "count": 1},
+        }
+        client.post(
+            "/api/hook/events",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"events": [ev, {**ev, "occurred_at": "2026-06-16T10:00:00Z"}]},
+        )
+
+    body = client.get("/api/copilot/overview?period=2026-06").json()
+    # Three savings figures kept separate. Each feature's duplicates = $6, so $12.
+    assert body["totals"]["measured"] == 12.0
+    assert "modeled_ceiling" in body["totals"] and "directional" in body["totals"]
+    # Top recommendations are ranked and tagged with their feature.
+    assert body["top_recommendations"][0]["feature_name"] in {"AI threat triage", "Report generator"}  # noqa: E501
+    # by-lever rollup: duplicate_calls across the two features.
+    dup = next(x for x in body["by_lever"] if x["lever"] == "duplicate_calls")
+    assert dup["count"] == 2 and dup["monthly"] == 12.0
+    assert len(body["by_feature"]) >= 2
+
+
 def test_apply_and_unapply_opportunity(client):
     feature = client.post("/api/features", json={"name": "AI threat triage"}).json()
 

@@ -184,6 +184,31 @@ export interface FeatureOpportunities {
   actions: OptimizationAction[];
 }
 
+/** Tenant-wide optimization Overview (opt spec §21). Measured, modeled and verified
+ * savings are three distinct figures — never combined. */
+export interface CopilotOverview {
+  period: string;
+  totals: { measured: number; modeled_ceiling: number; directional: number };
+  verified_monthly_savings: number;
+  verified_annual_savings: number;
+  top_recommendations: (Opportunity & { feature_id: string; feature_name: string })[];
+  by_feature: {
+    feature_id: string;
+    name: string;
+    measured: number;
+    modeled_ceiling: number;
+    directional: number;
+  }[];
+  by_lever: {
+    lever: string;
+    title: string;
+    savings_type: string;
+    monthly: number;
+    count: number;
+  }[];
+  applied: (OptimizationAction & { feature_id: string; feature_name: string })[];
+}
+
 export interface FeatureInference {
   window: string;
   total: number;
@@ -357,6 +382,9 @@ export const api = {
 
   unapplyOpportunity: (id: string, lever: string) =>
     request<void>(`/features/${id}/opportunities/apply?lever=${lever}`, { method: "DELETE" }),
+
+  copilotOverview: (period?: string) =>
+    request<CopilotOverview>(`/copilot/overview${period ? `?period=${period}` : ""}`),
 
   providerSpend: (range?: ReviewRange) =>
     request<ProviderSpend>(`/dashboard/providers${rangeQuery(range)}`),

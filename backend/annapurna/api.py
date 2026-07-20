@@ -679,6 +679,14 @@ def create_app() -> FastAPI:
     ) -> None:
         optimize_measured.unmark_applied(user["tenant_id"], feature_id, lever)
 
+    @app.get("/api/copilot/overview")
+    def copilot_overview(
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        resolved = _parse_period(period) if period else None
+        return optimize_measured.copilot_overview(user["tenant_id"], resolved)
+
     @app.get("/api/dashboard/providers")
     def dashboard_providers(
         user: CurrentUser,

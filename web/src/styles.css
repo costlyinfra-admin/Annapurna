@@ -1595,6 +1595,64 @@ a.exec-value:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Copilot Overview — three distinct savings KPIs + two-column rollups. */
+.copilot-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+.copilot-kpi {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.copilot-kpi.kpi-measured {
+  border-left-color: var(--success, #15803d);
+}
+.copilot-kpi.kpi-ceiling {
+  border-left-color: #b45309;
+}
+.copilot-kpi.kpi-verified {
+  border-left-color: var(--accent);
+}
+
+.copilot-kpi-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.copilot-kpi-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.copilot-kpi-sub {
+  font-size: 0.8rem;
+}
+
+.copilot-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+.copilot-cols .detail-section {
+  margin: 0;
+}
+
 /* Optimization: measured (grounded) vs estimated (heuristic) groups */
 .opt-group {
   margin-top: 0.4rem;

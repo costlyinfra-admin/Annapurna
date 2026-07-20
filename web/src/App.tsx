@@ -6,6 +6,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { AppShell } from "./components/AppShell";
+import { CopilotPage } from "./pages/CopilotPage";
 import { CostSourcesPage } from "./pages/CostSourcesPage";
 import { Dashboard } from "./pages/Dashboard";
 import { FeatureDetail } from "./pages/FeatureDetail";
@@ -56,6 +57,7 @@ export function App() {
         }
       >
         <Route path="/" element={<Dashboard />} />
+        <Route path="/optimize" element={<CopilotPage />} />
         <Route path="/cost-sources" element={<CostSourcesPage />} />
         <Route path="/features" element={<FeaturesPage />} />
         <Route path="/features/:id" element={<FeatureDetail />} />

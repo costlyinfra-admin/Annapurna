@@ -616,7 +616,19 @@ realized (already built) → **verified** (a new terminal status once realized s
 hold for N periods within tolerance). *Accept:* an applied opportunity advances
 `detected → applied → verified`, and verified savings roll up in the Overview (§21).
 
-## 21. Copilot Overview (M-opt-12)
+## 21. Copilot Overview (M-opt-12) ✅ Done
+
+Shipped. `optimize_measured.copilot_overview()` aggregates the per-feature
+opportunity computations (via a shared `_feature_opportunities(conn, …)` helper, so
+the Overview and the feature page agree) into: three separate savings figures
+(measured / modeled_ceiling / verified), a priority-ranked top-N recommendation
+list tagged with each feature, and by-feature / by-lever rollups plus the applied +
+verified reconciliations — no new tables. Exposed at `GET /api/copilot/overview`.
+New `/optimize` route + "Optimize" nav item render the **Optimization Copilot** page
+with three colour-accented KPI cards (never blended), the ranked recommendations
+table (linking to each feature), and the two rollups. Demo: $707/mo measured, up to
+$5,867/mo modeled (Model right-sizing across 4 features), $1,572/yr verified.
+Browser-verified; backend 166, frontend 34 green.
 
 A tenant-level screen — the flagship of the repositioning — answering "where's the
 money and what do I do first" across all features at once. A new read-only endpoint

@@ -496,44 +496,114 @@ def opportunities(
         start = dashboard._resolve_period(conn, period)
         if conn.execute("SELECT 1 FROM feature WHERE id = %s", (feature_id,)).fetchone() is None:
             return None
-        measured, cache_utilization = _measured(conn, feature_id, start)
-        estimated = dashboard.heuristic_optimization(conn, feature_id, start)
+        result = _feature_opportunities(conn, feature_id, start)
+    return {"period": start.isoformat(), **result}
 
-        unified = [_unify_measured(o) for o in measured]
-        unified += [_unify_directional(o) for o in estimated["opportunities"]]
 
-        # Reconciliation reads the CURRENT avoidable spend per applied lever.
-        by_lever = {
-            o["lever"]: o["projected_monthly_savings"]
-            for o in unified
-            if o["savings_type"] in ("measured", "modeled_ceiling")
-        }
-        actions = _actions(conn, feature_id, start, by_lever)
-        # An opportunity's lifecycle status follows its applied action: detected →
-        # applied → verified (opt spec §20).
-        action_status = {a["lever"]: a["status"] for a in actions}
-        for o in unified:
-            st = action_status.get(o["lever"])
-            if st == "verified":
-                o["status"] = "verified"
-            elif st is not None:
-                o["status"] = "applied"
+def _feature_opportunities(conn, feature_id: str, start: dt.date) -> dict:
+    """Compute the unified opportunities for one feature within an open connection.
 
-        # Rank by priority (savings × confidence × effort) — "what to fix first".
-        unified.sort(key=lambda o: o["priority_score"], reverse=True)
-        totals = {
-            kind: round(
-                sum(o["projected_monthly_savings"] for o in unified if o["savings_type"] == kind),
-                2,
-            )
-            for kind in ("measured", "modeled_ceiling", "directional")
-        }
+    Shared by the per-feature endpoint and the tenant Overview (opt spec §21), so
+    the Overview aggregates over the SAME numbers a feature page shows.
+    """
+    measured, cache_utilization = _measured(conn, feature_id, start)
+    estimated = dashboard.heuristic_optimization(conn, feature_id, start)
+
+    unified = [_unify_measured(o) for o in measured]
+    unified += [_unify_directional(o) for o in estimated["opportunities"]]
+
+    # Reconciliation reads the CURRENT avoidable spend per applied lever.
+    by_lever = {
+        o["lever"]: o["projected_monthly_savings"]
+        for o in unified
+        if o["savings_type"] in ("measured", "modeled_ceiling")
+    }
+    actions = _actions(conn, feature_id, start, by_lever)
+    # An opportunity's lifecycle status follows its applied action: detected →
+    # applied → verified (opt spec §20).
+    action_status = {a["lever"]: a["status"] for a in actions}
+    for o in unified:
+        st = action_status.get(o["lever"])
+        if st == "verified":
+            o["status"] = "verified"
+        elif st is not None:
+            o["status"] = "applied"
+
+    # Rank by priority (savings × confidence × effort) — "what to fix first".
+    unified.sort(key=lambda o: o["priority_score"], reverse=True)
+    totals = {
+        kind: round(
+            sum(o["projected_monthly_savings"] for o in unified if o["savings_type"] == kind),
+            2,
+        )
+        for kind in ("measured", "modeled_ceiling", "directional")
+    }
     return {
-        "period": start.isoformat(),
         "opportunities": unified,
         "totals": totals,  # measured / modeled_ceiling / directional — never combined
         "cache_utilization": cache_utilization,
         "actions": actions,  # applied optimizations: projected vs realized (opt spec §11)
+    }
+
+
+def copilot_overview(tenant_id: str, period: Optional[dt.date] = None) -> dict:
+    """Tenant-wide optimization Overview (opt spec §21) — "where's the money and
+    what do I fix first" across every feature. Aggregates the SAME per-feature
+    opportunity computations; no new tables. Measured, modeled and verified savings
+    are kept strictly separate and never combined into one number.
+    """
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        start = dashboard._resolve_period(conn, period)
+        features = conn.execute("SELECT id, name FROM feature ORDER BY name").fetchall()
+
+        totals = {"measured": 0.0, "modeled_ceiling": 0.0, "directional": 0.0}
+        verified_monthly = 0.0
+        actionable = []  # measured + modeled_ceiling opps, tagged with their feature
+        by_feature = []
+        lever_map: dict[str, dict] = {}
+        applied: list[dict] = []
+
+        for fid, fname in features:
+            r = _feature_opportunities(conn, str(fid), start)
+            for kind in totals:
+                totals[kind] += r["totals"][kind]
+            by_feature.append({"feature_id": str(fid), "name": fname, **r["totals"]})
+            for o in r["opportunities"]:
+                if o["savings_type"] == "directional":
+                    continue
+                actionable.append({**o, "feature_id": str(fid), "feature_name": fname})
+                entry = lever_map.setdefault(
+                    o["lever"],
+                    {
+                        "lever": o["lever"],
+                        "title": o["title"],
+                        "savings_type": o["savings_type"],
+                        "monthly": 0.0,
+                        "count": 0,
+                    },
+                )
+                entry["monthly"] += o["projected_monthly_savings"]
+                entry["count"] += 1
+            for a in r["actions"]:
+                applied.append({**a, "feature_id": str(fid), "feature_name": fname})
+                if a["status"] == "verified" and a["realized_monthly"]:
+                    verified_monthly += a["realized_monthly"]
+
+        top = sorted(actionable, key=lambda o: o["priority_score"], reverse=True)[:8]
+        by_feature.sort(key=lambda f: f["measured"] + f["modeled_ceiling"], reverse=True)
+        by_lever = sorted(lever_map.values(), key=lambda e: e["monthly"], reverse=True)
+        for e in by_lever:
+            e["monthly"] = round(e["monthly"], 2)
+
+    return {
+        "period": start.isoformat(),
+        "totals": {k: round(v, 2) for k, v in totals.items()},
+        "verified_monthly_savings": round(verified_monthly, 2),
+        "verified_annual_savings": round(verified_monthly * 12, 2),
+        "top_recommendations": top,
+        "by_feature": by_feature,
+        "by_lever": by_lever,
+        "applied": applied,
     }
 
 
