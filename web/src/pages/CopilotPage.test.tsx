@@ -31,6 +31,7 @@ const OVERVIEW: CopilotOverview = {
       validation_guidance: "eval first",
       verification: "spend drops",
       status: "detected",
+      overlaps: null,
       trail: [],
       feature_id: "f1",
       feature_name: "AI threat triage",

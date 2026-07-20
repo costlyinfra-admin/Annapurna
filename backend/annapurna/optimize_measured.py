@@ -94,6 +94,48 @@ def _priority(monthly: float, confidence: str, effort: str) -> float:
     )
 
 
+# Exclusion groups (opt spec §22) — levers that address overlapping spend. Within a
+# group present on one feature, the strongest member wins (measured beats a
+# directional estimate; then higher savings) and the rest are flagged `overlaps` and
+# dropped from the totals. A read-time rule, NOT a graph engine.
+#
+# Repo reality (why so few): among the shipped MEASURED detectors, provider_switch
+# (OSS models) and model_rightsizing (frontier models) are disjoint per-model, and
+# duplicate_calls vs prompt_caching are ~independent (their overlap is a tiny slice).
+# The real, present overlap is a measured finding SUPERSEDING the directional
+# estimate of the same thing — so we don't show a rough estimate for what we've
+# already measured precisely. (duplicate_calls ⊕ conditional-invocation, a true
+# full overlap, activates when that detector lands — M-opt-15.)
+_EXCLUSION_GROUPS = [
+    # measured prefix caching supersedes the heuristic estimate of the same thing
+    {"prompt_caching", "prompt_caching_est"},
+    # measured exact-duplicate finding supersedes the semantic-cache estimate
+    {"duplicate_calls", "semantic_caching"},
+]
+_SAVINGS_TYPE_RANK = {"measured": 2, "modeled_ceiling": 1, "directional": 0}
+
+
+def _apply_exclusions(unified: list) -> None:
+    """Flag overlapping opportunities so they're dropped from the totals (opt §22).
+
+    Sets `overlaps` on every opportunity (None, or the winning member's title).
+    """
+    by_lever = {o["lever"]: o for o in unified}
+    for o in unified:
+        o["overlaps"] = None
+    for group in _EXCLUSION_GROUPS:
+        present = [by_lever[lever] for lever in group if lever in by_lever]
+        if len(present) < 2:
+            continue
+        winner = max(
+            present,
+            key=lambda o: (_SAVINGS_TYPE_RANK[o["savings_type"]], o["projected_monthly_savings"]),
+        )
+        for o in present:
+            if o is not winner:
+                o["overlaps"] = winner["title"]
+
+
 # Per-lever guidance (opt spec §20) — deterministic templates, never an LLM. The
 # implementation one-liner is the detector's `fix`; these add "how to validate the
 # change is safe" and "how Annapurna confirms it worked".
@@ -529,11 +571,18 @@ def _feature_opportunities(conn, feature_id: str, start: dt.date) -> dict:
         elif st is not None:
             o["status"] = "applied"
 
+    # Suppress double-counting: a measured finding supersedes overlapping estimates.
+    _apply_exclusions(unified)
+
     # Rank by priority (savings × confidence × effort) — "what to fix first".
     unified.sort(key=lambda o: o["priority_score"], reverse=True)
     totals = {
         kind: round(
-            sum(o["projected_monthly_savings"] for o in unified if o["savings_type"] == kind),
+            sum(
+                o["projected_monthly_savings"]
+                for o in unified
+                if o["savings_type"] == kind and o["overlaps"] is None
+            ),
             2,
         )
         for kind in ("measured", "modeled_ceiling", "directional")
@@ -569,7 +618,7 @@ def copilot_overview(tenant_id: str, period: Optional[dt.date] = None) -> dict:
                 totals[kind] += r["totals"][kind]
             by_feature.append({"feature_id": str(fid), "name": fname, **r["totals"]})
             for o in r["opportunities"]:
-                if o["savings_type"] == "directional":
+                if o["savings_type"] == "directional" or o["overlaps"] is not None:
                     continue
                 actionable.append({**o, "feature_id": str(fid), "feature_name": fname})
                 entry = lever_map.setdefault(

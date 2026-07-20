@@ -38,6 +38,7 @@ function opp(over: Partial<Opportunity>): Opportunity {
     validation_guidance: "validate it",
     verification: "we verify it",
     status: "detected",
+    overlaps: null,
     trail: [],
   };
   return { ...base, ...over };
@@ -298,6 +299,27 @@ describe("FeatureDetail", () => {
     // The matching measured card shows an "Applied" chip and an Undo control.
     expect(screen.getByText(/✓ Applied Mar 2026/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+  });
+
+  it("marks a directional estimate superseded by a measured finding", async () => {
+    vi.mocked(api.featureOpportunities).mockResolvedValue({
+      ...OPPORTUNITIES,
+      opportunities: [
+        ...OPPORTUNITIES.opportunities,
+        opp({
+          lever: "prompt_caching_est",
+          title: "Prompt caching",
+          source: "heuristic",
+          savings_type: "directional",
+          confidence: "med",
+          projected_monthly_savings: 445,
+          overlaps: "Prompt caching",
+        }),
+      ],
+    });
+    renderDetail();
+    // The superseded estimate is shown but flagged as measured elsewhere.
+    expect(await screen.findByText(/measured as Prompt caching/)).toBeInTheDocument();
   });
 
   it("shows validate/verify guidance on each measured card", async () => {

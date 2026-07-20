@@ -309,6 +309,44 @@ def test_model_rightsizing_ceiling_from_real_spend(tenant_id):
     assert result["totals"]["modeled_ceiling"] == 73.33
 
 
+def test_measured_finding_supersedes_directional_estimate(tenant_id):
+    # opt spec §22: a big input-heavy Sonnet feature yields BOTH a measured prompt
+    # caching finding and a directional "Prompt caching" estimate. The estimate is
+    # flagged as overlapping and dropped from the directional total.
+    triage = features.add_feature(tenant_id, "AI threat triage")
+    # Connector spend (input-heavy) drives the heuristic estimate...
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        conn.execute(
+            """
+            INSERT INTO inference_cost (tenant_id, feature_id, provider, model, amount,
+                                        period, tokens_in, tokens_out, source, confidence)
+            VALUES (%s, %s, 'anthropic', 'claude-haiku-4-5', 1000.00, %s,
+                    9000000, 1000000, 'cost_api', 'high')
+            """,
+            (tenant_id, triage["id"], PERIOD),
+        )
+    # ...and a measured prompt-caching finding from the SDK.
+    hook.ingest_events(
+        tenant_id, [_prefix_event(triage["id"], "fp-p", 1000, 4000, 0, 4_000_000)]
+    )
+
+    result = optimize_measured.opportunities(tenant_id, triage["id"], PERIOD)
+    measured_pc = _opp(result, "prompt_caching")
+    directional_pc = _opp(result, "prompt_caching_est")
+    # The measured finding wins; the estimate is flagged as overlapping it.
+    assert measured_pc["overlaps"] is None
+    assert directional_pc["overlaps"] == "Prompt caching"
+    # The superseded estimate is NOT counted in the directional total.
+    non_overlapped = sum(
+        o["projected_monthly_savings"]
+        for o in result["opportunities"]
+        if o["savings_type"] == "directional" and o["overlaps"] is None
+    )
+    assert round(non_overlapped, 2) == result["totals"]["directional"]
+    # Including the superseded estimate would have inflated the total.
+    assert directional_pc["projected_monthly_savings"] > 0
+
+
 def test_priority_favors_easy_high_confidence_wins():
     # opt spec §19: priority = savings × confidence × effort. A cheap, guaranteed,
     # very-low-effort fix should outrank a bigger but risky, high-effort one.

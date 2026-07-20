@@ -464,8 +464,11 @@ function DirectionalGroup({ opps, total }: { opps: Opportunity[]; total: number 
           </thead>
           <tbody>
             {opps.map((o) => (
-              <tr key={o.lever}>
-                <td title={o.evidence}>{o.title}</td>
+              <tr key={o.lever} className={o.overlaps ? "opt-overlapped" : ""}>
+                <td title={o.evidence}>
+                  {o.title}
+                  {o.overlaps && <span className="muted"> · measured as {o.overlaps}</span>}
+                </td>
                 <td className="num">{money(o.projected_monthly_savings)}/mo</td>
                 <td>
                   <ConfidenceBadge level={o.confidence} />

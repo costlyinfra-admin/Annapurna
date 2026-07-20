@@ -154,6 +154,7 @@ export interface Opportunity {
   validation_guidance: string;
   verification: string;
   status: string;
+  overlaps: string | null; // set when superseded by an overlapping lever (opt spec §22)
   trail: {
     fingerprint?: string;
     provider?: string;

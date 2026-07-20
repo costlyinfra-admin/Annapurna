@@ -1664,6 +1664,11 @@ a.exec-value:hover {
   border-top: 1px dashed var(--line-strong);
 }
 
+/* A directional estimate superseded by a measured finding (opt spec §22). */
+.opt-overlapped td {
+  opacity: 0.55;
+}
+
 .opt-group-head {
   display: flex;
   align-items: flex-start;

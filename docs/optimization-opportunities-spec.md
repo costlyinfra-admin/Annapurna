@@ -647,7 +647,33 @@ number):
 top-N recommendation list, and by-feature / by-lever rollups — all from the existing
 opportunity computations.
 
-## 22. Overlap & exclusion groups (M-opt-13)
+## 22. Overlap & exclusion groups (M-opt-13) ✅ Done
+
+Shipped. `_apply_exclusions` is a **read-time exclusion rule** (not a graph engine):
+within a group present on a feature, the strongest member wins (measured beats a
+directional estimate; then higher savings) and the rest are flagged `overlaps =
+<winner title>` and dropped from the totals. Applied inside `_feature_opportunities`,
+so both the feature page and the Overview dedup identically.
+
+**Repo-reality finding (the interesting part).** The overlaps the draft imagined
+between *measured* detectors don't actually double-count today: provider-switch (OSS)
+and right-sizing (frontier) are disjoint per-model, and duplicate-calls vs
+prompt-caching are ~independent (their true overlap is a tiny slice, so hard-excluding
+one would badly *under*-count — worse than the double-count it prevents). The real,
+present overlap is a **measured finding superseding the directional ESTIMATE of the
+same thing**, so we never show a rough estimate for what we've measured precisely.
+Encoded groups: `{prompt_caching, prompt_caching_est}` and `{duplicate_calls,
+semantic_caching}`. (The true full overlap `duplicate_calls ⊕ conditional-invocation`
+activates when that detector lands — M-opt-15.) UI greys the superseded estimate row
+with "· measured as X" and excludes it from the estimated total. Demo: triage's
+directional total drops $795.53 → $224.82 (Prompt caching and Semantic caching
+estimates superseded); the measured total is unchanged. Browser-verified; backend
+167, frontend 35 green. *Accept:* an overlapping member is shown but excluded from the
+totals, marked with its superseding lever.
+
+---
+
+The original design of this milestone, for reference:
 
 Prevents double-counting when two levers address the *same* spend. Implemented as
 **read-time exclusion groups**, not a graph engine: within a group, keep the
