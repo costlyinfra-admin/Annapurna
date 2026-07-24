@@ -9,6 +9,68 @@ export interface User {
   id: string;
   tenant_id: string;
   email: string;
+  is_admin?: boolean;
+  impersonating?: { tenant_id: string; company: string } | null;
+}
+
+// ---- Internal admin portal (allow-listed admins only) ----
+export interface AdminOverview {
+  total_customers: number;
+  connected_customers: number;
+  pending_connections: number;
+  total_ai_spend: number;
+  total_opportunities: number;
+  total_verified_savings: number;
+}
+
+export interface AdminCustomer {
+  tenant_id: string;
+  company: string;
+  created_at: string | null;
+  status: "connected" | "pending";
+  connected_providers: string[];
+  last_sync: string | null;
+  monthly_spend: number;
+  opportunities: number;
+  verified_savings: number;
+}
+
+export interface AdminSyncRow {
+  tenant_id: string;
+  company: string;
+  connector_type: string;
+  action: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  records_imported: number | null;
+  status: string;
+  error_message: string | null;
+}
+
+export interface AdminCustomerDetail {
+  tenant_id: string;
+  company: string;
+  created_at: string | null;
+  users: string[];
+  connectors: ConnectorStatus[];
+  repositories: string[];
+  optimization_runs: {
+    lever: string;
+    applied_on: string;
+    projected_monthly: number;
+    created_at: string;
+  }[];
+  recent_syncs: AdminSyncRow[];
+  recent_errors: AdminSyncRow[];
+}
+
+export interface ConnectorActionResult {
+  status: string;
+  records_imported: number | null;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string;
 }
 
 export interface ConnectorStatus {
@@ -386,6 +448,35 @@ export const api = {
 
   copilotOverview: (period?: string) =>
     request<CopilotOverview>(`/copilot/overview${period ? `?period=${period}` : ""}`),
+
+  // ---- Internal admin portal ----
+  adminOverview: () => request<AdminOverview>("/admin/overview"),
+  adminCustomers: () => request<AdminCustomer[]>("/admin/customers"),
+  adminCustomer: (tenantId: string) => request<AdminCustomerDetail>(`/admin/customers/${tenantId}`),
+  adminSaveConnector: (tenantId: string, connectorType: string, secret: string, label?: string) =>
+    request<{ ok: boolean }>(`/admin/customers/${tenantId}/connectors`, {
+      method: "POST",
+      body: JSON.stringify({ connector_type: connectorType, secret, label: label ?? null }),
+    }),
+  adminTestConnector: (tenantId: string, connectorType: string) =>
+    request<ConnectorActionResult>(
+      `/admin/customers/${tenantId}/connectors/${connectorType}/test`,
+      { method: "POST" },
+    ),
+  adminSyncConnector: (tenantId: string, connectorType: string) =>
+    request<ConnectorActionResult>(
+      `/admin/customers/${tenantId}/connectors/${connectorType}/sync`,
+      { method: "POST" },
+    ),
+  adminDisconnectConnector: (tenantId: string, connectorType: string) =>
+    request<void>(`/admin/customers/${tenantId}/connectors/${connectorType}`, { method: "DELETE" }),
+  adminSyncHistory: () => request<AdminSyncRow[]>("/admin/sync-history"),
+  adminErrors: () => request<AdminSyncRow[]>("/admin/errors"),
+  impersonate: (tenantId: string) =>
+    request<{ tenant_id: string; company: string }>(`/admin/impersonate/${tenantId}`, {
+      method: "POST",
+    }),
+  stopImpersonate: () => request<void>("/admin/impersonate", { method: "DELETE" }),
 
   providerSpend: (range?: ReviewRange) =>
     request<ProviderSpend>(`/dashboard/providers${rangeQuery(range)}`),

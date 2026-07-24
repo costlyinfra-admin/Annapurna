@@ -37,6 +37,9 @@ createdb -h "$TMPD" -p 5544 annapurna
 
 export DATABASE_URL="host=$TMPD port=5544 dbname=annapurna"
 export APP_SECRET_KEY="demo-secret-change-me"
+# The demo account is an admin here so the internal Admin Portal is explorable in
+# the throwaway demo. In production, set ANNAPURNA_ADMIN_EMAILS to your own admins.
+export ANNAPURNA_ADMIN_EMAILS="demo@annapurna.com"
 
 echo "▶ Migrating + seeding the Acme Security demo tenant…"
 make db-seed

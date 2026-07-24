@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import (
     __version__,
+    admin,
     auth,
     build,
     claudecode,
@@ -165,6 +166,12 @@ class ApplyOpportunityRequest(BaseModel):
     projected_monthly: float = Field(ge=0)
 
 
+class AdminConnectorRequest(BaseModel):
+    connector_type: str = Field(min_length=1, max_length=40)
+    secret: str = Field(min_length=1, max_length=8192)
+    label: Optional[str] = Field(default=None, max_length=200)
+
+
 class CopilotSyncRequest(BaseModel):
     owner: str = Field(min_length=1, max_length=120)
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
@@ -209,7 +216,8 @@ def _parse_period(value: Optional[str]) -> dt.date:
     return dt.date(int(year), int(month), 1)
 
 
-def _current_user(request: Request) -> auth.User:
+def _real_user(request: Request) -> auth.User:
+    """The actually-logged-in user (ignores any admin impersonation)."""
     user_id = request.session.get("user_id")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -220,8 +228,29 @@ def _current_user(request: Request) -> auth.User:
     return user
 
 
+def _current_user(request: Request) -> auth.User:
+    """The effective user for tenant-scoped endpoints. If an admin is impersonating
+    a customer, the tenant_id is swapped to that customer's — the entire customer UI
+    then operates in that tenant with zero duplication."""
+    user = _real_user(request)
+    target = request.session.get("impersonate_tenant")
+    if target and admin.is_admin(user["email"]):
+        return {**user, "tenant_id": target}
+    return user
+
+
+def _admin_user(request: Request) -> auth.User:
+    """Gate for the internal admin portal — a real, allow-listed admin user."""
+    user = _real_user(request)
+    if not admin.is_admin(user["email"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
 # The authenticated user, resolved from the session cookie (FastAPI dependency).
 CurrentUser = Annotated[auth.User, Depends(_current_user)]
+AdminUser = Annotated[auth.User, Depends(_admin_user)]
+RealUser = Annotated[auth.User, Depends(_real_user)]
 
 
 def create_app() -> FastAPI:
@@ -300,8 +329,14 @@ def create_app() -> FastAPI:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/auth/me")
-    def me(user: CurrentUser) -> auth.User:
-        return user
+    def me(request: Request, user: CurrentUser) -> dict:
+        real = _real_user(request)
+        is_admin = admin.is_admin(real["email"])
+        impersonating = None
+        target = request.session.get("impersonate_tenant")
+        if target and is_admin:
+            impersonating = {"tenant_id": target, "company": admin.company_name(target)}
+        return {**user, "is_admin": is_admin, "impersonating": impersonating}
 
     @app.get("/api/connectors")
     def list_connectors(user: CurrentUser) -> list[credentials.ConnectorStatus]:
@@ -686,6 +721,65 @@ def create_app() -> FastAPI:
     ) -> dict:
         resolved = _parse_period(period) if period else None
         return optimize_measured.copilot_overview(user["tenant_id"], resolved)
+
+    # ---- Internal admin portal (allow-listed admins only) --------------
+    @app.get("/api/admin/overview")
+    def admin_overview(user: AdminUser) -> dict:
+        return admin.overview()
+
+    @app.get("/api/admin/customers")
+    def admin_customers(user: AdminUser) -> list[dict]:
+        return admin.customers()
+
+    @app.get("/api/admin/customers/{tenant_id}")
+    def admin_customer_detail(tenant_id: str, user: AdminUser) -> dict:
+        detail = admin.customer_detail(tenant_id)
+        if detail is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+        return detail
+
+    @app.post("/api/admin/customers/{tenant_id}/connectors")
+    def admin_save_connector(tenant_id: str, body: AdminConnectorRequest, user: AdminUser) -> dict:
+        try:
+            credentials.save_credential(tenant_id, body.connector_type, body.secret, body.label)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/api/admin/customers/{tenant_id}/connectors/{connector_type}/test")
+    def admin_test_connector(tenant_id: str, connector_type: str, user: AdminUser) -> dict:
+        return admin.test_connection(tenant_id, connector_type)
+
+    @app.post("/api/admin/customers/{tenant_id}/connectors/{connector_type}/sync")
+    def admin_sync_connector(tenant_id: str, connector_type: str, user: AdminUser) -> dict:
+        return admin.sync_now(tenant_id, connector_type)
+
+    @app.delete(
+        "/api/admin/customers/{tenant_id}/connectors/{connector_type}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def admin_disconnect_connector(tenant_id: str, connector_type: str, user: AdminUser) -> None:
+        admin.disconnect(tenant_id, connector_type)
+
+    @app.get("/api/admin/sync-history")
+    def admin_sync_history(user: AdminUser) -> list[dict]:
+        return admin.sync_history()
+
+    @app.get("/api/admin/errors")
+    def admin_errors(user: AdminUser) -> list[dict]:
+        return admin.errors()
+
+    @app.post("/api/admin/impersonate/{tenant_id}")
+    def admin_impersonate(tenant_id: str, request: Request, user: AdminUser) -> dict:
+        company = admin.company_name(tenant_id)
+        if company is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+        request.session["impersonate_tenant"] = tenant_id
+        return {"tenant_id": tenant_id, "company": company}
+
+    @app.delete("/api/admin/impersonate", status_code=status.HTTP_204_NO_CONTENT)
+    def admin_stop_impersonate(request: Request, user: RealUser) -> None:
+        request.session.pop("impersonate_tenant", None)
 
     @app.get("/api/dashboard/providers")
     def dashboard_providers(

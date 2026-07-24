@@ -31,3 +31,13 @@ export function compact(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return COMPACT.format(value);
 }
+
+/** Short local date-time, e.g. "Jul 19, 3:42 PM" — used in the admin portal. */
+export function shortDate(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}

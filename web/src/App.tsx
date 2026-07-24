@@ -5,6 +5,7 @@
  */
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
+import { AdminShell } from "./components/AdminShell";
 import { AppShell } from "./components/AppShell";
 import { CopilotPage } from "./pages/CopilotPage";
 import { CostSourcesPage } from "./pages/CostSourcesPage";
@@ -15,11 +16,25 @@ import { InstallSdkPage } from "./pages/InstallSdkPage";
 import { Login } from "./pages/Login";
 import { SettingsPage } from "./pages/SettingsPage";
 import { Signup } from "./pages/Signup";
+import { AdminConnectors } from "./pages/admin/AdminConnectors";
+import { AdminCustomerDetail } from "./pages/admin/AdminCustomerDetail";
+import { AdminCustomers } from "./pages/admin/AdminCustomers";
+import { AdminDashboard } from "./pages/admin/AdminDashboard";
+import { AdminErrors } from "./pages/admin/AdminErrors";
+import { AdminSyncHistory } from "./pages/admin/AdminSyncHistory";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="page-center muted">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="page-center muted">Loading…</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.is_admin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -63,6 +78,21 @@ export function App() {
         <Route path="/features/:id" element={<FeatureDetail />} />
         <Route path="/install-sdk" element={<InstallSdkPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+      </Route>
+      <Route
+        path="/admin"
+        element={
+          <RequireAdmin>
+            <AdminShell />
+          </RequireAdmin>
+        }
+      >
+        <Route index element={<AdminDashboard />} />
+        <Route path="customers" element={<AdminCustomers />} />
+        <Route path="customers/:id" element={<AdminCustomerDetail />} />
+        <Route path="connectors" element={<AdminConnectors />} />
+        <Route path="sync-history" element={<AdminSyncHistory />} />
+        <Route path="errors" element={<AdminErrors />} />
       </Route>
       <Route path="/dashboard" element={<Navigate to="/" replace />} />
       <Route path="/onboarding" element={<Navigate to="/" replace />} />

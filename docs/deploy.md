@@ -130,6 +130,25 @@ using the ingest token from **POST `/api/hook/token`** (offered in onboarding).
 | `ANNAPURNA_APP_DB_PASSWORD` | Render + GitHub secrets | Password for the RLS-enforced app DB role |
 | `ANNAPURNA_SECURE_COOKIES` | set to `true` in prod (blueprint default) | Secure session cookie over HTTPS |
 | `ANNAPURNA_STATIC_DIR` | set by the Docker image | Tells the API to also serve the web app |
+| `ANNAPURNA_ADMIN_EMAILS` | Render (comma-separated) | Unlocks the internal Admin Portal for these accounts |
+
+## Internal Admin Portal (`admin.annapurna.costlyinfra.com`)
+
+The admin portal (onboard/support customers without touching the database) is served
+by the **same** Render service — no extra infra. Two steps:
+
+1. **Grant access.** Set `ANNAPURNA_ADMIN_EMAILS` on the Render service to your
+   admin accounts, comma-separated (e.g. `you@costlyinfra.com`). Those users log in
+   with their normal account; the portal (and the `/api/admin/*` routes) unlock for
+   them and stay hidden/403 for everyone else. No schema change, no self-service.
+2. **Point the subdomain.** In Cloudflare → `costlyinfra.com` → **DNS → Add record**:
+   a `CNAME` named `admin.annapurna` targeting the same Render host as Step 3
+   (`annapurna.onrender.com`), **DNS only (grey cloud)**. Add
+   `admin.annapurna.costlyinfra.com` as a custom domain on the Render service too.
+
+Then visit `admin.annapurna.costlyinfra.com/admin` (or the "Admin portal →" link in
+the customer sidebar). Access is gated by the allowlist, not the hostname, so the
+subdomain is purely where admins go.
 
 ## When you outgrow free
 - **No more cold starts:** upgrade the Render service to a paid instance (~$7/mo).
