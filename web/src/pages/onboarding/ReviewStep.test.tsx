@@ -10,6 +10,8 @@ vi.mock("../../api", async (importActual) => {
     api: {
       listFeatures: vi.fn(),
       runDiscovery: vi.fn(),
+      discoveryRepos: vi.fn(),
+      discoveryScope: vi.fn(),
       addFeature: vi.fn(),
       renameFeature: vi.fn(),
       deleteFeature: vi.fn(),
@@ -17,6 +19,17 @@ vi.mock("../../api", async (importActual) => {
       mergeFeatures: vi.fn(),
     },
   };
+});
+
+const summary = (over: Partial<import("../../api").DiscoverySummary>) => ({
+  owner: "acme",
+  prs: 0,
+  repos: [] as string[],
+  repos_with_prs: [] as string[],
+  prs_by_repo: {} as Record<string, number>,
+  repos_scanned: 0,
+  proposals: 0,
+  ...over,
 });
 
 const THREAT: Feature = {
@@ -33,17 +46,23 @@ const THREAT: Feature = {
 };
 
 describe("ReviewStep", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Component loads the saved scope on mount; default to "nothing saved".
+    vi.mocked(api.discoveryScope).mockResolvedValue({ owner: null, repos: [] });
+  });
 
   it("runs discovery and renders proposals with evidence + confidence", async () => {
     vi.mocked(api.listFeatures).mockResolvedValueOnce([]).mockResolvedValue([THREAT]);
-    vi.mocked(api.runDiscovery).mockResolvedValue({
-      owner: "acme",
-      prs: 3,
-      repos: ["acme/core"],
-      repos_scanned: 2,
-      proposals: 1,
-    });
+    vi.mocked(api.runDiscovery).mockResolvedValue(
+      summary({
+        prs: 3,
+        repos: ["acme/core"],
+        repos_with_prs: ["acme/core"],
+        repos_scanned: 2,
+        proposals: 1,
+      }),
+    );
 
     render(<ReviewStep />);
     expect(await screen.findByText("No features discovered yet")).toBeInTheDocument();
@@ -51,22 +70,49 @@ describe("ReviewStep", () => {
     fireEvent.change(screen.getByLabelText("GitHub organization"), { target: { value: "acme" } });
     fireEvent.click(screen.getByRole("button", { name: "Analyze last 90 days" }));
 
-    expect(await screen.findByText(/Analyzed 3 merged PRs/)).toBeInTheDocument();
+    expect(await screen.findByText(/Analyzed: 3 merged PRs/)).toBeInTheDocument();
     expect(await screen.findByText("Threat")).toBeInTheDocument();
     expect(screen.getByText("high confidence")).toBeInTheDocument();
     expect(screen.getByText("acme/core#1")).toBeInTheDocument();
     expect(screen.getByText("branch: feature/threat-*")).toBeInTheDocument();
   });
 
+  it("lists org repositories and analyzes only the selected scope", async () => {
+    vi.mocked(api.listFeatures).mockResolvedValue([]);
+    vi.mocked(api.discoveryRepos).mockResolvedValue({
+      owner: "transilienceai",
+      repos: ["transilienceai/mcs", "transilienceai/docs"],
+    });
+    vi.mocked(api.runDiscovery).mockResolvedValue(
+      summary({
+        owner: "transilienceai",
+        prs: 5,
+        repos: ["transilienceai/mcs"],
+        repos_scanned: 2,
+        proposals: 2,
+      }),
+    );
+
+    render(<ReviewStep />);
+    fireEvent.change(await screen.findByLabelText("GitHub organization"), {
+      target: { value: "transilienceai" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "List repositories" }));
+
+    // Repos appear as checkboxes; select just "mcs".
+    const mcs = await screen.findByText("transilienceai/mcs");
+    fireEvent.click(mcs);
+    fireEvent.click(screen.getByRole("button", { name: "Analyze 1 selected" }));
+
+    await waitFor(() =>
+      expect(api.runDiscovery).toHaveBeenCalledWith("transilienceai", ["transilienceai/mcs"]),
+    );
+    expect(await screen.findByText(/Repository: transilienceai\/mcs/)).toBeInTheDocument();
+  });
+
   it("explains when no repositories are accessible (token/owner issue)", async () => {
     vi.mocked(api.listFeatures).mockResolvedValue([]);
-    vi.mocked(api.runDiscovery).mockResolvedValue({
-      owner: "cloudoku-training",
-      prs: 0,
-      repos: [],
-      repos_scanned: 0,
-      proposals: 0,
-    });
+    vi.mocked(api.runDiscovery).mockResolvedValue(summary({ owner: "cloudoku-training" }));
 
     render(<ReviewStep />);
     fireEvent.change(await screen.findByLabelText("GitHub organization"), {
@@ -79,13 +125,9 @@ describe("ReviewStep", () => {
 
   it("explains when repos are found but have no merged PRs", async () => {
     vi.mocked(api.listFeatures).mockResolvedValue([]);
-    vi.mocked(api.runDiscovery).mockResolvedValue({
-      owner: "cloudoku-training",
-      prs: 0,
-      repos: [],
-      repos_scanned: 1,
-      proposals: 0,
-    });
+    vi.mocked(api.runDiscovery).mockResolvedValue(
+      summary({ owner: "cloudoku-training", repos_scanned: 1 }),
+    );
 
     render(<ReviewStep />);
     fireEvent.change(await screen.findByLabelText("GitHub organization"), {

@@ -900,6 +900,11 @@ select {
   color: var(--muted);
 }
 
+.badge.conf-review {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
 /* ---------- Empty states ---------- */
 .empty-state {
   text-align: center;
@@ -1002,6 +1007,94 @@ select {
   padding: 0.18rem 0.6rem;
   font-family: var(--mono);
   color: var(--ink-soft);
+}
+
+/* ---------- Repo selector ---------- */
+.repo-selector {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 0.9rem;
+  background: var(--card);
+  margin: 0.2rem 0 0.6rem;
+}
+
+.repo-selector-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+}
+
+.repo-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.35rem 1rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.repo-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-family: var(--mono);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+/* ---------- PR evidence rows (repo secondary, capability primary) ---------- */
+.feature-card.needs-review {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, #fdfbfb, var(--card));
+}
+
+.pr-evidence {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.pr-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+}
+
+.pr-ref {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+a.pr-ref {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a.pr-ref:hover {
+  text-decoration: underline;
+}
+
+.pr-title {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.pr-branch {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .split-form {

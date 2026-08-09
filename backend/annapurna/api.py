@@ -63,6 +63,8 @@ class CredentialRequest(BaseModel):
 class DiscoveryRequest(BaseModel):
     owner: str = Field(min_length=1, max_length=200)  # GitHub org or user
     days: int = Field(default=90, ge=1, le=365)
+    # Selected "owner/name" repos to analyze; empty = the whole org (legacy behavior).
+    repos: list[str] = Field(default_factory=list, max_length=200)
 
 
 class AddFeatureRequest(BaseModel):
@@ -228,6 +230,20 @@ def _real_user(request: Request) -> auth.User:
     return user
 
 
+def _raise_github(exc: GitHubError):
+    """Map a GitHubError to a user-facing HTTP error (shared by discovery routes)."""
+    if exc.status == 401:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub rejected the token. Reconnect with a valid token.",
+        ) from exc
+    if exc.status in (403, 404):  # rate limit, or owner not found / no public repos
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub error: {exc}"
+    ) from exc
+
+
 def _current_user(request: Request) -> auth.User:
     """The effective user for tenant-scoped endpoints. If an admin is impersonating
     a customer, the tenant_id is swapped to that customer's — the entire customer UI
@@ -355,27 +371,34 @@ def create_app() -> FastAPI:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     # ---- Feature discovery + editing (wizard step 2) --------------------
+    @app.get("/api/discovery/repos")
+    def discovery_repos(
+        user: CurrentUser, owner: str = Query(min_length=1, max_length=200)
+    ) -> dict:
+        # List an org's repositories so the user can pick which to analyze (before
+        # running discovery). Token optional (public orgs work unauthenticated).
+        token = credentials.get_secret(user["tenant_id"], "github")
+        try:
+            return {"owner": owner, "repos": discovery.list_repos(owner, token)}
+        except GitHubError as exc:
+            _raise_github(exc)
+
+    @app.get("/api/discovery/scope")
+    def discovery_scope(user: CurrentUser) -> dict:
+        # The last-used org + selected repos, to prefill the selector.
+        return discovery.get_scope(user["tenant_id"]) or {"owner": None, "repos": []}
+
     @app.post("/api/discovery/run")
     def run_discovery(body: DiscoveryRequest, user: CurrentUser) -> dict:
         # Token is optional: without a connected GitHub credential, discovery
         # analyzes PUBLIC organizations/repos via GitHub's unauthenticated API.
         token = credentials.get_secret(user["tenant_id"], "github")
         try:
-            return discovery.run_discovery(user["tenant_id"], body.owner, token, days=body.days)
+            return discovery.run_discovery(
+                user["tenant_id"], body.owner, token, days=body.days, repos=body.repos
+            )
         except GitHubError as exc:
-            if exc.status == 401:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="GitHub rejected the token. Reconnect with a valid token.",
-                ) from exc
-            if exc.status in (403, 404):
-                # Rate limit, or owner not found / no public repos.
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub error: {exc}"
-            ) from exc
+            _raise_github(exc)
 
     @app.get("/api/features")
     def list_features(

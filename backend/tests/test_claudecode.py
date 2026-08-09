@@ -13,16 +13,14 @@ from annapurna.github import PullRequest
 PERIOD = dt.date(2026, 5, 1)
 
 
-def _pr(number, branch, author):
-    return PullRequest(
-        number, "acme/core", f"PR {number}", "", branch, author, "2026-05-01T00:00:00Z", ""
-    )
+def _pr(number, title, branch, author):
+    return PullRequest(number, "acme/core", title, "", branch, author, "2026-05-01T00:00:00Z", "")
 
 
 FIXTURE_PRS = [
-    _pr(1, "feature/threat-triage", "alice"),
-    _pr(2, "feature/threat-scoring", "alice"),
-    _pr(3, "feature/report-gen", "bob"),
+    _pr(1, "Threat triage automation", "feature/threat-triage", "alice"),
+    _pr(2, "Threat scoring model", "feature/threat-scoring", "alice"),
+    _pr(3, "Report generator", "feature/report-gen", "bob"),
 ]
 
 
@@ -136,7 +134,7 @@ def test_import_allocates_claude_code_spend_to_features(discovered, monkeypatch)
     features = {f["name"]: f for f in summary["features"]}
     assert features["Threat"]["amount"] == 117.0  # alice
     assert features["Threat"]["by_tool"] == {"claude_code": 117.0}
-    assert features["Report"]["amount"] == 84.0  # bob
+    assert features["Reports"]["amount"] == 84.0  # bob
     assert summary["unattributed"] == 30.0  # contractor
     assert summary["total"] == 231.0
 

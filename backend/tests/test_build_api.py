@@ -11,16 +11,14 @@ from fastapi.testclient import TestClient
 PASSWORD = "correct horse battery"
 
 
-def _pr(number, branch, author):
-    return PullRequest(
-        number, "acme/core", f"PR {number}", "", branch, author, "2026-05-01T00:00:00Z", ""
-    )
+def _pr(number, title, branch, author):
+    return PullRequest(number, "acme/core", title, "", branch, author, "2026-05-01T00:00:00Z", "")
 
 
 FIXTURE_PRS = [
-    _pr(1, "feature/threat-triage", "alice"),
-    _pr(2, "feature/threat-scoring", "alice"),
-    _pr(3, "feature/report-gen", "bob"),
+    _pr(1, "Threat triage automation", "feature/threat-triage", "alice"),
+    _pr(2, "Threat scoring model", "feature/threat-scoring", "alice"),
+    _pr(3, "Report generator", "feature/report-gen", "bob"),
 ]
 
 
@@ -59,7 +57,7 @@ def test_import_csv_and_summary(client):
     features = {f["name"]: f for f in summary["features"]}
     assert features["Threat"]["amount"] == 100.0  # alice, all in Threat -> high
     assert features["Threat"]["by_tool"] == {"cursor": 100.0}
-    assert features["Report"]["amount"] == 60.0
+    assert features["Reports"]["amount"] == 60.0
     assert summary["unattributed"] == 30.0  # dave has no PRs
     assert summary["total"] == 190.0
 

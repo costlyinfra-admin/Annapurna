@@ -11,14 +11,14 @@ from fastapi.testclient import TestClient
 PASSWORD = "correct horse battery"
 
 
-def _pr(number, repo, branch):
-    return PullRequest(number, repo, f"PR {number}", "", branch, "dev", "2026-05-01T00:00:00Z", "")
+def _pr(number, repo, title, branch):
+    return PullRequest(number, repo, title, "", branch, "dev", "2026-05-01T00:00:00Z", "")
 
 
 FIXTURE_PRS = [
-    _pr(1, "acme/core", "feature/threat-triage"),
-    _pr(2, "acme/core", "feature/threat-scoring"),
-    _pr(3, "acme/core", "feature/report-gen"),
+    _pr(1, "acme/core", "Threat triage automation", "feature/threat-triage"),
+    _pr(2, "acme/core", "Threat scoring model", "feature/threat-scoring"),
+    _pr(3, "acme/core", "Report generator", "feature/report-gen"),
 ]
 
 
@@ -32,7 +32,9 @@ class _FakeGitHub:
     def list_repos(self, owner):
         return sorted({p.repo for p in FIXTURE_PRS})
 
-    def fetch_merged_prs(self, owner, since):
+    def fetch_merged_prs(self, owner, since, *, repos=None, with_stats=True):
+        if repos is not None:
+            return [p for p in FIXTURE_PRS if p.repo in set(repos)]
         return FIXTURE_PRS
 
 
@@ -64,7 +66,7 @@ def test_full_discovery_edit_confirm_flow(client):
 
     proposed = client.get("/api/features", params={"status": "proposed"}).json()
     names = {f["name"] for f in proposed}
-    assert "Threat" in names and "Report" in names
+    assert "Threat" in names and "Reports" in names
     threat = next(f for f in proposed if f["name"] == "Threat")
     assert any(s["signal_type"] == "pr" for s in threat["signals"])
     assert threat["discovery_confidence"] == "high"
@@ -79,7 +81,7 @@ def test_full_discovery_edit_confirm_flow(client):
     assert manual.status_code == 201
 
     # Merge two proposals.
-    report = next(f for f in proposed if f["name"] == "Report")
+    report = next(f for f in proposed if f["name"] == "Reports")
     merged = client.post(
         "/api/features/merge",
         json={"feature_ids": [renamed.json()["id"], report["id"]], "name": "Merged feature"},
@@ -110,3 +112,22 @@ def test_split_via_api(client):
     )
     assert resp.status_code == 200
     assert {f["name"] for f in resp.json()} == {"Triage", "Scoring"}
+
+
+def test_repos_endpoint_lists_org_repositories(client):
+    # The selector fetches the org's repos before running discovery.
+    resp = client.get("/api/discovery/repos", params={"owner": "acme"})
+    assert resp.status_code == 200
+    assert resp.json() == {"owner": "acme", "repos": ["acme/core"]}
+
+
+def test_scope_is_empty_then_remembers_selection(client):
+    # Nothing chosen yet -> empty scope prefill.
+    assert client.get("/api/discovery/scope").json() == {"owner": None, "repos": []}
+
+    # Running discovery scoped to a repo persists that selection.
+    client.post("/api/discovery/run", json={"owner": "acme", "repos": ["acme/core"]})
+    assert client.get("/api/discovery/scope").json() == {
+        "owner": "acme",
+        "repos": ["acme/core"],
+    }

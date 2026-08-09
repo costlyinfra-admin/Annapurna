@@ -13,19 +13,17 @@ from annapurna.github import CopilotSeat, PullRequest
 PERIOD = dt.date(2026, 5, 1)
 
 
-def _pr(number, branch, author):
-    return PullRequest(
-        number, "acme/core", f"PR {number}", "", branch, author, "2026-05-01T00:00:00Z", ""
-    )
+def _pr(number, title, branch, author):
+    return PullRequest(number, "acme/core", title, "", branch, author, "2026-05-01T00:00:00Z", "")
 
 
 # alice: 2 PRs on Threat; bob: 1 on Report; carol: 1 Threat + 1 Report; dave: none
 FIXTURE_PRS = [
-    _pr(1, "feature/threat-triage", "alice"),
-    _pr(2, "feature/threat-scoring", "alice"),
-    _pr(3, "feature/report-gen", "bob"),
-    _pr(4, "feature/report-export", "carol"),
-    _pr(5, "feature/threat-intel", "carol"),
+    _pr(1, "Threat triage automation", "feature/threat-triage", "alice"),
+    _pr(2, "Threat scoring model", "feature/threat-scoring", "alice"),
+    _pr(3, "Report generator", "feature/report-gen", "bob"),
+    _pr(4, "Report CSV export", "feature/report-export", "carol"),
+    _pr(5, "Threat intel feed", "feature/threat-intel", "carol"),
 ]
 
 
@@ -82,7 +80,7 @@ def test_allocation_by_pr_overlap(discovered):
     assert features["Threat"]["by_tool"] == {"cursor": 100.0, "claude_code": 40.0}
     assert features["Threat"]["confidence"] == "high"  # alice's PRs are all in Threat
     # Report: bob 60 + carol 40 = 100
-    assert features["Report"]["amount"] == 100.0
+    assert features["Reports"]["amount"] == 100.0
 
     devs = {d["developer_id"]: d for d in summary["developers"]}
     assert devs["alice"]["amount"] == 100.0
@@ -129,7 +127,7 @@ def test_import_copilot_seats(discovered, monkeypatch):
     assert features["Threat"]["by_tool"] == {"copilot": 39.0}
     assert features["Threat"]["confidence"] == "high"
     # bob's PR is in Report.
-    assert features["Report"]["amount"] == 39.0
+    assert features["Reports"]["amount"] == 39.0
 
     devs = {d["developer_id"]: d for d in summary["developers"]}
     assert devs["alice"]["amount"] == 39.0

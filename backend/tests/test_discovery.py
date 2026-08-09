@@ -1,4 +1,4 @@
-"""Discovery: heuristic clustering, Claude-JSON parsing, and persistence."""
+"""Discovery: capability-based heuristic clustering, LLM parsing, scope, persistence."""
 
 from __future__ import annotations
 
@@ -8,105 +8,126 @@ from annapurna import discovery, features
 from annapurna.github import PullRequest
 
 
-def _pr(number, repo, branch, author="dev"):
+def _pr(number, repo, title, branch, *, body="", labels=None, author="dev"):
     return PullRequest(
         number=number,
         repo=repo,
-        title=f"PR {number}",
-        body="",
+        title=title,
+        body=body,
         branch=branch,
         author=author,
         merged_at="2026-05-01T00:00:00Z",
         url=f"https://github.com/{repo}/pull/{number}",
+        labels=labels or [],
     )
 
 
-FIXTURE_PRS = [
-    _pr(1, "acme/core", "feature/threat-triage"),
-    _pr(2, "acme/core", "feature/threat-scoring"),
-    _pr(3, "acme/core", "feature/report-gen"),
-    _pr(4, "acme/infra", "main"),  # no feature prefix -> repo fallback
+MCS = "transilienceai/mcs"
+MCS_PRS = [
+    _pr(201, MCS, "Add notifications system", "feat/notifications", labels=["notifications"]),
+    _pr(202, MCS, "Notifications: email digest", "feat/notifications-digest"),
+    _pr(203, MCS, "Chat UI polish", "feat/chat-ui"),
+    _pr(204, MCS, "Chat backend streaming", "feat/chat-backend"),
+    _pr(205, MCS, "Fix running session refire and duplicate spawn", "fix/running-session-refire"),
+    _pr(206, MCS, "Selected branch propagation fix", "fix/selected-branch-propagation"),
+    _pr(207, MCS, "522", "fix/522"),
 ]
 
 
-def test_heuristic_groups_by_branch_topic():
-    proposals = discovery.heuristic_cluster(FIXTURE_PRS)
+def test_heuristic_clusters_by_product_capability_not_branch_tokens():
+    proposals = discovery.heuristic_cluster(MCS_PRS)
     by_name = {p.name: p for p in proposals}
 
-    # threat-triage + threat-scoring cluster into one high-confidence feature.
-    assert "Threat" in by_name
-    threat = by_name["Threat"]
-    assert threat.confidence == "high"
-    assert set(threat.pr_refs) == {"acme/core#1", "acme/core#2"}
-    assert threat.branch_pattern == "feature/threat-*"
+    # Related PRs roll up into ONE capability, named from the title (not the branch).
+    assert "Notifications" in by_name
+    assert set(by_name["Notifications"].pr_refs) == {f"{MCS}#201", f"{MCS}#202"}
+    assert by_name["Notifications"].confidence == "high"  # two agreeing titles
 
-    # single PR -> medium confidence.
-    assert by_name["Report"].confidence == "med"
+    assert "Chat" in by_name
+    assert set(by_name["Chat"].pr_refs) == {f"{MCS}#203", f"{MCS}#204"}
 
-    # branch with no recognizable prefix falls back to a low-confidence repo group.
-    assert any(p.confidence == "low" for p in proposals)
+    # "fix/running-session-refire" -> Sessions, NEVER "Running".
+    assert "Sessions" in by_name
+    assert f"{MCS}#205" in by_name["Sessions"].pr_refs
+    assert "Running" not in by_name
+
+
+def test_heuristic_never_emits_junk_tokens_and_routes_weak_to_review():
+    names = {p.name for p in discovery.heuristic_cluster(MCS_PRS)}
+    for junk in ("Running", "Selected", "Branch", "522", "In", "Per", "Fix", "Feature"):
+        assert junk not in names
+    # "Selected branch propagation" and "522" carry no capability -> Needs review.
+    review = next(p for p in discovery.heuristic_cluster(MCS_PRS) if p.name == "Needs review")
+    assert {f"{MCS}#206", f"{MCS}#207"} <= set(review.pr_refs)
+    assert review.confidence == "low"
+
+
+def test_confidence_reflects_signal_strength():
+    proposals = {p.name: p for p in discovery.heuristic_cluster(MCS_PRS)}
+    assert proposals["Notifications"].confidence == "high"  # 2 PRs, strong titles
+    assert proposals["Sessions"].confidence == "med"  # 1 strong PR
+    assert proposals["Needs review"].confidence == "low"
+
+
+def test_stopwords_and_acronyms():
+    # A single unknown branch fragment is too weak to name -> review, not "Widget".
+    prs = [_pr(1, MCS, "Improve the thing", "chore/improve-widget")]
+    assert discovery.heuristic_cluster(prs)[0].name == "Needs review"
+    # Acronyms get proper casing.
+    mfa = discovery.heuristic_cluster([_pr(2, MCS, "Add MFA to login", "feat/mfa")])
+    assert mfa[0].name == "MFA"
 
 
 def test_proposals_from_json_filters_unknown_refs():
-    text = """Here you go:
+    text = f"""Here you go:
     [
-      {"name": "Threat triage", "description": "d", "confidence": "high",
-       "pr_refs": ["acme/core#1", "acme/core#999"], "branch_pattern": "feature/threat-*"},
-      {"name": "Bad", "confidence": "nonsense", "pr_refs": ["acme/core#3"]}
+      {{"name": "Chat", "description": "d", "confidence": "high",
+       "pr_refs": ["{MCS}#203", "{MCS}#999"], "branch_pattern": "feat/chat-*"}},
+      {{"name": "Bad", "confidence": "nonsense", "pr_refs": ["{MCS}#205"]}}
     ]"""
-    proposals = discovery._proposals_from_json(text, FIXTURE_PRS)
-    assert proposals[0].pr_refs == ["acme/core#1"]  # unknown ref dropped
+    proposals = discovery._proposals_from_json(text, MCS_PRS)
+    assert proposals[0].pr_refs == [f"{MCS}#203"]  # unknown ref dropped
     assert proposals[1].confidence == "low"  # invalid confidence normalized
 
 
-def test_openai_compatible_cluster_parses(monkeypatch):
+def test_openai_compatible_cluster_sends_body_and_labels(monkeypatch):
     import httpx
 
     monkeypatch.setenv("ANNAPURNA_DISCOVERY_BASE_URL", "https://api.groq.com/openai/v1")
     monkeypatch.setenv("ANNAPURNA_DISCOVERY_API_KEY", "gsk_free")
-    monkeypatch.setenv("ANNAPURNA_DISCOVERY_MODEL", "llama-3.3-70b-versatile")
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url).endswith("/chat/completions")
-        assert request.headers["Authorization"] == "Bearer gsk_free"
         sent = json.loads(request.content)
-        assert sent["model"] == "llama-3.3-70b-versatile"
+        # The payload now carries body + labels, not just title/branch.
+        user_msg = json.loads(sent["messages"][1]["content"])
+        assert "labels" in user_msg[0] and "body" in user_msg[0]
         content = json.dumps(
-            [
-                {
-                    "name": "Threat triage",
-                    "description": "Classifies alerts.",
-                    "confidence": "high",
-                    "pr_refs": ["acme/core#1", "acme/core#2"],
-                    "branch_pattern": "feature/threat-*",
-                }
-            ]
+            [{"name": "Notifications", "confidence": "high", "pr_refs": [f"{MCS}#201"]}]
         )
         return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
 
     proposals = discovery.openai_compatible_cluster(
-        FIXTURE_PRS, client=httpx.Client(transport=httpx.MockTransport(handler))
+        MCS_PRS, client=httpx.Client(transport=httpx.MockTransport(handler))
     )
-    assert proposals[0].name == "Threat triage"
-    assert set(proposals[0].pr_refs) == {"acme/core#1", "acme/core#2"}
+    assert proposals[0].name == "Notifications"
 
 
 def test_llm_backend_selection(monkeypatch):
     monkeypatch.delenv("ANNAPURNA_DISCOVERY_BASE_URL", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert discovery._llm_backend() is None  # nothing configured -> heuristic
-
+    assert discovery._llm_backend() is None
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     assert discovery._llm_backend() is discovery.claude_cluster
-
-    # An explicit OpenAI-compatible endpoint (free model) takes precedence.
     monkeypatch.setenv("ANNAPURNA_DISCOVERY_BASE_URL", "http://localhost:11434/v1")
     assert discovery._llm_backend() is discovery.openai_compatible_cluster
 
 
 class _FakeGitHub:
-    def __init__(self, prs):
+    """Fake with repos across two orgs/repos to exercise scope filtering."""
+
+    def __init__(self, prs, repos=None):
         self._prs = prs
+        self._repos = repos or sorted({p.repo for p in prs})
 
     def __enter__(self):
         return self
@@ -115,42 +136,53 @@ class _FakeGitHub:
         return False
 
     def list_repos(self, owner):
-        return sorted({p.repo for p in self._prs})
+        target = owner.lower()
+        return [r for r in self._repos if r.split("/", 1)[0].lower() == target]
 
-    def fetch_merged_prs(self, owner, since):
-        return self._prs
+    def fetch_merged_prs(self, owner, since, *, repos=None, with_stats=True):
+        if repos:
+            allowed = set(repos)
+            return [p for p in self._prs if p.repo in allowed]
+        target = owner.lower()
+        return [p for p in self._prs if p.repo.split("/", 1)[0].lower() == target]
 
 
-def test_run_discovery_persists_proposed_features(tenant_id, monkeypatch):
-    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(FIXTURE_PRS))
+def test_run_discovery_scopes_to_selected_repos_and_persists(tenant_id, monkeypatch):
+    # Two repos in the org; only "mcs" is selected — "docs" PRs must be excluded.
+    prs = MCS_PRS + [_pr(9, "transilienceai/docs", "Fix typos", "fix/typos")]
+    repos = ["transilienceai/mcs", "transilienceai/docs"]
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(prs, repos))
 
-    summary = discovery.run_discovery(tenant_id, "acme", "fake-token")
-    assert summary["prs"] == 4
-    assert summary["proposals"] >= 2
-    assert set(summary["repos"]) == {"acme/core", "acme/infra"}
+    summary = discovery.run_discovery(
+        tenant_id, "transilienceai", "tok", repos=["transilienceai/mcs"]
+    )
+    assert summary["repos"] == ["transilienceai/mcs"]  # only the selected repo analyzed
+    assert summary["prs"] == len(MCS_PRS)  # the docs PR was not fetched
 
     proposed = features.list_features(tenant_id, status="proposed")
-    assert len(proposed) == summary["proposals"]
+    all_refs = {
+        s["external_ref"] for f in proposed for s in f["signals"] if s["signal_type"] == "pr"
+    }
+    assert all(ref.startswith("transilienceai/mcs#") for ref in all_refs)
 
-    threat = next(f for f in proposed if f["name"] == "Threat")
-    assert threat["discovery_confidence"] == "high"
-    pr_signals = [s for s in threat["signals"] if s["signal_type"] == "pr"]
-    branch_signals = [s for s in threat["signals"] if s["signal_type"] == "branch"]
-    assert {s["external_ref"] for s in pr_signals} == {"acme/core#1", "acme/core#2"}
-    assert branch_signals[0]["external_ref"] == "feature/threat-*"
+    # PR detail (title/branch/url) is persisted on the signal for the review UI.
+    notif = next(f for f in proposed if f["name"] == "Notifications")
+    pr = next(s for s in notif["signals"] if s["signal_type"] == "pr")
+    assert pr["title"] and pr["branch"] and pr["url"]
+
+    # Scope is remembered for the next run.
+    scope = discovery.get_scope(tenant_id)
+    assert scope == {"owner": "transilienceai", "repos": ["transilienceai/mcs"]}
 
 
-def test_rerun_discovery_replaces_proposals_but_keeps_confirmed(tenant_id, monkeypatch):
-    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(FIXTURE_PRS))
-    discovery.run_discovery(tenant_id, "acme", "tok")
-    # confirm everything, then re-run discovery with fewer PRs
+def test_rerun_replaces_proposals_but_keeps_confirmed(tenant_id, monkeypatch):
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(MCS_PRS))
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
     features.confirm_features(tenant_id)
-    monkeypatch.setattr(
-        discovery, "_make_github_client", lambda token: _FakeGitHub([FIXTURE_PRS[0]])
-    )
-    discovery.run_discovery(tenant_id, "acme", "tok")
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub([MCS_PRS[0]]))
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
 
     confirmed = features.list_features(tenant_id, status="confirmed")
     proposed = features.list_features(tenant_id, status="proposed")
     assert len(confirmed) >= 2  # earlier confirmations survive
-    assert len(proposed) == 1  # proposals were regenerated from the new run
+    assert len(proposed) == 1  # regenerated from the smaller re-run

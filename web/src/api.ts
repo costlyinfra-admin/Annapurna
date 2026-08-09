@@ -85,6 +85,9 @@ export interface FeatureSignal {
   signal_type: string;
   external_ref: string;
   confidence: string | null;
+  title?: string | null; // PR title (source evidence for the review UI)
+  branch?: string | null; // PR head branch
+  url?: string | null; // GitHub PR URL
 }
 
 export interface Feature {
@@ -99,9 +102,21 @@ export interface Feature {
 export interface DiscoverySummary {
   owner: string;
   prs: number;
-  repos: string[];
+  repos: string[]; // repos actually analyzed (the selected scope)
+  repos_with_prs: string[];
+  prs_by_repo: Record<string, number>;
   repos_scanned: number;
   proposals: number;
+}
+
+export interface RepoList {
+  owner: string;
+  repos: string[];
+}
+
+export interface DiscoveryScope {
+  owner: string | null;
+  repos: string[];
 }
 
 export interface SplitGroup {
@@ -388,10 +403,15 @@ export const api = {
     }),
 
   // ---- Discovery + features (wizard step 2) ----
-  runDiscovery: (owner: string, days = 90) =>
+  discoveryRepos: (owner: string) =>
+    request<RepoList>(`/discovery/repos?owner=${encodeURIComponent(owner)}`),
+
+  discoveryScope: () => request<DiscoveryScope>("/discovery/scope"),
+
+  runDiscovery: (owner: string, repos: string[] = [], days = 90) =>
     request<DiscoverySummary>("/discovery/run", {
       method: "POST",
-      body: JSON.stringify({ owner, days }),
+      body: JSON.stringify({ owner, repos, days }),
     }),
 
   listFeatures: (status?: string) =>

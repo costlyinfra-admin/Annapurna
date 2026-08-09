@@ -8,7 +8,7 @@ customer's own personal access token, supplied per tenant (stored encrypted).
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import httpx
@@ -38,6 +38,7 @@ class PullRequest:
     author: str
     merged_at: str  # ISO-8601
     url: str
+    labels: list[str] = field(default_factory=list)  # PR labels (strong capability signal)
     commits: Optional[int] = None  # filled from the PR detail endpoint (best-effort)
     changed_files: Optional[int] = None
 
@@ -165,9 +166,18 @@ class GitHubClient:
             page += 1
 
     def fetch_merged_prs(
-        self, owner: str, since: dt.date, *, with_stats: bool = True
+        self,
+        owner: str,
+        since: dt.date,
+        *,
+        repos: Optional[list[str]] = None,
+        with_stats: bool = True,
     ) -> list[PullRequest]:
-        """All PRs across the owner's repos merged on/after ``since``.
+        """PRs merged on/after ``since`` across the owner's repos.
+
+        Pass ``repos`` (full "owner/name" names) to fetch ONLY those repositories —
+        the caller-selected scope — instead of every repo in the org. Names are
+        validated to belong to ``owner`` so a caller can't reach outside it.
 
         When ``with_stats`` is set, each PR's commit and changed-file counts are
         fetched from its detail endpoint (one extra GET per PR; best-effort, so a
@@ -176,8 +186,13 @@ class GitHubClient:
         # Unauthenticated requests have a tight rate limit (60/hr) — skip the
         # per-PR stat calls to conserve it.
         with_stats = with_stats and bool(self._token)
+        if repos:
+            target = owner.lower()
+            selected = [r for r in repos if r.split("/", 1)[0].lower() == target]
+        else:
+            selected = self.list_repos(owner)
         prs: list[PullRequest] = []
-        for repo in self.list_repos(owner):
+        for repo in selected:
             prs.extend(self._fetch_repo_merged_prs(repo, since, with_stats=with_stats))
         return prs
 
@@ -276,4 +291,5 @@ def _to_pull_request(repo: str, pr: dict) -> PullRequest:
         author=(pr.get("user") or {}).get("login") or "",
         merged_at=pr["merged_at"],
         url=pr.get("html_url") or "",
+        labels=[label["name"] for label in (pr.get("labels") or []) if label.get("name")],
     )

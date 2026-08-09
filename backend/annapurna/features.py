@@ -27,14 +27,22 @@ MANUAL_SIGNAL_TYPES = {"api_key", "service", "repo", "branch"}
 def _signals(conn: psycopg.Connection, feature_id: str) -> list[dict]:
     rows = conn.execute(
         """
-        SELECT id, signal_type, external_ref, confidence
+        SELECT id, signal_type, external_ref, confidence, title, branch, url
         FROM feature_signal WHERE feature_id = %s
         ORDER BY signal_type, external_ref
         """,
         (feature_id,),
     ).fetchall()
     return [
-        {"id": str(r[0]), "signal_type": r[1], "external_ref": r[2], "confidence": r[3]}
+        {
+            "id": str(r[0]),
+            "signal_type": r[1],
+            "external_ref": r[2],
+            "confidence": r[3],
+            "title": r[4],
+            "branch": r[5],
+            "url": r[6],
+        }
         for r in rows
     ]
 

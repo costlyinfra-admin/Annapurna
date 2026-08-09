@@ -9,6 +9,8 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Feature } from "../../api";
 
+const NEEDS_REVIEW = "Needs review";
+
 function ConfidenceBadge({ level }: { level: string | null }) {
   const l = level ?? "low";
   return <span className={`badge conf-${l}`}>{l} confidence</span>;
@@ -22,17 +24,58 @@ export function ReviewStep() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  // Repo selector: the org's repositories, and which the user picked to analyze.
+  const [repoList, setRepoList] = useState<string[] | null>(null);
+  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
+  const [loadingRepos, setLoadingRepos] = useState(false);
+
   const reload = async () => setFeatures(await api.listFeatures("proposed"));
 
   useEffect(() => {
     reload().catch(() => setFeatures([]));
+    // Prefill the last-used org + repo selection so re-runs are one click.
+    api
+      .discoveryScope()
+      .then((scope) => {
+        if (scope.owner) setOwner(scope.owner);
+        if (scope.repos.length) setSelectedRepos(new Set(scope.repos));
+      })
+      .catch(() => {});
   }, []);
+
+  async function loadRepos() {
+    const who = owner.trim();
+    if (!who) return;
+    setLoadingRepos(true);
+    setError(null);
+    try {
+      const { repos } = await api.discoveryRepos(who);
+      setRepoList(repos);
+      // Keep any previously-saved selection that still exists in this org.
+      setSelectedRepos((prev) => new Set([...prev].filter((r) => repos.includes(r))));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not list repositories.");
+      setRepoList(null);
+    } finally {
+      setLoadingRepos(false);
+    }
+  }
+
+  function toggleRepo(repo: string) {
+    setSelectedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(repo)) next.delete(repo);
+      else next.add(repo);
+      return next;
+    });
+  }
 
   async function runDiscovery() {
     setBusy(true);
     setError(null);
     try {
-      const s = await api.runDiscovery(owner.trim());
+      const scope = [...selectedRepos];
+      const s = await api.runDiscovery(owner.trim(), scope);
       const who = owner.trim();
       if (s.repos_scanned === 0) {
         setSummary(
@@ -41,15 +84,19 @@ export function ReviewStep() {
             `the org/user login.`,
         );
       } else if (s.prs === 0) {
-        const n = s.repos_scanned;
+        const n = s.repos.length || s.repos_scanned;
         setSummary(
-          `Found ${n} repositor${n === 1 ? "y" : "ies"} for "${who}", but no merged PRs in the ` +
-            `last 90 days — discovery needs merged pull requests.`,
+          `Analyzed ${n} repositor${n === 1 ? "y" : "ies"} for "${who}", but found no merged PRs ` +
+            `in the last 90 days — discovery needs merged pull requests.`,
         );
       } else {
+        const label =
+          s.repos.length === 1
+            ? s.repos[0]
+            : `${s.repos.length} repositories${scope.length ? " (selected)" : ""}`;
         setSummary(
-          `Analyzed ${s.prs} merged PRs across ${s.repos.length} repositories → ` +
-            `${s.proposals} proposed features.`,
+          `Repository: ${label} · Analyzed: ${s.prs} merged PRs · ` +
+            `Proposed: ${s.proposals} feature${s.proposals === 1 ? "" : "s"}.`,
         );
       }
       setSelected(new Set());
@@ -76,25 +123,63 @@ export function ReviewStep() {
     await reload();
   }
 
+  const scopeCount = selectedRepos.size;
+
   return (
     <div>
       <h2>Review auto-discovered features</h2>
       <p className="muted">
-        Annapurna analyzes your last 90 days of merged pull requests and proposes features. Curate
-        them below, then confirm.
+        Annapurna analyzes your last 90 days of merged pull requests and proposes features. Pick the
+        repositories to analyze, curate the proposals below, then confirm.
       </p>
 
       <div className="discovery-bar">
         <input
           placeholder="GitHub organization (e.g. acme)"
           value={owner}
-          onChange={(e) => setOwner(e.target.value)}
+          onChange={(e) => {
+            setOwner(e.target.value);
+            setRepoList(null); // org changed — force a fresh repo list
+          }}
           aria-label="GitHub organization"
         />
+        <button className="secondary" onClick={loadRepos} disabled={loadingRepos || !owner.trim()}>
+          {loadingRepos ? "Loading…" : "List repositories"}
+        </button>
         <button onClick={runDiscovery} disabled={busy || !owner.trim()}>
-          {busy ? "Analyzing…" : "Analyze last 90 days"}
+          {busy
+            ? "Analyzing…"
+            : scopeCount
+              ? `Analyze ${scopeCount} selected`
+              : "Analyze last 90 days"}
         </button>
       </div>
+
+      {repoList && (
+        <div className="repo-selector">
+          <p className="muted repo-selector-hint">
+            {repoList.length === 0
+              ? "No repositories accessible for this org/token."
+              : `Select repositories to analyze (${scopeCount || "all"} selected). Leave all ` +
+                `unchecked to analyze the whole org.`}
+          </p>
+          <ul className="repo-list">
+            {repoList.map((repo) => (
+              <li key={repo}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={selectedRepos.has(repo)}
+                    onChange={() => toggleRepo(repo)}
+                  />
+                  {repo}
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <p className="muted hint-inline">
         No token needed for <strong>public</strong> organizations. Connect GitHub above for private
         repos and higher rate limits.
@@ -189,8 +274,10 @@ function FeatureCard({
     await onChanged();
   }
 
+  const isReview = feature.name === NEEDS_REVIEW;
+
   return (
-    <li className="feature-card">
+    <li className={`feature-card${isReview ? " needs-review" : ""}`}>
       <div className="feature-head">
         <input
           type="checkbox"
@@ -213,7 +300,11 @@ function FeatureCard({
         ) : (
           <>
             <span className="feature-name">{feature.name}</span>
-            <ConfidenceBadge level={feature.discovery_confidence} />
+            {isReview ? (
+              <span className="badge conf-review">needs review</span>
+            ) : (
+              <ConfidenceBadge level={feature.discovery_confidence} />
+            )}
             <span className="feature-actions">
               <button className="link" onClick={() => setEditing(true)}>
                 Rename
@@ -238,10 +329,18 @@ function FeatureCard({
       </div>
 
       {branchSignal && <p className="branch-pattern">branch: {branchSignal.external_ref}</p>}
-      <ul className="pr-chips">
+      <ul className="pr-evidence">
         {prSignals.map((s) => (
-          <li key={s.id} className="pr-chip">
-            {s.external_ref}
+          <li key={s.id} className="pr-row">
+            {s.url ? (
+              <a className="pr-ref" href={s.url} target="_blank" rel="noreferrer">
+                {s.external_ref}
+              </a>
+            ) : (
+              <span className="pr-ref">{s.external_ref}</span>
+            )}
+            {s.title && <span className="pr-title">{s.title}</span>}
+            {s.branch && <span className="pr-branch">{s.branch}</span>}
           </li>
         ))}
       </ul>

@@ -7,8 +7,8 @@ from annapurna import discovery, features
 from annapurna.github import PullRequest
 
 
-def _pr(number, repo, branch):
-    return PullRequest(number, repo, f"PR {number}", "", branch, "dev", "2026-05-01T00:00:00Z", "")
+def _pr(number, repo, title, branch):
+    return PullRequest(number, repo, title, "", branch, "dev", "2026-05-01T00:00:00Z", "")
 
 
 class _FakeGitHub:
@@ -32,9 +32,9 @@ class _FakeGitHub:
 def discovered(tenant_id, monkeypatch):
     """Run heuristic discovery so there are proposed features to edit."""
     prs = [
-        _pr(1, "acme/core", "feature/threat-triage"),
-        _pr(2, "acme/core", "feature/threat-scoring"),
-        _pr(3, "acme/core", "feature/report-gen"),
+        _pr(1, "acme/core", "Threat triage automation", "feature/threat-triage"),
+        _pr(2, "acme/core", "Threat scoring model", "feature/threat-scoring"),
+        _pr(3, "acme/core", "Report generator", "feature/report-gen"),
     ]
     monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(prs))
     discovery.run_discovery(tenant_id, "acme", "tok")
@@ -92,7 +92,7 @@ def test_split_feature(discovered):
 def test_merge_features(discovered):
     all_feats = features.list_features(discovered, status="proposed")
     threat = next(f for f in all_feats if f["name"] == "Threat")
-    report = next(f for f in all_feats if f["name"] == "Report")
+    report = next(f for f in all_feats if f["name"] == "Reports")
     total_signals = len(threat["signals"]) + len(report["signals"])
 
     merged = features.merge_features(discovered, [threat["id"], report["id"]], name="Combined")

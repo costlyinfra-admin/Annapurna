@@ -13,16 +13,14 @@ from annapurna.github import PullRequest
 PERIOD = dt.date(2026, 5, 1)
 
 
-def _pr(number, branch, author):
-    return PullRequest(
-        number, "acme/core", f"PR {number}", "", branch, author, "2026-05-01T00:00:00Z", ""
-    )
+def _pr(number, title, branch, author):
+    return PullRequest(number, "acme/core", title, "", branch, author, "2026-05-01T00:00:00Z", "")
 
 
 FIXTURE_PRS = [
-    _pr(1, "feature/threat-triage", "alice"),
-    _pr(2, "feature/threat-scoring", "alice"),
-    _pr(3, "feature/report-gen", "bob"),
+    _pr(1, "Threat triage automation", "feature/threat-triage", "alice"),
+    _pr(2, "Threat scoring model", "feature/threat-scoring", "alice"),
+    _pr(3, "Report generator", "feature/report-gen", "bob"),
 ]
 
 
@@ -97,7 +95,7 @@ def test_sync_idp_seats_allocates_to_features(discovered, monkeypatch):
     features = {f["name"]: f for f in summary["features"]}
     assert features["Threat"]["amount"] == 40.0  # alice's seat
     assert features["Threat"]["by_tool"] == {"cursor": 40.0}
-    assert features["Report"]["amount"] == 40.0  # bob's seat
+    assert features["Reports"]["amount"] == 40.0  # bob's seat
     assert summary["unattributed"] == 40.0  # the unmatched contractor's seat
     assert summary["total"] == 120.0  # 3 seats x $40
 
