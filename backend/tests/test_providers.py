@@ -39,6 +39,8 @@ def test_anthropic_parses_cost_report():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["x-api-key"] == "sk-ant-admin"
         assert request.method == "GET"  # read-only
+        # cost_report only supports workspace_id + description grouping (NOT model).
+        assert request.url.params.get_list("group_by[]") == ["workspace_id", "description"]
         return httpx.Response(
             200,
             json={
@@ -47,13 +49,13 @@ def test_anthropic_parses_cost_report():
                         "results": [
                             {
                                 "workspace_id": "ws_triage",
-                                "model": "claude-sonnet-4-6",
+                                "description": "claude-sonnet-4-6",
                                 "amount": "4200.00",
                                 "currency": "USD",
                             },
                             {
                                 "workspace_id": "ws_shared",
-                                "model": "claude-haiku-4-5",
+                                "description": "claude-haiku-4-5",
                                 "amount": "980.00",
                             },
                         ]
@@ -69,6 +71,7 @@ def test_anthropic_parses_cost_report():
     by_ws = {r.project: r for r in records}
     assert by_ws["ws_triage"].amount == Decimal("4200.00")
     assert by_ws["ws_triage"].period == dt.date(2026, 5, 1)
+    # The description line-item survives as the model label.
     assert by_ws["ws_shared"].model == "claude-haiku-4-5"
 
 

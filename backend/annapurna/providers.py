@@ -138,7 +138,9 @@ class AnthropicCostClient(_BaseCostClient):
             params={
                 "starting_at": start.isoformat(),
                 "ending_at": end.isoformat(),
-                "group_by[]": ["workspace_id", "model"],
+                # cost_report only groups by workspace_id + description (NOT model);
+                # the description line-item carries the model/token-type label.
+                "group_by[]": ["workspace_id", "description"],
             },
             headers={
                 "x-api-key": self._key,
@@ -246,7 +248,9 @@ def _parse_anthropic(payload: dict, period: dt.date):
                 currency=item.get("currency", "USD"),
                 api_key_ref=item.get("api_key_id"),
                 project=item.get("workspace_id"),
-                model=item.get("model"),
+                # cost_report returns "description" (e.g. "Claude Sonnet 4.5 · input");
+                # fall back to it so the line-item label survives as the model.
+                model=item.get("model") or item.get("description"),
                 tokens_in=input_tokens,
                 tokens_out=_int_or_none(item.get("output_tokens")),
                 cached_tokens_in=cache_read,
