@@ -45,6 +45,26 @@ class CostRecord:
     cached_tokens_in: Optional[int] = None
 
 
+@dataclass
+class UsageRecord:
+    """A detailed usage row from a provider's Usage Report API (tokens, not dollars).
+
+    Carries the identity dimensions the Cost Report lacks — ``workspace_id`` and
+    ``api_key_id`` — so spend can be attributed to a workspace/key and classified.
+    Dollars are NOT taken from here: the Cost Report stays the billing authority
+    and usage is priced only to weight the proportional split (see inference.py).
+    """
+
+    workspace_id: Optional[str] = None
+    api_key_id: Optional[str] = None
+    model: Optional[str] = None
+    service_tier: Optional[str] = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cached_tokens_in: int = 0
+    request_count: int = 0
+
+
 class ProviderError(Exception):
     def __init__(self, message: str, status: Optional[int] = None):
         super().__init__(message)
@@ -126,9 +146,22 @@ class _BaseCostClient:
 
 
 class AnthropicCostClient(_BaseCostClient):
-    """Anthropic Admin Usage & Cost API. Auth via x-api-key admin key."""
+    """Anthropic Admin Cost + Usage + org-metadata API. Auth via x-api-key admin key.
+
+    Two read paths, kept distinct:
+      * ``fetch_costs`` — the Cost Report (authoritative billed dollars, grouped by
+        workspace + description). The billing source of truth.
+      * ``fetch_usage`` — the Messages Usage Report (tokens, grouped by workspace +
+        api_key + model + tier). Provides the identity dimensions the cost report
+        lacks; used only to split the authoritative dollars, never to compute them.
+    Plus two org-metadata lookups (``fetch_workspaces``, ``fetch_api_keys``) that
+    resolve the ids in usage rows to human names.
+    """
 
     base_url = "https://api.anthropic.com"
+
+    def _headers(self) -> dict:
+        return {"x-api-key": self._key, "anthropic-version": "2023-06-01"}
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
@@ -142,12 +175,73 @@ class AnthropicCostClient(_BaseCostClient):
                 # the description line-item carries the model/token-type label.
                 "group_by[]": ["workspace_id", "description"],
             },
-            headers={
-                "x-api-key": self._key,
-                "anthropic-version": "2023-06-01",
-            },
+            headers=self._headers(),
         )
         return aggregate(list(_parse_anthropic(resp.json(), start)))
+
+    def fetch_usage(self, period: dt.date) -> list[UsageRecord]:
+        """Detailed token usage for the month, grouped by workspace/key/model/tier.
+
+        Paginated via the ``page`` cursor. Returns per-bucket rows (typically daily);
+        the caller aggregates. Dollars are intentionally absent — this is attribution
+        detail, not billing.
+        """
+        start = month_start(period)
+        end = next_month(start)
+        out: list[UsageRecord] = []
+        page: Optional[str] = None
+        while True:
+            params: dict = {
+                "starting_at": start.isoformat(),
+                "ending_at": end.isoformat(),
+                "bucket_width": "1d",
+                "group_by[]": ["workspace_id", "api_key_id", "model", "service_tier"],
+                "limit": 31,  # daily buckets in a month
+            }
+            if page:
+                params["page"] = page
+            data = self._get(
+                "/v1/organizations/usage_report/messages", params, self._headers()
+            ).json()
+            out.extend(_parse_anthropic_usage(data))
+            if data.get("has_more") and data.get("next_page"):
+                page = data["next_page"]
+                continue
+            return out
+
+    def fetch_workspaces(self) -> dict[str, str]:
+        """Resolve ``workspace_id -> workspace_name`` for the org (paginated)."""
+        out: dict[str, str] = {}
+        for ws in self._paginate_admin("/v1/organizations/workspaces"):
+            wid = ws.get("id")
+            if wid:
+                out[wid] = ws.get("name") or wid
+        return out
+
+    def fetch_api_keys(self) -> dict[str, dict]:
+        """Resolve ``api_key_id -> {name, workspace_id}`` for the org (paginated)."""
+        out: dict[str, dict] = {}
+        for key in self._paginate_admin("/v1/organizations/api_keys"):
+            kid = key.get("id")
+            if kid:
+                out[kid] = {"name": key.get("name"), "workspace_id": key.get("workspace_id")}
+        return out
+
+    def _paginate_admin(self, path: str) -> list[dict]:
+        """Walk an Admin list endpoint via the ``after_id``/``has_more`` cursor."""
+        items: list[dict] = []
+        after: Optional[str] = None
+        while True:
+            params: dict = {"limit": 100}
+            if after:
+                params["after_id"] = after
+            data = self._get(path, params, self._headers()).json()
+            batch = data.get("data") or []
+            items.extend(b for b in batch if isinstance(b, dict))
+            if data.get("has_more") and data.get("last_id"):
+                after = data["last_id"]
+                continue
+            return items
 
 
 class OpenAICostClient(_BaseCostClient):
@@ -254,6 +348,34 @@ def _parse_anthropic(payload: dict, period: dt.date):
                 tokens_in=input_tokens,
                 tokens_out=_int_or_none(item.get("output_tokens")),
                 cached_tokens_in=cache_read,
+            )
+
+
+def _parse_anthropic_usage(payload: dict):
+    """Yield UsageRecords from a Messages Usage Report response (tolerant parsing)."""
+    for bucket in payload.get("data", []):
+        for item in bucket.get("results", []) or bucket.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            # Total input = uncached + cache-creation + cache-read; some payloads
+            # instead give a single input_tokens. cache_read is tracked separately.
+            cache_read = _int_or_none(item.get("cache_read_input_tokens")) or 0
+            input_tokens = _int_or_none(item.get("input_tokens"))
+            if input_tokens is None:
+                uncached = _int_or_none(item.get("uncached_input_tokens")) or 0
+                creation = _int_or_none(item.get("cache_creation_input_tokens")) or 0
+                input_tokens = uncached + creation + cache_read
+            yield UsageRecord(
+                workspace_id=item.get("workspace_id"),
+                api_key_id=item.get("api_key_id"),
+                model=item.get("model"),
+                service_tier=item.get("service_tier"),
+                tokens_in=input_tokens,
+                tokens_out=_int_or_none(item.get("output_tokens")) or 0,
+                cached_tokens_in=cache_read,
+                request_count=_int_or_none(item.get("request_count"))
+                or _int_or_none(item.get("num_requests"))
+                or 0,
             )
 
 

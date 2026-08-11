@@ -456,3 +456,135 @@ def test_groq_prices_tokens_via_hosted_pattern():
     client._client = httpx.Client(transport=httpx.MockTransport(handler))
     records = client.fetch_costs(dt.date(2026, 5, 1))
     assert records[0].amount == Decimal("0.1300")  # 0.05 + 0.08, computed by us
+
+
+# ---------------------------------------------------------------------------
+# Anthropic Usage Report + org metadata (workspace/api-key identity).
+# ---------------------------------------------------------------------------
+def test_anthropic_usage_report_groups_and_paginates():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        assert request.headers["x-api-key"] == "sk-ant-admin"
+        assert request.method == "GET"  # read-only
+        assert "/v1/organizations/usage_report/messages" in str(request.url)
+        groups = request.url.params.get_list("group_by[]")
+        assert groups == ["workspace_id", "api_key_id", "model", "service_tier"]
+        if request.url.params.get("page") is None:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "results": [
+                                {
+                                    "workspace_id": "wrkspc_mcs",
+                                    "api_key_id": "apikey_a",
+                                    "model": "claude-sonnet-4-6",
+                                    "service_tier": "standard",
+                                    "uncached_input_tokens": 900,
+                                    "cache_read_input_tokens": 100,
+                                    "output_tokens": 500,
+                                    "request_count": 7,
+                                }
+                            ]
+                        }
+                    ],
+                    "has_more": True,
+                    "next_page": "cursor2",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "results": [
+                            {
+                                "workspace_id": "wrkspc_sos",
+                                "api_key_id": "apikey_b",
+                                "model": "claude-haiku-4-5",
+                                "input_tokens": 200,
+                                "output_tokens": 50,
+                            }
+                        ]
+                    }
+                ],
+                "has_more": False,
+                "next_page": None,
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    usage = client.fetch_usage(dt.date(2026, 5, 10))
+    assert len(calls) == 2  # followed pagination
+    first = next(u for u in usage if u.api_key_id == "apikey_a")
+    assert first.workspace_id == "wrkspc_mcs"
+    assert first.tokens_in == 1000  # uncached 900 + cache_read 100
+    assert first.cached_tokens_in == 100
+    assert first.tokens_out == 500
+    assert first.request_count == 7
+    assert first.service_tier == "standard"
+    second = next(u for u in usage if u.api_key_id == "apikey_b")
+    assert second.tokens_in == 200  # single input_tokens field honored
+
+
+def test_anthropic_fetch_workspaces_resolves_names_and_paginates():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "/v1/organizations/workspaces" in str(request.url)
+        if request.url.params.get("after_id") is None:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [{"id": "wrkspc_mcs", "name": "mcs-dev"}],
+                    "has_more": True,
+                    "last_id": "wrkspc_mcs",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "wrkspc_sos", "name": "sos-dev"},
+                    {"id": "wrkspc_ti", "name": "threatintel-dev"},
+                ],
+                "has_more": False,
+                "last_id": "wrkspc_ti",
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    workspaces = client.fetch_workspaces()
+    assert workspaces == {
+        "wrkspc_mcs": "mcs-dev",
+        "wrkspc_sos": "sos-dev",
+        "wrkspc_ti": "threatintel-dev",
+    }
+
+
+def test_anthropic_fetch_api_keys_resolves_names_and_workspace():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "/v1/organizations/api_keys" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "apikey_a", "name": "service-a-prod", "workspace_id": "wrkspc_mcs"},
+                    {"id": "apikey_b", "name": "experimental", "workspace_id": "wrkspc_mcs"},
+                ],
+                "has_more": False,
+                "last_id": "apikey_b",
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    keys = client.fetch_api_keys()
+    assert keys["apikey_a"] == {"name": "service-a-prod", "workspace_id": "wrkspc_mcs"}
+    assert keys["apikey_b"]["name"] == "experimental"

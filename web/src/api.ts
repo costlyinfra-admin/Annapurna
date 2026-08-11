@@ -124,6 +124,31 @@ export interface SplitGroup {
   signal_ids: string[];
 }
 
+// ---- Anthropic workspace / API-key / environment breakdown ----
+export interface AnthropicKeyRow {
+  workspace_id: string | null;
+  workspace_name: string | null;
+  api_key_id: string | null;
+  api_key_name: string | null;
+  environment: string; // production | development | internal | unclassified
+  amount: number;
+}
+
+export interface AnthropicWorkspaceRow {
+  workspace_id: string | null;
+  workspace_name: string | null;
+  total: number;
+  by_environment: Record<string, number>;
+}
+
+export interface AnthropicBreakdown {
+  period: string;
+  total: number;
+  by_environment: Record<string, number>;
+  by_workspace: AnthropicWorkspaceRow[];
+  keys: AnthropicKeyRow[];
+}
+
 export interface DashboardRow {
   feature_id: string;
   name: string;
@@ -512,6 +537,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ provider, period }),
     }),
+
+  anthropicBreakdown: (period?: string) =>
+    request<AnthropicBreakdown>(
+      `/inference/anthropic/breakdown${period ? `?period=${period}` : ""}`,
+    ),
 
   importBuildCost: (csv: string, tool?: string, period?: string) =>
     request<{ total: number }>("/build/import", {

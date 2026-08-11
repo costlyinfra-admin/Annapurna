@@ -2310,3 +2310,153 @@ a.exec-value:hover {
   max-width: 420px;
   overflow-wrap: anywhere;
 }
+
+/* ---------- Anthropic environment breakdown (Cost Sources) ---------- */
+.anthropic-breakdown {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1.2rem;
+}
+
+.env-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.env-tile {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.env-tile-prod {
+  border-color: var(--good);
+  background: var(--good-bg);
+}
+
+.env-tile-total {
+  background: var(--bg);
+}
+
+.env-tile-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 550;
+}
+
+.env-tile-amount {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.workspace-breakdown,
+.key-table-wrap {
+  margin-top: 1.3rem;
+}
+
+.workspace-breakdown h4,
+.key-table-wrap h4 {
+  font-size: 0.9rem;
+  margin: 0 0 0.6rem;
+}
+
+.workspace-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.workspace-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  min-width: 9rem;
+}
+
+.workspace-envs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.workspace-env {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.workspace-total {
+  font-weight: 700;
+  margin-left: auto;
+}
+
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: #eef1f6;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.env-badge.env-production {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.key-table-wrap {
+  overflow-x: auto;
+}
+
+.key-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.key-table th,
+.key-table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.key-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.key-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.key-table .mono {
+  font-family: var(--mono);
+}

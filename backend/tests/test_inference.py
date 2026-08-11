@@ -5,8 +5,9 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+import pytest
 from annapurna import features, inference
-from annapurna.providers import CostRecord
+from annapurna.providers import CostRecord, UsageRecord
 
 PERIOD = dt.date(2026, 5, 1)
 
@@ -95,3 +96,125 @@ def test_unmapped_tenant_all_unattributed(tenant_id):
     assert summary["features"] == []
     assert summary["unattributed"] == 800.0
     assert summary["total"] == 800.0
+
+
+# ---------------------------------------------------------------------------
+# Anthropic detailed path: workspace/API-key identity, environment, reconcile.
+# ---------------------------------------------------------------------------
+def _usage(ws, key, model, tin, tout, *, tier=None, cached=0, reqs=0):
+    return UsageRecord(
+        workspace_id=ws,
+        api_key_id=key,
+        model=model,
+        service_tier=tier,
+        tokens_in=tin,
+        tokens_out=tout,
+        cached_tokens_in=cached,
+        request_count=reqs,
+    )
+
+
+def _cost(ws, amount):
+    return CostRecord("anthropic", PERIOD, Decimal(str(amount)), project=ws)
+
+
+_WORKSPACES = {"ws_mcs": "mcs-dev", "ws_sos": "sos-dev"}
+_API_KEYS = {
+    "k_a": {"name": "service-a-prod", "workspace_id": "ws_mcs"},
+    "k_b": {"name": "experimental", "workspace_id": "ws_mcs"},
+    "k_c": {"name": "pentest-prod", "workspace_id": "ws_sos"},
+}
+
+
+def test_anthropic_reconciles_to_cost_report_total(tenant_id):
+    # Two workspaces; mcs has a prod + a non-prod key, sos is all prod.
+    cost = [_cost("ws_mcs", 1000), _cost("ws_sos", 200)]
+    usage = [
+        _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 1_000_000),  # priced 18
+        _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),  # priced 3
+        _usage("ws_sos", "k_c", "claude-haiku-4-5", 500_000, 100_000),
+    ]
+    summary = inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS)
+
+    # INVARIANT: persisted total == authoritative Cost Report total, to the cent.
+    assert summary["total"] == 1200.0
+    breakdown = inference.anthropic_breakdown(tenant_id, PERIOD)
+    assert breakdown["total"] == pytest.approx(1200.0, abs=0.01)
+    assert breakdown["by_environment"]["production"] + breakdown["by_environment"][
+        "unclassified"
+    ] == pytest.approx(1200.0, abs=0.01)
+    # ws_mcs $1000 split 18:3 -> prod 857.14, unclassified 142.86; ws_sos $200 all prod.
+    assert breakdown["by_environment"]["production"] == pytest.approx(1057.14, abs=0.01)
+    assert breakdown["by_environment"]["unclassified"] == pytest.approx(142.86, abs=0.01)
+
+
+def test_anthropic_key_names_and_workspaces_resolve_in_breakdown(tenant_id):
+    cost = [_cost("ws_mcs", 100)]
+    usage = [
+        _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 0),
+        _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),
+    ]
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS)
+    keys = {k["api_key_name"]: k for k in inference.anthropic_breakdown(tenant_id, PERIOD)["keys"]}
+    assert keys["service-a-prod"]["environment"] == "production"
+    assert keys["service-a-prod"]["workspace_name"] == "mcs-dev"
+    assert keys["experimental"]["environment"] == "unclassified"
+
+
+def test_anthropic_workspace_without_usage_is_unclassified_not_lost(tenant_id):
+    # Billed dollars with no usage detail must survive as unclassified, not vanish.
+    summary = inference.ingest_anthropic(
+        tenant_id, PERIOD, [_cost("ws_mcs", 500)], [], _WORKSPACES, _API_KEYS
+    )
+    assert summary["total"] == 500.0
+    breakdown = inference.anthropic_breakdown(tenant_id, PERIOD)
+    assert breakdown["total"] == pytest.approx(500.0, abs=0.01)
+    assert breakdown["by_environment"] == {"unclassified": pytest.approx(500.0, abs=0.01)}
+    # Unattributed (no feature) — reported as such.
+    assert summary["unattributed"] == 500.0
+    assert summary["production"] == 0.0
+
+
+def test_anthropic_missing_key_metadata_degrades_to_unclassified(tenant_id):
+    # Usage references a key we have no metadata for -> unclassified, no crash.
+    cost = [_cost("ws_x", 40)]
+    usage = [_usage("ws_x", "k_unknown", "claude-sonnet-4-6", 1_000_000, 0)]
+    summary = inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, {}, {})
+    assert summary["total"] == 40.0
+    breakdown = inference.anthropic_breakdown(tenant_id, PERIOD)
+    assert breakdown["by_environment"]["unclassified"] == pytest.approx(40.0, abs=0.01)
+    assert breakdown["keys"][0]["api_key_name"] is None
+    assert breakdown["keys"][0]["workspace_name"] is None
+
+
+def test_run_inference_ingest_routes_anthropic_to_detailed_path(tenant_id, monkeypatch):
+    class _FakeAnthropic:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):
+            return [_cost("ws_mcs", 1000)]
+
+        def fetch_usage(self, period):
+            return [
+                _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 0),
+                _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),
+            ]
+
+        def fetch_workspaces(self):
+            return _WORKSPACES
+
+        def fetch_api_keys(self):
+            return _API_KEYS
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeAnthropic())
+    summary = inference.run_inference_ingest(tenant_id, "anthropic", PERIOD, "admin-key")
+    assert summary["total"] == 1000.0
+    assert summary["production"] == pytest.approx(500.0, abs=0.01)  # split 1:1
+    assert summary["unclassified"] == pytest.approx(500.0, abs=0.01)
+    # Persisted rows carry explicit identity, not the old api_key_ref overload.
+    keys = inference.anthropic_breakdown(tenant_id, PERIOD)["keys"]
+    assert {k["workspace_name"] for k in keys} == {"mcs-dev"}

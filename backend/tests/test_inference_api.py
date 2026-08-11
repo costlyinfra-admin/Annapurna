@@ -40,6 +40,58 @@ def client(admin_conn, admin_conninfo, app_conninfo, monkeypatch):
     return c
 
 
+class _FakeAnthropicDetailed:
+    """A full Anthropic admin client: cost + usage + workspace/key metadata."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def fetch_costs(self, period):
+        from annapurna.providers import month_start
+
+        start = month_start(period)
+        return [CostRecord("anthropic", start, Decimal("1000"), project="ws_mcs")]
+
+    def fetch_usage(self, period):
+        from annapurna.providers import UsageRecord
+
+        return [
+            UsageRecord("ws_mcs", "k_a", "claude-sonnet-4-6", tokens_in=1_000_000, tokens_out=0),
+            UsageRecord("ws_mcs", "k_b", "claude-sonnet-4-6", tokens_in=1_000_000, tokens_out=0),
+        ]
+
+    def fetch_workspaces(self):
+        return {"ws_mcs": "mcs-dev"}
+
+    def fetch_api_keys(self):
+        return {
+            "k_a": {"name": "service-a-prod", "workspace_id": "ws_mcs"},
+            "k_b": {"name": "experimental", "workspace_id": "ws_mcs"},
+        }
+
+
+def test_anthropic_breakdown_endpoint_reports_prod_vs_unclassified(client, monkeypatch):
+    monkeypatch.setattr(
+        inference, "_make_cost_client", lambda provider, key: _FakeAnthropicDetailed()
+    )
+    client.post("/api/connectors/anthropic/credential", json={"secret": "sk-ant-admin"})
+    summary = client.post("/api/inference/ingest", json={"provider": "anthropic"}).json()
+    assert summary["total"] == 1000.0
+
+    breakdown = client.get("/api/inference/anthropic/breakdown").json()
+    # Reconciled to the authoritative bill, split 1:1 between the two keys.
+    assert breakdown["total"] == pytest.approx(1000.0, abs=0.01)
+    assert breakdown["by_environment"]["production"] == pytest.approx(500.0, abs=0.01)
+    assert breakdown["by_environment"]["unclassified"] == pytest.approx(500.0, abs=0.01)
+    keys = {k["api_key_name"]: k for k in breakdown["keys"]}
+    assert keys["service-a-prod"]["environment"] == "production"
+    assert keys["service-a-prod"]["workspace_name"] == "mcs-dev"
+    assert keys["experimental"]["environment"] == "unclassified"
+
+
 class _FakeTogether:
     def __enter__(self):
         return self

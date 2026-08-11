@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from collections import defaultdict
 from decimal import Decimal
 from typing import Optional
 
-from . import credentials
+from . import classification, credentials, pricing
 from .db import admin_dsn, app_dsn, connect, tenant_tx
-from .providers import CostRecord, make_cost_client, month_start
+from .providers import CostRecord, UsageRecord, make_cost_client, month_start
 
 
 def _make_cost_client(provider: str, admin_key: str):
@@ -58,10 +59,21 @@ def _attribute(record: CostRecord, maps: tuple[dict, dict]) -> tuple[Optional[st
 
 
 def run_inference_ingest(tenant_id: str, provider: str, period: dt.date, admin_key: str) -> dict:
-    """Fetch a provider's monthly cost and ingest it. Returns a summary."""
+    """Fetch a provider's monthly cost and ingest it. Returns a summary.
+
+    Anthropic uses the detailed path when the client exposes the Usage Report:
+    authoritative Cost Report dollars are reconciled against per-workspace/per-key
+    usage and labelled with an environment. Every other provider (and simpler
+    clients, e.g. tests) uses the flat cost-report attribution path.
+    """
     with _make_cost_client(provider, admin_key) as client:
-        records = client.fetch_costs(period)
-    return ingest_records(tenant_id, provider, period, records)
+        cost_records = client.fetch_costs(period)
+        if provider == "anthropic" and hasattr(client, "fetch_usage"):
+            usage = client.fetch_usage(period)
+            workspaces = client.fetch_workspaces()
+            api_keys = client.fetch_api_keys()
+            return ingest_anthropic(tenant_id, period, cost_records, usage, workspaces, api_keys)
+    return ingest_records(tenant_id, provider, period, cost_records)
 
 
 def ingest_records(
@@ -119,6 +131,306 @@ def ingest_records(
         "total": float(total),
         "attributed": float(attributed),
         "unattributed": float(unattributed),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Anthropic detailed path: workspace / API-key identity + environment.
+# ---------------------------------------------------------------------------
+def _usage_weight(row: UsageRecord) -> Decimal:
+    """Proportional weight for splitting a workspace's billed dollars.
+
+    Priced dollars are the best proxy for real cost; fall back to total tokens,
+    then request count, so a workspace's split (and each key's environment) is
+    preserved even when a model is unpriced.
+    """
+    priced = pricing.price(row.model or "", row.tokens_in, row.tokens_out, "anthropic")
+    if priced > 0:
+        return priced
+    tokens = Decimal(row.tokens_in + row.tokens_out)
+    if tokens > 0:
+        return tokens
+    return Decimal(row.request_count or 0)
+
+
+def _allocate(total: Decimal, weights: list[Decimal]) -> list[Decimal]:
+    """Split ``total`` across ``weights`` so the parts sum EXACTLY to ``total``.
+
+    The last row absorbs the rounding remainder, guaranteeing the reconciliation
+    invariant (sum of allocated == authoritative billed) to the cent.
+    """
+    q = Decimal("0.0001")
+    wsum = sum(weights, Decimal("0"))
+    if not weights or wsum <= 0:
+        return [Decimal("0") for _ in weights]
+    out: list[Decimal] = []
+    running = Decimal("0")
+    for i, w in enumerate(weights):
+        if i == len(weights) - 1:
+            out.append((total - running).quantize(q))
+        else:
+            part = (total * w / wsum).quantize(q)
+            out.append(part)
+            running += part
+    return out
+
+
+def _attribute_detail(
+    api_key_id: Optional[str], workspace_id: Optional[str], maps: tuple[dict, dict]
+) -> tuple[Optional[str], str]:
+    """Preserve existing feature attribution over the new explicit ids.
+
+    A per-key mapping (api_key signal) wins; a per-workspace mapping (service
+    signal) is next. No mapping -> Unattributed. (Feature/customer attribution of
+    production traffic is a later milestone; this only keeps today's capability.)
+    """
+    by_api_key, by_service = maps
+    if api_key_id and api_key_id in by_api_key:
+        return by_api_key[api_key_id], "high"
+    if workspace_id and workspace_id in by_service:
+        return by_service[workspace_id], "med"
+    if workspace_id and workspace_id in by_api_key:
+        return by_api_key[workspace_id], "high"
+    return None, "low"
+
+
+def _insert_anthropic_row(
+    conn,
+    tenant_id: str,
+    feature_id: Optional[str],
+    row: UsageRecord,
+    amount: Decimal,
+    start: dt.date,
+    workspace_id: Optional[str],
+    workspace_name: Optional[str],
+    api_key_name: Optional[str],
+    environment: str,
+    confidence: str,
+) -> None:
+    """Persist one reconciled Anthropic cost row with explicit identity columns.
+
+    NOTE: ``api_key_ref`` now holds the genuine ``api_key_id`` (not the workspace,
+    as the legacy fallback did); ``workspace_id`` has its own column.
+    """
+    conn.execute(
+        """
+        INSERT INTO inference_cost
+            (tenant_id, feature_id, provider, model, api_key_ref, amount, currency,
+             period, tokens_in, tokens_out, request_count, cached_tokens_in,
+             workspace_id, workspace_name, api_key_id, api_key_name, environment,
+             source, confidence)
+        VALUES (%s, %s, 'anthropic', %s, %s, %s, 'USD', %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, 'cost_api', %s)
+        """,
+        (
+            tenant_id,
+            feature_id,
+            row.model,
+            row.api_key_id,
+            amount,
+            start,
+            row.tokens_in or None,
+            row.tokens_out or None,
+            row.request_count or None,
+            row.cached_tokens_in or None,
+            workspace_id,
+            workspace_name,
+            row.api_key_id,
+            api_key_name,
+            environment,
+            confidence,
+        ),
+    )
+
+
+def ingest_anthropic(
+    tenant_id: str,
+    period: dt.date,
+    cost_records: list[CostRecord],
+    usage_records: list[UsageRecord],
+    workspaces: dict[str, str],
+    api_keys: dict[str, dict],
+) -> dict:
+    """Reconcile authoritative Cost Report dollars against detailed usage.
+
+    The Cost Report is the billing authority (dollars per workspace); the Usage
+    Report supplies the per-(api_key, model) split within a workspace. For each
+    workspace we allocate its billed dollars across its usage rows by priced
+    weight — so the persisted total ALWAYS equals the bill — and label each row's
+    environment from the API-key name. A workspace billed with no usable usage is
+    preserved as a single ``unclassified`` unattributed row rather than guessed.
+    """
+    start = month_start(period)
+
+    # Authoritative billed dollars per workspace (cost_report groups by workspace_id).
+    billed_by_ws: dict[Optional[str], Decimal] = {}
+    for r in cost_records:
+        billed_by_ws[r.project] = billed_by_ws.get(r.project, Decimal("0")) + r.amount
+    billed_total = sum(billed_by_ws.values(), Decimal("0"))
+
+    # Aggregate usage within each workspace by (api_key_id, model, service_tier).
+    usage_by_ws: dict[Optional[str], dict[tuple, UsageRecord]] = defaultdict(dict)
+    for u in usage_records:
+        bucket = usage_by_ws[u.workspace_id]
+        k = (u.api_key_id, u.model, u.service_tier)
+        agg = bucket.get(k)
+        if agg is None:
+            bucket[k] = UsageRecord(
+                workspace_id=u.workspace_id,
+                api_key_id=u.api_key_id,
+                model=u.model,
+                service_tier=u.service_tier,
+                tokens_in=u.tokens_in,
+                tokens_out=u.tokens_out,
+                cached_tokens_in=u.cached_tokens_in,
+                request_count=u.request_count,
+            )
+        else:
+            agg.tokens_in += u.tokens_in
+            agg.tokens_out += u.tokens_out
+            agg.cached_tokens_in += u.cached_tokens_in
+            agg.request_count += u.request_count
+
+    by_env: dict[str, Decimal] = {}
+    attributed = Decimal("0")
+    unattributed = Decimal("0")
+    rows_written = 0
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        maps = _load_mappings(conn)
+        conn.execute(
+            "DELETE FROM inference_cost WHERE provider = 'anthropic' "
+            "AND period = %s AND source = 'cost_api'",
+            (start,),
+        )
+        for ws_id, authoritative in billed_by_ws.items():
+            ws_name = workspaces.get(ws_id) if ws_id else None
+            rows = list(usage_by_ws.get(ws_id, {}).values())
+            allocations = _allocate(authoritative, [_usage_weight(r) for r in rows])
+            if rows and sum(allocations, Decimal("0")) > 0:
+                for row, amount in zip(rows, allocations):
+                    meta = api_keys.get(row.api_key_id or "", {})
+                    api_key_name = meta.get("name")
+                    environment = classification.classify("anthropic", api_key_name=api_key_name)
+                    feature_id, confidence = _attribute_detail(row.api_key_id, ws_id, maps)
+                    _insert_anthropic_row(
+                        conn,
+                        tenant_id,
+                        feature_id,
+                        row,
+                        amount,
+                        start,
+                        ws_id,
+                        ws_name,
+                        api_key_name,
+                        environment,
+                        confidence,
+                    )
+                    by_env[environment] = by_env.get(environment, Decimal("0")) + amount
+                    if feature_id:
+                        attributed += amount
+                    else:
+                        unattributed += amount
+                    rows_written += 1
+            else:
+                # Billed dollars we can't safely map to usage -> unclassified bucket.
+                _insert_anthropic_row(
+                    conn,
+                    tenant_id,
+                    None,
+                    UsageRecord(workspace_id=ws_id),
+                    authoritative,
+                    start,
+                    ws_id,
+                    ws_name,
+                    None,
+                    classification.UNCLASSIFIED,
+                    "low",
+                )
+                by_env[classification.UNCLASSIFIED] = (
+                    by_env.get(classification.UNCLASSIFIED, Decimal("0")) + authoritative
+                )
+                unattributed += authoritative
+                rows_written += 1
+
+    return {
+        "provider": "anthropic",
+        "period": start.isoformat(),
+        "rows": rows_written,
+        "total": float(billed_total),
+        "attributed": float(attributed),
+        "unattributed": float(unattributed),
+        "production": float(by_env.get(classification.PRODUCTION, Decimal("0"))),
+        "unclassified": float(by_env.get(classification.UNCLASSIFIED, Decimal("0"))),
+        "by_environment": {k: float(v) for k, v in by_env.items()},
+    }
+
+
+def anthropic_breakdown(tenant_id: str, period: Optional[dt.date] = None) -> dict:
+    """Per-environment / per-workspace / per-key Anthropic split for a month.
+
+    Reads persisted rows only (no provider calls). Powers the Cost Sources view
+    and the production-vs-unclassified summary. Legacy rows (environment NULL) are
+    surfaced as ``unclassified`` so nothing is presented as production by default.
+    ``period`` defaults to the latest month that has Anthropic cost data.
+    """
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        if period is None:
+            latest = conn.execute(
+                "SELECT MAX(period) FROM inference_cost "
+                "WHERE provider = 'anthropic' AND source = 'cost_api'"
+            ).fetchone()[0]
+            start = latest or month_start(dt.date.today())
+        else:
+            start = month_start(period)
+        rows = conn.execute(
+            """
+            SELECT workspace_id, workspace_name, api_key_id, api_key_name,
+                   COALESCE(environment, 'unclassified') AS env, SUM(amount)
+            FROM inference_cost
+            WHERE provider = 'anthropic' AND period = %s AND source = 'cost_api'
+            GROUP BY workspace_id, workspace_name, api_key_id, api_key_name, env
+            ORDER BY SUM(amount) DESC
+            """,
+            (start,),
+        ).fetchall()
+
+    by_environment: dict[str, float] = {}
+    workspaces: dict[tuple, dict] = {}
+    keys: list[dict] = []
+    total = 0.0
+    for ws_id, ws_name, key_id, key_name, env, amount in rows:
+        amt = float(amount)
+        total += amt
+        by_environment[env] = by_environment.get(env, 0.0) + amt
+        ws = workspaces.setdefault(
+            (ws_id, ws_name),
+            {
+                "workspace_id": ws_id,
+                "workspace_name": ws_name,
+                "total": 0.0,
+                "by_environment": {},
+            },
+        )
+        ws["total"] += amt
+        ws["by_environment"][env] = ws["by_environment"].get(env, 0.0) + amt
+        keys.append(
+            {
+                "workspace_id": ws_id,
+                "workspace_name": ws_name,
+                "api_key_id": key_id,
+                "api_key_name": key_name,
+                "environment": env,
+                "amount": amt,
+            }
+        )
+
+    return {
+        "period": start.isoformat(),
+        "total": total,
+        "by_environment": by_environment,
+        "by_workspace": sorted(workspaces.values(), key=lambda w: w["total"], reverse=True),
+        "keys": keys,
     }
 
 

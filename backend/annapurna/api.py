@@ -508,6 +508,16 @@ def create_app() -> FastAPI:
     ) -> dict:
         return inference.inference_summary(user["tenant_id"], _parse_period(period))
 
+    @app.get("/api/inference/anthropic/breakdown")
+    def anthropic_breakdown(
+        user: CurrentUser,
+        period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        # Production vs. unclassified Anthropic spend, split by workspace + API key.
+        # No explicit period -> the latest month that has Anthropic data.
+        resolved = _parse_period(period) if period else None
+        return inference.anthropic_breakdown(user["tenant_id"], resolved)
+
     # ---- Metering hook (M7) --------------------------------------------
     @app.post("/api/hook/token")
     def create_hook_token(user: CurrentUser) -> dict:

@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type ConnectorStatus } from "../api";
+import { AnthropicBreakdown } from "../components/AnthropicBreakdown";
 import { BuildCostActions, type FeatureOption } from "../components/BuildCostActions";
 import { ConnectorRow } from "../components/ConnectorRow";
 import { SelfHostedPools } from "../components/SelfHostedPools";
@@ -22,6 +23,8 @@ export function CostSourcesPage() {
   const [connectors, setConnectors] = useState<ConnectorStatus[] | null>(null);
   const [features, setFeatures] = useState<FeatureOption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Bumped after an Anthropic sync so the breakdown re-fetches.
+  const [anthropicVersion, setAnthropicVersion] = useState(0);
 
   const refreshConnectors = useCallback(async () => {
     try {
@@ -91,11 +94,15 @@ export function CostSourcesPage() {
                   onSync={async () => {
                     const r = await api.ingestInference(c.type);
                     await refreshFeatures();
+                    if (c.type === "anthropic") setAnthropicVersion((v) => v + 1);
                     return `Pulled ${money(r.total)} of ${c.name} spend for this month.`;
                   }}
                 />
               ))}
             </ul>
+          )}
+          {connectors && inference.some((c) => c.type === "anthropic" && c.connected) && (
+            <AnthropicBreakdown version={anthropicVersion} />
           )}
         </section>
       )}
