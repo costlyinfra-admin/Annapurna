@@ -19,6 +19,7 @@ export function TrendChart({ trend }: { trend: { period: string; amount: number 
             key={t.period}
             title={`${MONTHS[month]} · ${money(t.amount)}`}
           >
+            <span className="trend-value">{money(t.amount)}</span>
             <div
               className="trend-bar"
               style={{ height: `${Math.max(3, (t.amount / max) * 100)}%` }}

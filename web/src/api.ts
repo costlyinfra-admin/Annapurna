@@ -346,7 +346,13 @@ export interface ProviderSpend {
   start: string;
   end: string;
   total: number;
-  by_provider: { provider: string; amount: number; pct: number; requests: number | null }[];
+  by_provider: {
+    provider: string;
+    amount: number;
+    pct: number;
+    requests: number | null;
+    by_model: { model: string; amount: number; pct: number }[];
+  }[];
   trend: { period: string; amount: number }[];
   build_total: number;
   build_by_tool: { tool: string; amount: number; pct: number }[];

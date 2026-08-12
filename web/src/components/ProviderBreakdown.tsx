@@ -29,7 +29,8 @@ function prettyTool(tool: string): string {
     .join(" ");
 }
 
-type Bar = { label: string; amount: number; pct: number };
+type ModelBar = { label: string; amount: number; pct: number };
+type Bar = { label: string; amount: number; pct: number; models?: ModelBar[] };
 
 function SpendBars({ rows }: { rows: Bar[] }) {
   return (
@@ -45,6 +46,18 @@ function SpendBars({ rows }: { rows: Bar[] }) {
           <div className="provider-bar-track">
             <div className="provider-bar-fill" style={{ width: `${Math.max(2, r.pct)}%` }} />
           </div>
+          {r.models && r.models.length > 0 && (
+            <ul className="model-subrows">
+              {r.models.map((m) => (
+                <li key={m.label} className="model-subrow">
+                  <span className="model-subrow-name">{m.label}</span>
+                  <span className="model-subrow-amt">
+                    {money(m.amount)} · {m.pct.toFixed(0)}%
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </li>
       ))}
     </ul>
@@ -107,6 +120,11 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
                       label: p.provider,
                       amount: p.amount,
                       pct: p.pct,
+                      models: p.by_model.map((m) => ({
+                        label: m.model,
+                        amount: m.amount,
+                        pct: m.pct,
+                      })),
                     }))}
                   />
                 </div>

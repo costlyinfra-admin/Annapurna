@@ -623,12 +623,36 @@ def spend_by_provider(
             (start, end),
         ).fetchall()
         total = sum(float(amount) for _p, amount, _req in provider_rows) or 0.0
+
+        # Per-provider model split (so each provider's total breaks down by model).
+        model_rows = conn.execute(
+            """
+            SELECT provider, model, SUM(amount)
+            FROM inference_cost
+            WHERE period BETWEEN %s AND %s
+            GROUP BY provider, model ORDER BY SUM(amount) DESC
+            """,
+            (start, end),
+        ).fetchall()
+        models_by_provider: dict[str, list] = {}
+        for provider, model, amount in model_rows:
+            models_by_provider.setdefault(provider, []).append((model, float(amount)))
+
         by_provider = [
             {
                 "provider": provider,
                 "amount": float(amount),
                 "pct": (float(amount) / total * 100.0) if total else 0.0,
                 "requests": int(req) if req is not None else None,
+                "by_model": [
+                    {
+                        "model": model or "unknown",
+                        "amount": amt,
+                        # Share of THIS provider's spend (models under a provider sum to ~100%).
+                        "pct": (amt / float(amount) * 100.0) if amount else 0.0,
+                    }
+                    for model, amt in models_by_provider.get(provider, [])
+                ],
             }
             for provider, amount, req in provider_rows
         ]

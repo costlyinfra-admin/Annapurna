@@ -146,8 +146,20 @@ describe("Dashboard (Overview)", () => {
       end: "2026-05-01",
       total: 5450,
       by_provider: [
-        { provider: "openai", amount: 4200, pct: 77.06, requests: 320000 },
-        { provider: "anthropic", amount: 1250, pct: 22.94, requests: 60000 },
+        {
+          provider: "openai",
+          amount: 4200,
+          pct: 77.06,
+          requests: 320000,
+          by_model: [{ model: "gpt-4o", amount: 4200, pct: 100 }],
+        },
+        {
+          provider: "anthropic",
+          amount: 1250,
+          pct: 22.94,
+          requests: 60000,
+          by_model: [{ model: "claude-sonnet-4-6", amount: 1250, pct: 100 }],
+        },
       ],
       trend: [{ period: "2026-05-01", amount: 5450 }],
       build_total: 270,

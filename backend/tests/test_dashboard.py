@@ -163,6 +163,13 @@ def test_spend_by_provider_breakdown_and_window(seeded):
     assert amounts == sorted(amounts, reverse=True)
     assert len(month["trend"]) == 1
 
+    # Each provider carries a model breakdown that sums back to its own total,
+    # with per-provider pct shares adding to 100.
+    for p in month["by_provider"]:
+        assert p["by_model"], f"{p['provider']} should have a model breakdown"
+        assert abs(sum(m["amount"] for m in p["by_model"]) - p["amount"]) < 1e-6
+        assert abs(sum(m["pct"] for m in p["by_model"]) - 100.0) < 1e-6
+
     # Build cost is grouped by tool, separately from inference (never blended).
     by_tool = {t["tool"]: t for t in month["build_by_tool"]}
     assert set(by_tool) <= {"claude_code", "cursor", "copilot", "codex"}

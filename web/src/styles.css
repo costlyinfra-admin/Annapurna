@@ -490,6 +490,36 @@ select {
   border-radius: var(--radius-pill);
 }
 
+.model-subrows {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0 0 0 0.75rem;
+  border-left: 2px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.model-subrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.model-subrow-name {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-subrow-amt {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-card {
   background: var(--card);
   border: 1px solid var(--line);
@@ -2078,6 +2108,15 @@ a.exec-value:hover {
 .trend-label {
   font-size: 0.72rem;
   color: var(--muted);
+}
+
+.trend-value {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1;
 }
 
 .pie-wrap {
