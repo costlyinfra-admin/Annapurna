@@ -77,10 +77,6 @@ export function Dashboard() {
     <div className="content">
       <div className="dash-head">
         <h1>Overview</h1>
-        <div className="period-controls">
-          {data && <span className="muted period-label">{fmtRange(data.start, data.end)}</span>}
-          <PeriodSelector value={range} onChange={setRange} />
-        </div>
       </div>
 
       {error && (
@@ -134,6 +130,13 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Review-period selector, right-justified beneath the cost/token tiles.
+          Always rendered so it doesn't flicker away while a range change reloads. */}
+      <div className="period-controls period-controls-below">
+        {data && <span className="muted period-label">{fmtRange(data.start, data.end)}</span>}
+        <PeriodSelector value={range} onChange={setRange} />
+      </div>
 
       {/* Tabs switch only the detailed breakdown below; the summary, insights,
           and totals above stay put no matter which tab is active. */}

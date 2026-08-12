@@ -1153,12 +1153,18 @@ a.pr-ref:hover {
   margin: 1.25rem 0 1rem;
 }
 
-/* Review-period selector (Overview header). */
+/* Review-period selector. */
 .period-controls {
   display: flex;
   align-items: center;
   gap: 0.85rem;
   flex-wrap: wrap;
+}
+
+/* Placed beneath the cost/token tiles, right-justified. */
+.period-controls-below {
+  justify-content: flex-end;
+  margin: 0.9rem 0 0.25rem;
 }
 
 .period-label {
