@@ -129,6 +129,19 @@ def test_hosted_open_source_connector_ingests(client, monkeypatch):
     assert view["by_provider"]["together"] == 1020.0
 
 
+def test_sync_backfills_multiple_months(client, monkeypatch):
+    # "Sync now" pulls history: months>1 walks the window, not just this month.
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeTogether())
+    client.post("/api/connectors/together/credential", json={"secret": "tg-admin"})
+
+    summary = client.post(
+        "/api/inference/ingest", json={"provider": "together", "months": 3}
+    ).json()
+    assert summary["months"] == 3
+    assert len(summary["by_month"]) == 3
+    assert summary["total"] == 3060.0  # 3 * (900 + 120)
+
+
 class _FakeBedrock:
     def __enter__(self):
         return self

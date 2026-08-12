@@ -532,10 +532,10 @@ export const api = {
       body: JSON.stringify({ active_users: activeUsers, period }),
     }),
 
-  ingestInference: (provider: string, period?: string) =>
-    request<{ total: number }>("/inference/ingest", {
+  ingestInference: (provider: string, period?: string, months?: number) =>
+    request<{ total: number; months?: number }>("/inference/ingest", {
       method: "POST",
-      body: JSON.stringify({ provider, period }),
+      body: JSON.stringify({ provider, period, months }),
     }),
 
   anthropicBreakdown: (period?: string) =>

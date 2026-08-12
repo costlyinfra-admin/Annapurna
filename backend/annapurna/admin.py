@@ -240,8 +240,9 @@ def sync_now(tenant_id: str, connector_type: str) -> dict:
             result = discovery.run_discovery(tenant_id, owner, secret)
             records = int(result.get("proposals", 0))
         else:
-            result = inference.run_inference_ingest(
-                tenant_id, connector_type, month_start(dt.date.today()), secret
+            # Manual sync backfills a year of history (not just the current month).
+            result = inference.run_inference_backfill(
+                tenant_id, connector_type, secret, months=12
             )
             records = int(result.get("rows", 0))
         return _log_sync(tenant_id, connector_type, "sync", "success", records=records)

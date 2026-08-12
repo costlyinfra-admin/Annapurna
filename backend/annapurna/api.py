@@ -110,6 +110,9 @@ class IngestRequest(BaseModel):
         )
     )
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")  # YYYY-MM
+    # How many months to pull, ending at `period` (or this month). 1 = single month
+    # (nightly refresh); >1 backfills history (the manual "Sync now" pulls 12).
+    months: int = Field(default=1, ge=1, le=24)
 
 
 class BuildImportRequest(BaseModel):
@@ -481,6 +484,11 @@ def create_app() -> FastAPI:
             )
         period = _parse_period(body.period)
         try:
+            if body.months > 1:
+                return inference.run_inference_backfill(
+                    user["tenant_id"], body.provider, admin_key,
+                    months=body.months, anchor=period,
+                )
             return inference.run_inference_ingest(
                 user["tenant_id"], body.provider, period, admin_key
             )

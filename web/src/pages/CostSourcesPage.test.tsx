@@ -90,7 +90,10 @@ describe("CostSourcesPage", () => {
     vi.mocked(api.ingestInference).mockResolvedValue({ total: 4200 });
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Sync now" }));
-    await waitFor(() => expect(api.ingestInference).toHaveBeenCalledWith("anthropic"));
+    // Sync now backfills the last 12 months of history.
+    await waitFor(() =>
+      expect(api.ingestInference).toHaveBeenCalledWith("anthropic", undefined, 12),
+    );
     expect(await screen.findByText(/Pulled .* of Anthropic spend/)).toBeInTheDocument();
   });
 });

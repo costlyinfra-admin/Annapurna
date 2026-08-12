@@ -218,3 +218,93 @@ def test_run_inference_ingest_routes_anthropic_to_detailed_path(tenant_id, monke
     # Persisted rows carry explicit identity, not the old api_key_ref overload.
     keys = inference.anthropic_breakdown(tenant_id, PERIOD)["keys"]
     assert {k["workspace_name"] for k in keys} == {"mcs-dev"}
+
+
+# ---------------------------------------------------------------------------
+# Multi-month backfill (Sync now pulls history, not just the current month).
+# ---------------------------------------------------------------------------
+def test_backfill_ingests_each_month_of_the_window(tenant_id, monkeypatch):
+    seen: list = []
+
+    class _FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):
+            seen.append(period)
+            return [_record("openai", 100, project="proj_x")]
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeClient())
+    anchor = dt.date(2026, 8, 1)
+    summary = inference.run_inference_backfill(tenant_id, "openai", "key", months=12, anchor=anchor)
+
+    assert len(seen) == 12  # one fetch per month
+    assert min(seen) == dt.date(2025, 9, 1)  # 12 months back, inclusive
+    assert max(seen) == anchor
+    assert summary["months"] == 12
+    assert len(summary["by_month"]) == 12
+    assert summary["total"] == 1200.0  # 12 * 100
+    # Persisted across the window: last-12-months range sees every month.
+    view = inference.inference_summary(tenant_id, dt.date(2026, 8, 1))
+    assert view["by_provider"]["openai"] == 100.0  # each month stored separately
+
+
+def test_backfill_is_idempotent_per_month(tenant_id, monkeypatch):
+    class _FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):
+            return [_record("openai", 50, project="proj_x")]
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeClient())
+    anchor = dt.date(2026, 8, 1)
+    inference.run_inference_backfill(tenant_id, "openai", "key", months=3, anchor=anchor)
+    inference.run_inference_backfill(tenant_id, "openai", "key", months=3, anchor=anchor)  # again
+    # A month's total is not doubled by re-running the backfill.
+    view = inference.inference_summary(tenant_id, anchor)
+    assert view["by_provider"]["openai"] == 50.0
+
+
+def test_backfill_survives_a_single_bad_month(tenant_id, monkeypatch):
+    class _FlakyClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):
+            if period == dt.date(2026, 7, 1):
+                raise RuntimeError("transient provider error")
+            return [_record("openai", 10, project="proj_x")]
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FlakyClient())
+    summary = inference.run_inference_backfill(
+        tenant_id, "openai", "key", months=3, anchor=dt.date(2026, 8, 1)
+    )
+    assert len(summary["by_month"]) == 2  # June + August landed
+    assert len(summary["errors"]) == 1  # July recorded, not fatal
+    assert summary["errors"][0]["period"] == "2026-07-01"
+
+
+def test_backfill_raises_when_every_month_fails(tenant_id, monkeypatch):
+    class _DeadClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):
+            raise RuntimeError("bad admin key")
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _DeadClient())
+    with pytest.raises(RuntimeError, match="bad admin key"):
+        inference.run_inference_backfill(tenant_id, "openai", "key", months=3)

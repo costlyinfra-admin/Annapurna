@@ -76,6 +76,68 @@ def run_inference_ingest(tenant_id: str, provider: str, period: dt.date, admin_k
     return ingest_records(tenant_id, provider, period, cost_records)
 
 
+def _months_back(day: dt.date, n: int) -> dt.date:
+    """First-of-month ``n`` months before ``day`` (month-aligned)."""
+    month = day.month - n
+    year = day.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    return dt.date(year, month, 1)
+
+
+def run_inference_backfill(
+    tenant_id: str,
+    provider: str,
+    admin_key: str,
+    *,
+    months: int = 12,
+    anchor: Optional[dt.date] = None,
+) -> dict:
+    """Ingest the last ``months`` months (ending at ``anchor``, default this month).
+
+    Reuses the per-month ingest so attribution, classification, and reconciliation
+    are identical to a single-month sync — this just walks the window, oldest month
+    first, and each month is idempotent (a re-sync replaces that month's rows).
+
+    Resilient to a single bad month (a transient provider error is recorded and the
+    walk continues), but if EVERY month fails the first error is raised so a real
+    problem (e.g. a rejected admin key) still surfaces to the caller.
+    """
+    anchor_month = month_start(anchor or dt.date.today())
+    periods = [_months_back(anchor_month, i) for i in range(months - 1, -1, -1)]
+    by_month: list[dict] = []
+    errors: list[dict] = []
+    first_error: Optional[Exception] = None
+    total = 0.0
+    rows = 0
+    for period in periods:
+        try:
+            summary = run_inference_ingest(tenant_id, provider, period, admin_key)
+        except Exception as exc:  # noqa: BLE001 — record and continue; surfaced below if all fail
+            first_error = first_error or exc
+            errors.append({"period": period.isoformat(), "error": str(exc)[:200]})
+            continue
+        by_month.append(
+            {"period": summary["period"], "total": summary["total"], "rows": summary.get("rows", 0)}
+        )
+        total += summary["total"]
+        rows += summary.get("rows", 0)
+
+    if not by_month and first_error is not None:
+        raise first_error  # nothing landed — surface the real cause (bad key, etc.)
+
+    return {
+        "provider": provider,
+        "months": months,
+        "period": periods[-1].isoformat(),  # newest month (back-compat with single sync)
+        "total": total,
+        "rows": rows,
+        "by_month": by_month,
+        "errors": errors,
+    }
+
+
 def ingest_records(
     tenant_id: str, provider: str, period: dt.date, records: list[CostRecord]
 ) -> dict:

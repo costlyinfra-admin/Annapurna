@@ -92,10 +92,11 @@ export function CostSourcesPage() {
                   connector={c}
                   onConnected={refreshConnectors}
                   onSync={async () => {
-                    const r = await api.ingestInference(c.type);
+                    // Backfill the last 12 months of history, not just this month.
+                    const r = await api.ingestInference(c.type, undefined, 12);
                     await refreshFeatures();
                     if (c.type === "anthropic") setAnthropicVersion((v) => v + 1);
-                    return `Pulled ${money(r.total)} of ${c.name} spend for this month.`;
+                    return `Pulled ${money(r.total)} of ${c.name} spend across the last 12 months.`;
                   }}
                 />
               ))}
