@@ -2061,8 +2061,11 @@ a.exec-value:hover {
 }
 
 .inference-col {
-  flex: 1;
-  min-width: 260px;
+  /* min-width:0 lets the column contain a wide child (the trend chart) instead of
+     letting it overflow into the sibling column; basis 320px still wraps to a
+     stacked layout on narrow screens. */
+  flex: 1 1 320px;
+  min-width: 0;
 }
 
 .chart-title {
@@ -2078,13 +2081,18 @@ a.exec-value:hover {
 .trend-chart {
   display: flex;
   align-items: flex-end;
-  gap: 0.6rem;
+  gap: 0.5rem;
   height: 150px;
-  padding-top: 0.5rem;
+  padding-top: 0.75rem;
+  /* Many months (e.g. 12) scroll within the column rather than overflowing it. */
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
 }
 
 .trend-bar-wrap {
-  flex: 1;
+  /* Grow to fill, but never shrink below a readable width — beyond that the chart
+     scrolls horizontally instead of cramming/overlapping bars. */
+  flex: 1 0 44px;
   display: flex;
   flex-direction: column;
   align-items: center;
