@@ -27,6 +27,11 @@ import httpx
 from .pricing import price
 from .retrying import http_get_with_retry
 
+# Anthropic's Cost Report reports `amount` in the currency's lowest unit (cents);
+# every other provider here reports dollars. Divide Anthropic amounts by this once,
+# at the parse boundary, so the rest of the system is uniformly in dollars.
+_CENTS_PER_DOLLAR = Decimal(100)
+
 
 @dataclass
 class CostRecord:
@@ -323,9 +328,14 @@ def _int_or_none(value) -> Optional[int]:
 def _parse_anthropic(payload: dict, period: dt.date):
     for bucket in payload.get("data", []):
         for item in bucket.get("results", []) or bucket.get("items", []):
-            amount = _to_decimal(item.get("amount") or item.get("cost") or item.get("amount_usd"))
-            if amount is None:
+            raw = _to_decimal(item.get("amount"))
+            if raw is None:
                 continue
+            # Anthropic's cost_report returns `amount` in the currency's LOWEST unit
+            # (cents) as a decimal string — per the Cost API contract, "123.45" USD
+            # means $1.2345. Convert to dollars ONCE here at the source so every
+            # downstream number (storage, reconciliation, dashboard) is in dollars.
+            amount = raw / _CENTS_PER_DOLLAR
             # Cache/token fields when the report includes usage (parsed tolerantly;
             # None when absent). cache_read_input_tokens = input served from cache.
             cache_read = _int_or_none(item.get("cache_read_input_tokens"))

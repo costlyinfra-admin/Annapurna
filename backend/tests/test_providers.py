@@ -69,7 +69,9 @@ def test_anthropic_parses_cost_report():
     )
     records = client.fetch_costs(dt.date(2026, 5, 10))
     by_ws = {r.project: r for r in records}
-    assert by_ws["ws_triage"].amount == Decimal("4200.00")
+    # Anthropic reports cents: "4200.00" cents == $42.00, "980.00" cents == $9.80.
+    assert by_ws["ws_triage"].amount == Decimal("42.00")
+    assert by_ws["ws_shared"].amount == Decimal("9.80")
     assert by_ws["ws_triage"].period == dt.date(2026, 5, 1)
     # The description line-item survives as the model label.
     assert by_ws["ws_shared"].model == "claude-haiku-4-5"
@@ -101,6 +103,33 @@ def test_openai_parses_costs():
     records = client.fetch_costs(dt.date(2026, 5, 1))
     assert records[0].project == "proj_reports"
     assert records[0].amount == Decimal("1850.00")
+
+
+def test_anthropic_amount_is_cents_converted_to_dollars():
+    # Anthropic's cost_report `amount` is in the currency's lowest unit (cents) as a
+    # decimal string. Per the Cost API contract, "123.45" USD represents $1.2345 and
+    # a raw "28886" is $288.86 — NOT $28,886.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "results": [
+                            {"workspace_id": "ws_doc", "amount": "123.45", "currency": "USD"},
+                            {"workspace_id": "ws_client", "amount": "28886", "currency": "USD"},
+                        ]
+                    }
+                ]
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    by_ws = {r.project: r.amount for r in client.fetch_costs(dt.date(2026, 5, 1))}
+    assert by_ws["ws_doc"] == Decimal("1.2345")  # documented example
+    assert by_ws["ws_client"] == Decimal("288.86")  # 28886 cents, not $28,886
 
 
 def test_anthropic_captures_cache_read_tokens():
