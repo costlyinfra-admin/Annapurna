@@ -35,10 +35,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const signup = async (email: string, password: string) =>
-    setUser(await api.signup(email, password));
-  const login = async (email: string, password: string) =>
-    setUser(await api.login(email, password));
+  // After auth, hydrate from /auth/me so the user carries the enriched fields
+  // (org_name, is_admin, impersonating) — the login/signup responses don't.
+  const signup = async (email: string, password: string) => {
+    await api.signup(email, password);
+    setUser(await api.me());
+  };
+  const login = async (email: string, password: string) => {
+    await api.login(email, password);
+    setUser(await api.me());
+  };
   const logout = async () => {
     await api.logout();
     setUser(null);

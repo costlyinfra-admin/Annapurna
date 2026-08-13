@@ -9,6 +9,7 @@ export interface User {
   id: string;
   tenant_id: string;
   email: string;
+  org_name?: string;
   is_admin?: boolean;
   impersonating?: { tenant_id: string; company: string } | null;
 }

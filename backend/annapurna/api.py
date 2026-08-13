@@ -368,7 +368,13 @@ def create_app() -> FastAPI:
         target = request.session.get("impersonate_tenant")
         if target and is_admin:
             impersonating = {"tenant_id": target, "company": admin.company_name(target)}
-        return {**user, "is_admin": is_admin, "impersonating": impersonating}
+        return {
+            **user,
+            "is_admin": is_admin,
+            "impersonating": impersonating,
+            # Organization name of the effective tenant (shown in the UI header).
+            "org_name": admin.company_name(user["tenant_id"]),
+        }
 
     # ---- Organization settings (administrative Settings page) -----------
     @app.get("/api/settings")

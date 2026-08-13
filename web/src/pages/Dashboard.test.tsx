@@ -57,8 +57,18 @@ function renderDashboard() {
 describe("Dashboard (Overview)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
+    vi.mocked(api.me).mockResolvedValue({
+      id: "u1",
+      tenant_id: "t1",
+      email: "cto@acme.com",
+      org_name: "Transilience AI",
+    });
     vi.mocked(api.dashboard).mockResolvedValue(DATA);
+  });
+
+  it("shows the organization name above the Overview title", async () => {
+    renderDashboard();
+    expect(await screen.findByText("Transilience AI")).toBeInTheDocument();
   });
 
   it("shows build and inference as separate columns, plus the Unattributed row", async () => {

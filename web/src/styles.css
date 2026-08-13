@@ -1208,6 +1208,17 @@ a.pr-ref:hover {
   margin: 1.25rem 0 1rem;
 }
 
+/* Organization name above a page title (e.g. Overview). */
+.page-eyebrow {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.15rem;
+}
+
 /* Review-period selector. */
 .period-controls {
   display: flex;

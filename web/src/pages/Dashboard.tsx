@@ -15,6 +15,7 @@ import {
   type RangeKind,
   type ReviewRange,
 } from "../api";
+import { useAuth } from "../auth/AuthContext";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import { PeriodSelector } from "../components/PeriodSelector";
@@ -45,6 +46,8 @@ function fmtRange(startIso: string, endIso: string): string {
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const orgName = user?.org_name;
   const [tab, setTab] = useState<OverviewTab>("features");
   const [range, setRange] = useState<ReviewRange>({ kind: "this_month" });
   const [data, setData] = useState<DashboardData | null>(null);
@@ -76,7 +79,10 @@ export function Dashboard() {
   return (
     <div className="content">
       <div className="dash-head">
-        <h1>Overview</h1>
+        <div>
+          {orgName && <span className="page-eyebrow">{orgName}</span>}
+          <h1>Overview</h1>
+        </div>
       </div>
 
       {error && (
