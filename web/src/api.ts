@@ -13,6 +13,16 @@ export interface User {
   impersonating?: { tenant_id: string; company: string } | null;
 }
 
+// Organization-level settings (shared by every user in the tenant).
+export interface OrgSettings {
+  org_name: string;
+  timezone: string;
+  currency: string;
+  customer_id_storage: "names" | "aliases" | "hashed";
+  store_prompts: boolean;
+  data_retention: "30d" | "90d" | "1y" | "indefinite";
+}
+
 // ---- Internal admin portal (allow-listed admins only) ----
 export interface AdminOverview {
   total_customers: number;
@@ -424,6 +434,11 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
   me: () => request<User>("/auth/me"),
+
+  getSettings: () => request<OrgSettings>("/settings"),
+
+  updateSettings: (patch: Partial<OrgSettings>) =>
+    request<OrgSettings>("/settings", { method: "PATCH", body: JSON.stringify(patch) }),
 
   connectors: () => request<ConnectorStatus[]>("/connectors"),
 

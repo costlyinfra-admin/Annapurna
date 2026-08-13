@@ -38,6 +38,7 @@ from . import (
     okta,
     optimize_measured,
     seats,
+    settings,
 )
 from .github import GitHubError
 from .providers import ProviderError
@@ -53,6 +54,18 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class SettingsRequest(BaseModel):
+    # All optional: a PATCH updates only the fields that are present. The generous
+    # length cap just bounds the payload; the precise limit is enforced (as HTTP 400)
+    # in settings.update_settings so all validation errors come back consistently.
+    org_name: Optional[str] = Field(default=None, max_length=1000)
+    timezone: Optional[str] = Field(default=None, max_length=64)
+    currency: Optional[str] = Field(default=None, max_length=8)
+    customer_id_storage: Optional[str] = Field(default=None, max_length=16)
+    store_prompts: Optional[bool] = None
+    data_retention: Optional[str] = Field(default=None, max_length=16)
 
 
 class CredentialRequest(BaseModel):
@@ -356,6 +369,20 @@ def create_app() -> FastAPI:
         if target and is_admin:
             impersonating = {"tenant_id": target, "company": admin.company_name(target)}
         return {**user, "is_admin": is_admin, "impersonating": impersonating}
+
+    # ---- Organization settings (administrative Settings page) -----------
+    @app.get("/api/settings")
+    def get_settings(user: CurrentUser) -> dict:
+        return settings.get_settings(user["tenant_id"])
+
+    @app.patch("/api/settings")
+    def update_settings(body: SettingsRequest, user: CurrentUser) -> dict:
+        # Only send through the fields the client actually set (PATCH semantics).
+        changes = body.model_dump(exclude_unset=True)
+        try:
+            return settings.update_settings(user["tenant_id"], changes)
+        except settings.SettingsError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     @app.get("/api/connectors")
     def list_connectors(user: CurrentUser) -> list[credentials.ConnectorStatus]:

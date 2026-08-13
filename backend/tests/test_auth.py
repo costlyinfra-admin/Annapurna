@@ -6,11 +6,33 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from annapurna import crypto
+from annapurna import auth, crypto
 from annapurna.api import create_app
 from fastapi.testclient import TestClient
 
 GOOD_PASSWORD = "correct horse battery"
+
+
+@pytest.mark.parametrize(
+    "email, expected",
+    [
+        ("alessio@transilienceai.com", "Transilience AI"),  # trailing "ai" -> " AI"
+        ("cto@acme.com", "Acme"),
+        ("dev@acme-corp.io", "Acme Corp"),  # hyphens become words
+        ("x@openai.com", "Open AI"),
+        ("someone@gmail.com", None),  # personal mailbox -> no inference
+        ("u@outlook.com", None),
+        ("u@yahoo.co.uk", None),
+        ("noatsign", None),  # unparseable
+    ],
+)
+def test_infer_org_name(email, expected):
+    assert auth.infer_org_name(email) == expected
+
+
+def test_default_tenant_name_falls_back_safely_for_personal_email():
+    # No confident company name -> a safe, non-strange fallback (not machine noise).
+    assert auth._default_tenant_name("jane@gmail.com") == "jane's workspace"
 
 
 @pytest.fixture

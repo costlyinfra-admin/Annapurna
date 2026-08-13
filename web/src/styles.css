@@ -543,6 +543,61 @@ select {
   margin-bottom: 0.4rem;
 }
 
+/* Administrative settings fields (Organization, Privacy & data). */
+.settings-page .settings-card {
+  max-width: 640px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.95rem;
+}
+
+.settings-field > label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.settings-field input,
+.settings-field select {
+  max-width: 340px;
+}
+
+.settings-field-inline {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.settings-hint {
+  font-size: 0.8rem;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 1.25rem;
+}
+
+.settings-saved {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--good);
+}
+
 @media (max-width: 720px) {
   .app-shell {
     flex-direction: column;

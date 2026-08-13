@@ -8,6 +8,7 @@ exists (RLS would otherwise hide the user during login).
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 import bcrypt
@@ -17,6 +18,70 @@ from typing_extensions import TypedDict  # pydantic needs this on Python < 3.12
 from .db import admin_dsn, connect
 
 MIN_PASSWORD_LENGTH = 8
+
+# Consumer mailbox brands — a signup from one of these tells us nothing about a
+# company. Matched on the domain's second-level label so ccTLD variants are caught
+# too (yahoo.com AND yahoo.co.uk). Being over-inclusive here is safe: it just falls
+# back to the neutral default instead of inventing a company name.
+_PERSONAL_EMAIL_BRANDS = frozenset(
+    {
+        "gmail",
+        "googlemail",
+        "outlook",
+        "hotmail",
+        "live",
+        "msn",
+        "yahoo",
+        "ymail",
+        "rocketmail",
+        "icloud",
+        "me",
+        "mac",
+        "aol",
+        "proton",
+        "protonmail",
+        "pm",
+        "gmx",
+        "mail",
+        "email",
+        "yandex",
+        "zoho",
+        "fastmail",
+        "hey",
+        "mailbox",
+        "qq",
+        "163",
+        "126",
+    }
+)
+
+
+def infer_org_name(email: str) -> Optional[str]:
+    """Best-effort company name from a work-email domain, or None if not confident.
+
+    ``alessio@transilienceai.com`` -> ``"Transilience AI"``. Personal mailboxes and
+    unparseable domains return None so the caller can fall back to a safe default.
+    Only a *starting* value — always editable later in Settings.
+    """
+    if "@" not in email:
+        return None
+    domain = email.rsplit("@", 1)[1].strip().lower()
+    label = domain.split(".", 1)[0]  # second-level label, e.g. "transilienceai"
+    if not domain or label in _PERSONAL_EMAIL_BRANDS:
+        return None
+    if not re.fullmatch(r"[a-z0-9-]{2,}", label) or not any(c.isalpha() for c in label):
+        return None
+    parts = [p for p in label.split("-") if p]
+    words: list[str] = []
+    for i, part in enumerate(parts):
+        # A trailing "…ai" reads as a separate "AI" (transilienceai -> Transilience AI).
+        if i == len(parts) - 1 and len(part) > 4 and part.endswith("ai"):
+            words.append(part[:-2].title())
+            words.append("AI")
+        else:
+            words.append(part.title())
+    name = " ".join(w for w in words if w).strip()
+    return name or None
 
 
 class EmailAlreadyRegistered(Exception):
@@ -41,6 +106,11 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def _default_tenant_name(email: str) -> str:
+    """Initial organization name: inferred from the work-email domain, else a safe
+    fallback tied to the local part (never a strange machine-generated name)."""
+    inferred = infer_org_name(email)
+    if inferred:
+        return inferred
     local = email.split("@", 1)[0]
     return f"{local}'s workspace"
 
