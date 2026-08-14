@@ -135,29 +135,33 @@ export interface SplitGroup {
   signal_ids: string[];
 }
 
-// ---- Anthropic workspace / API-key / environment breakdown ----
-export interface AnthropicKeyRow {
-  workspace_id: string | null;
-  workspace_name: string | null;
-  api_key_id: string | null;
-  api_key_name: string | null;
-  environment: string; // production | development | internal | unclassified
-  amount: number;
+// ---- Shared cost-source resource classification ----
+export type Classification = "production" | "development" | "internal" | "ignore" | "unclassified";
+
+export const CLASSIFICATION_OPTIONS: { value: Classification; label: string }[] = [
+  { value: "production", label: "Production" },
+  { value: "development", label: "Development / Test" },
+  { value: "internal", label: "Internal" },
+  { value: "ignore", label: "Ignore" },
+  { value: "unclassified", label: "Unclassified" },
+];
+
+export interface SourceResourceRow {
+  resource_type: string;
+  resource_id: string | null;
+  name: string | null;
+  group: string | null;
+  classification: Classification;
+  cost: number;
 }
 
-export interface AnthropicWorkspaceRow {
-  workspace_id: string | null;
-  workspace_name: string | null;
-  total: number;
-  by_environment: Record<string, number>;
-}
-
-export interface AnthropicBreakdown {
-  period: string;
-  total: number;
-  by_environment: Record<string, number>;
-  by_workspace: AnthropicWorkspaceRow[];
-  keys: AnthropicKeyRow[];
+export interface SourceDetail {
+  provider: string;
+  period?: string;
+  classifiable: boolean;
+  columns?: { group: string; name: string };
+  rows: SourceResourceRow[];
+  message?: string;
 }
 
 export interface DashboardRow {
@@ -560,10 +564,17 @@ export const api = {
       body: JSON.stringify({ provider, period, months }),
     }),
 
-  anthropicBreakdown: (period?: string) =>
-    request<AnthropicBreakdown>(
-      `/inference/anthropic/breakdown${period ? `?period=${period}` : ""}`,
-    ),
+  sourceDetail: (provider: string, period?: string) =>
+    request<SourceDetail>(`/cost-sources/${provider}/detail${period ? `?period=${period}` : ""}`),
+
+  classifyResource: (
+    provider: string,
+    body: { resource_type: string; resource_id: string; classification: Classification },
+  ) =>
+    request<{ classification: Classification }>(`/cost-sources/${provider}/classify`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   importBuildCost: (csv: string, tool?: string, period?: string) =>
     request<{ total: number }>("/build/import", {

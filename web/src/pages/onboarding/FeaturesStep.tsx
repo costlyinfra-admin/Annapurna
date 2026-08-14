@@ -12,6 +12,7 @@ import { ReviewStep } from "./ReviewStep";
 export function FeaturesStep() {
   const [connectors, setConnectors] = useState<ConnectorStatus[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openType, setOpenType] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -48,6 +49,8 @@ export function FeaturesStep() {
               connector={c}
               onConnected={refresh}
               hint="feature discovery · optional for public orgs"
+              expanded={openType === c.type}
+              onToggle={() => setOpenType((t) => (t === c.type ? null : c.type))}
             />
           ))}
         </ul>

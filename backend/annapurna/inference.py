@@ -20,9 +20,14 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import Optional
 
-from . import classification, credentials, pricing
+from . import credentials, pricing, resources
 from .db import admin_dsn, app_dsn, connect, tenant_tx
 from .providers import CostRecord, UsageRecord, make_cost_client, month_start
+
+# 'ignore'-classified spend is excluded from normal reporting totals. NULL
+# (legacy/unclassified) stays included. Two forms: bare and for the aliased table.
+_ACTIVE_ENV = "(environment IS NULL OR environment <> 'ignore')"
+_ACTIVE_ENV_IC = "(ic.environment IS NULL OR ic.environment <> 'ignore')"
 
 
 def _make_cost_client(provider: str, admin_key: str):
@@ -318,11 +323,39 @@ def ingest_anthropic(
     The Cost Report is the billing authority (dollars per workspace); the Usage
     Report supplies the per-(api_key, model) split within a workspace. For each
     workspace we allocate its billed dollars across its usage rows by priced
-    weight — so the persisted total ALWAYS equals the bill — and label each row's
-    environment from the API-key name. A workspace billed with no usable usage is
-    preserved as a single ``unclassified`` unattributed row rather than guessed.
+    weight — so the persisted total ALWAYS equals the bill. Each row's environment
+    is the resolved snapshot of the API key's MANUAL classification (never inferred
+    from names); newly seen keys default to ``unclassified``. A workspace billed
+    with no usable usage is preserved as a single row rather than guessed.
     """
     start = month_start(period)
+
+    # Register discovered resources (workspaces + API keys) so the user can classify
+    # them, then load the saved classifications. Registration never overwrites a
+    # manual choice; unseen resources default to 'unclassified'.
+    discovered: list[dict] = []
+    for ws_id in {r.project for r in cost_records if r.project} | {
+        u.workspace_id for u in usage_records if u.workspace_id
+    }:
+        discovered.append(
+            {
+                "resource_type": "workspace",
+                "resource_id": ws_id,
+                "resource_name": workspaces.get(ws_id),
+            }
+        )
+    for key_id in {u.api_key_id for u in usage_records if u.api_key_id}:
+        meta = api_keys.get(key_id, {})
+        discovered.append(
+            {
+                "resource_type": "api_key",
+                "resource_id": key_id,
+                "resource_name": meta.get("name"),
+                "parent_resource_id": meta.get("workspace_id"),
+            }
+        )
+    resources.register_resources(tenant_id, "anthropic", discovered)
+    class_map = resources.get_classifications(tenant_id, "anthropic")
 
     # Authoritative billed dollars per workspace (cost_report groups by workspace_id).
     billed_by_ws: dict[Optional[str], Decimal] = {}
@@ -373,7 +406,11 @@ def ingest_anthropic(
                 for row, amount in zip(rows, allocations):
                     meta = api_keys.get(row.api_key_id or "", {})
                     api_key_name = meta.get("name")
-                    environment = classification.classify("anthropic", api_key_name=api_key_name)
+                    # Environment is the resolved snapshot of the KEY's manual
+                    # classification (never inferred from its name).
+                    environment = class_map.get(
+                        ("api_key", row.api_key_id), resources.DEFAULT_CLASSIFICATION
+                    )
                     feature_id, confidence = _attribute_detail(row.api_key_id, ws_id, maps)
                     _insert_anthropic_row(
                         conn,
@@ -395,7 +432,9 @@ def ingest_anthropic(
                         unattributed += amount
                     rows_written += 1
             else:
-                # Billed dollars we can't safely map to usage -> unclassified bucket.
+                # Billed dollars with no usable usage detail -> the workspace's own
+                # classification if the user set one, else unclassified.
+                environment = class_map.get(("workspace", ws_id), resources.DEFAULT_CLASSIFICATION)
                 _insert_anthropic_row(
                     conn,
                     tenant_id,
@@ -406,12 +445,10 @@ def ingest_anthropic(
                     ws_id,
                     ws_name,
                     None,
-                    classification.UNCLASSIFIED,
+                    environment,
                     "low",
                 )
-                by_env[classification.UNCLASSIFIED] = (
-                    by_env.get(classification.UNCLASSIFIED, Decimal("0")) + authoritative
-                )
+                by_env[environment] = by_env.get(environment, Decimal("0")) + authoritative
                 unattributed += authoritative
                 rows_written += 1
 
@@ -422,20 +459,20 @@ def ingest_anthropic(
         "total": float(billed_total),
         "attributed": float(attributed),
         "unattributed": float(unattributed),
-        "production": float(by_env.get(classification.PRODUCTION, Decimal("0"))),
-        "unclassified": float(by_env.get(classification.UNCLASSIFIED, Decimal("0"))),
         "by_environment": {k: float(v) for k, v in by_env.items()},
     }
 
 
-def anthropic_breakdown(tenant_id: str, period: Optional[dt.date] = None) -> dict:
-    """Per-environment / per-workspace / per-key Anthropic split for a month.
+def anthropic_resource_detail(tenant_id: str, period: Optional[dt.date] = None) -> dict:
+    """Anthropic's one detail table: each API key, its workspace, its current manual
+    classification, and its cost for the month.
 
-    Reads persisted rows only (no provider calls). Powers the Cost Sources view
-    and the production-vs-unclassified summary. Legacy rows (environment NULL) are
-    surfaced as ``unclassified`` so nothing is presented as production by default.
-    ``period`` defaults to the latest month that has Anthropic cost data.
+    Cost comes from persisted rows; the classification comes from the saved config
+    (``resource_classification``) so a just-made choice shows immediately, before the
+    next sync re-snapshots it onto the cost rows. ``period`` defaults to the latest
+    month with Anthropic data.
     """
+    class_map = resources.get_classifications(tenant_id, "anthropic")
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         if period is None:
             latest = conn.execute(
@@ -447,52 +484,39 @@ def anthropic_breakdown(tenant_id: str, period: Optional[dt.date] = None) -> dic
             start = month_start(period)
         rows = conn.execute(
             """
-            SELECT workspace_id, workspace_name, api_key_id, api_key_name,
-                   COALESCE(environment, 'unclassified') AS env, SUM(amount)
+            SELECT workspace_id, workspace_name, api_key_id, api_key_name, SUM(amount)
             FROM inference_cost
             WHERE provider = 'anthropic' AND period = %s AND source = 'cost_api'
-            GROUP BY workspace_id, workspace_name, api_key_id, api_key_name, env
+            GROUP BY workspace_id, workspace_name, api_key_id, api_key_name
             ORDER BY SUM(amount) DESC
             """,
             (start,),
         ).fetchall()
 
-    by_environment: dict[str, float] = {}
-    workspaces: dict[tuple, dict] = {}
-    keys: list[dict] = []
-    total = 0.0
-    for ws_id, ws_name, key_id, key_name, env, amount in rows:
-        amt = float(amount)
-        total += amt
-        by_environment[env] = by_environment.get(env, 0.0) + amt
-        ws = workspaces.setdefault(
-            (ws_id, ws_name),
+    detail_rows: list[dict] = []
+    for ws_id, ws_name, key_id, key_name, amount in rows:
+        # A key row is classifiable; a workspace-only fallback row (no key) is not.
+        if key_id:
+            classification = class_map.get(("api_key", key_id), resources.DEFAULT_CLASSIFICATION)
+        else:
+            classification = class_map.get(("workspace", ws_id), resources.DEFAULT_CLASSIFICATION)
+        detail_rows.append(
             {
-                "workspace_id": ws_id,
-                "workspace_name": ws_name,
-                "total": 0.0,
-                "by_environment": {},
-            },
-        )
-        ws["total"] += amt
-        ws["by_environment"][env] = ws["by_environment"].get(env, 0.0) + amt
-        keys.append(
-            {
-                "workspace_id": ws_id,
-                "workspace_name": ws_name,
-                "api_key_id": key_id,
-                "api_key_name": key_name,
-                "environment": env,
-                "amount": amt,
+                "resource_type": "api_key" if key_id else "workspace",
+                "resource_id": key_id or ws_id,
+                "name": key_name or ("(no key detail)" if key_id else None),
+                "group": ws_name or ws_id or "—",
+                "classification": classification,
+                "cost": float(amount),
             }
         )
 
     return {
+        "provider": "anthropic",
         "period": start.isoformat(),
-        "total": total,
-        "by_environment": by_environment,
-        "by_workspace": sorted(workspaces.values(), key=lambda w: w["total"], reverse=True),
-        "keys": keys,
+        "classifiable": True,
+        "columns": {"group": "Workspace", "name": "API key"},
+        "rows": detail_rows,
     }
 
 
@@ -501,22 +525,22 @@ def inference_summary(tenant_id: str, period: dt.date) -> dict:
     start = month_start(period)
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         rows = conn.execute(
-            """
+            f"""
             SELECT ic.feature_id, f.name, ic.confidence, SUM(ic.amount)
             FROM inference_cost ic
             LEFT JOIN feature f ON f.id = ic.feature_id
-            WHERE ic.period = %s AND ic.source = 'cost_api'
+            WHERE ic.period = %s AND ic.source = 'cost_api' AND {_ACTIVE_ENV_IC}
             GROUP BY ic.feature_id, f.name, ic.confidence
             ORDER BY SUM(ic.amount) DESC
-            """,
+            """,  # noqa: S608
             (start,),
         ).fetchall()
         provider_rows = conn.execute(
-            """
+            f"""
             SELECT provider, SUM(amount) FROM inference_cost
-            WHERE period = %s AND source = 'cost_api'
+            WHERE period = %s AND source = 'cost_api' AND {_ACTIVE_ENV}
             GROUP BY provider
-            """,
+            """,  # noqa: S608
             (start,),
         ).fetchall()
 

@@ -73,23 +73,43 @@ class _FakeAnthropicDetailed:
         }
 
 
-def test_anthropic_breakdown_endpoint_reports_prod_vs_unclassified(client, monkeypatch):
+def test_cost_source_detail_and_classify_endpoints(client, monkeypatch):
     monkeypatch.setattr(
         inference, "_make_cost_client", lambda provider, key: _FakeAnthropicDetailed()
     )
     client.post("/api/connectors/anthropic/credential", json={"secret": "sk-ant-admin"})
-    summary = client.post("/api/inference/ingest", json={"provider": "anthropic"}).json()
-    assert summary["total"] == 1000.0
+    client.post("/api/inference/ingest", json={"provider": "anthropic"})
 
-    breakdown = client.get("/api/inference/anthropic/breakdown").json()
-    # Reconciled to the authoritative bill, split 1:1 between the two keys.
-    assert breakdown["total"] == pytest.approx(1000.0, abs=0.01)
-    assert breakdown["by_environment"]["production"] == pytest.approx(500.0, abs=0.01)
-    assert breakdown["by_environment"]["unclassified"] == pytest.approx(500.0, abs=0.01)
-    keys = {k["api_key_name"]: k for k in breakdown["keys"]}
-    assert keys["service-a-prod"]["environment"] == "production"
-    assert keys["service-a-prod"]["workspace_name"] == "mcs-dev"
-    assert keys["experimental"]["environment"] == "unclassified"
+    # Detail: one flat classifiable table; nothing auto-classified.
+    detail = client.get("/api/cost-sources/anthropic/detail").json()
+    assert detail["classifiable"] is True
+    assert detail["columns"] == {"group": "Workspace", "name": "API key"}
+    by_name = {r["name"]: r for r in detail["rows"]}
+    assert by_name["service-a-prod"]["classification"] == "unclassified"  # NOT production
+    assert sum(r["cost"] for r in detail["rows"]) == pytest.approx(1000.0, abs=0.01)
+
+    # Classify a key -> persists and shows immediately.
+    resp = client.post(
+        "/api/cost-sources/anthropic/classify",
+        json={"resource_type": "api_key", "resource_id": "k_a", "classification": "production"},
+    )
+    assert resp.status_code == 200
+    again = client.get("/api/cost-sources/anthropic/detail").json()
+    assert {r["name"]: r["classification"] for r in again["rows"]}["service-a-prod"] == "production"
+
+    # Invalid classification -> 400.
+    bad = client.post(
+        "/api/cost-sources/anthropic/classify",
+        json={"resource_type": "api_key", "resource_id": "k_a", "classification": "prod"},
+    )
+    assert bad.status_code == 400
+
+
+def test_cost_source_detail_for_provider_without_adapter(client):
+    detail = client.get("/api/cost-sources/openai/detail").json()
+    assert detail["classifiable"] is False
+    assert detail["rows"] == []
+    assert "message" in detail
 
 
 class _FakeTogether:

@@ -19,6 +19,8 @@ vi.mock("../api", async (importActual) => {
       syncCursorSpend: vi.fn(),
       createComputePool: vi.fn(),
       saveCredential: vi.fn(),
+      sourceDetail: vi.fn(),
+      classifyResource: vi.fn(),
     },
   };
 });
@@ -95,5 +97,48 @@ describe("CostSourcesPage", () => {
       expect(api.ingestInference).toHaveBeenCalledWith("anthropic", undefined, 12),
     );
     expect(await screen.findByText(/Pulled .* of Anthropic spend/)).toBeInTheDocument();
+  });
+
+  it("expands a connected source's detail inline and classifies a resource", async () => {
+    vi.mocked(api.connectors).mockResolvedValue([
+      { type: "anthropic", name: "Anthropic", category: "inference", connected: true },
+    ]);
+    vi.mocked(api.sourceDetail).mockResolvedValue({
+      provider: "anthropic",
+      classifiable: true,
+      columns: { group: "Workspace", name: "API key" },
+      rows: [
+        {
+          resource_type: "api_key",
+          resource_id: "k_a",
+          name: "service-a-prod",
+          group: "mcs-dev",
+          classification: "unclassified",
+          cost: 100,
+        },
+      ],
+    });
+    vi.mocked(api.classifyResource).mockResolvedValue({ classification: "production" });
+    renderPage();
+
+    // Detail is hidden until the source is expanded.
+    expect(screen.queryByText("service-a-prod")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /Configure/ }));
+
+    // Detail appears inline: one table, no KPI tiles, no auto-classification.
+    expect(await screen.findByText("service-a-prod")).toBeInTheDocument();
+    expect(screen.queryByText("Production inference")).not.toBeInTheDocument();
+    const select = screen.getByLabelText(/Classification for service-a-prod/);
+    expect(select).toHaveValue("unclassified");
+
+    // Classifying calls the API with the user's choice.
+    fireEvent.change(select, { target: { value: "production" } });
+    await waitFor(() =>
+      expect(api.classifyResource).toHaveBeenCalledWith("anthropic", {
+        resource_type: "api_key",
+        resource_id: "k_a",
+        classification: "production",
+      }),
+    );
   });
 });

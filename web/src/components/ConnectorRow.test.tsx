@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { type ReactNode, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type ConnectorStatus } from "../api";
 import { ConnectorRow } from "./ConnectorRow";
@@ -8,7 +9,17 @@ vi.mock("../api", async (importActual) => {
   return { ...actual, api: { saveCredential: vi.fn() } };
 });
 
-function row(overrides: Partial<ConnectorStatus> = {}) {
+// A minimal controlled harness: ConnectorRow's expand is parent-driven (accordion).
+function Harness({
+  overrides = {},
+  onSync,
+  detail,
+}: {
+  overrides?: Partial<ConnectorStatus>;
+  onSync?: () => Promise<string>;
+  detail?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
   return (
     <ul>
       <ConnectorRow
@@ -20,9 +31,17 @@ function row(overrides: Partial<ConnectorStatus> = {}) {
           ...overrides,
         }}
         onConnected={vi.fn()}
+        onSync={onSync}
+        detail={detail}
+        expanded={open}
+        onToggle={() => setOpen((v) => !v)}
       />
     </ul>
   );
+}
+
+function row(overrides: Partial<ConnectorStatus> = {}) {
+  return <Harness overrides={overrides} />;
 }
 
 describe("ConnectorRow", () => {
@@ -64,22 +83,18 @@ describe("ConnectorRow", () => {
 
   it("shows Sync now on a connected row and reports the result", async () => {
     const onSync = vi.fn().mockResolvedValue("Pulled $42 of spend.");
-    render(
-      <ul>
-        <ConnectorRow
-          connector={{
-            type: "anthropic",
-            name: "Anthropic",
-            category: "inference",
-            connected: true,
-          }}
-          onConnected={vi.fn()}
-          onSync={onSync}
-        />
-      </ul>,
-    );
+    render(<Harness overrides={{ connected: true }} onSync={onSync} />);
     fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
     await waitFor(() => expect(onSync).toHaveBeenCalled());
     expect(await screen.findByText("Pulled $42 of spend.")).toBeInTheDocument();
+  });
+
+  it("expands a connected row's detail inline via Configure", () => {
+    render(<Harness overrides={{ connected: true }} detail={<p>INLINE DETAIL</p>} />);
+    expect(screen.queryByText("INLINE DETAIL")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Configure/ }));
+    expect(screen.getByText("INLINE DETAIL")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Close/ }));
+    expect(screen.queryByText("INLINE DETAIL")).not.toBeInTheDocument();
   });
 });

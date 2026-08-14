@@ -6,7 +6,7 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
-from annapurna import features, inference
+from annapurna import features, inference, resources
 from annapurna.providers import CostRecord, UsageRecord
 
 PERIOD = dt.date(2026, 5, 1)
@@ -127,64 +127,86 @@ _API_KEYS = {
 
 
 def test_anthropic_reconciles_to_cost_report_total(tenant_id):
-    # Two workspaces; mcs has a prod + a non-prod key, sos is all prod.
     cost = [_cost("ws_mcs", 1000), _cost("ws_sos", 200)]
     usage = [
-        _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 1_000_000),  # priced 18
-        _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),  # priced 3
+        _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 1_000_000),
+        _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),
         _usage("ws_sos", "k_c", "claude-haiku-4-5", 500_000, 100_000),
     ]
     summary = inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS)
-
     # INVARIANT: persisted total == authoritative Cost Report total, to the cent.
     assert summary["total"] == 1200.0
-    breakdown = inference.anthropic_breakdown(tenant_id, PERIOD)
-    assert breakdown["total"] == pytest.approx(1200.0, abs=0.01)
-    assert breakdown["by_environment"]["production"] + breakdown["by_environment"][
-        "unclassified"
-    ] == pytest.approx(1200.0, abs=0.01)
-    # ws_mcs $1000 split 18:3 -> prod 857.14, unclassified 142.86; ws_sos $200 all prod.
-    assert breakdown["by_environment"]["production"] == pytest.approx(1057.14, abs=0.01)
-    assert breakdown["by_environment"]["unclassified"] == pytest.approx(142.86, abs=0.01)
+    detail = inference.anthropic_resource_detail(tenant_id, PERIOD)
+    assert sum(r["cost"] for r in detail["rows"]) == pytest.approx(1200.0, abs=0.01)
 
 
-def test_anthropic_key_names_and_workspaces_resolve_in_breakdown(tenant_id):
+def test_anthropic_resources_default_unclassified_no_name_inference(tenant_id):
+    # "service-a-prod" must NOT auto-become production. Everything starts unclassified.
     cost = [_cost("ws_mcs", 100)]
     usage = [
         _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 0),
         _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),
     ]
     inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS)
-    keys = {k["api_key_name"]: k for k in inference.anthropic_breakdown(tenant_id, PERIOD)["keys"]}
-    assert keys["service-a-prod"]["environment"] == "production"
-    assert keys["service-a-prod"]["workspace_name"] == "mcs-dev"
-    assert keys["experimental"]["environment"] == "unclassified"
+    detail = inference.anthropic_resource_detail(tenant_id, PERIOD)
+    by_name = {r["name"]: r for r in detail["rows"]}
+    assert by_name["service-a-prod"]["classification"] == "unclassified"
+    assert by_name["service-a-prod"]["group"] == "mcs-dev"
+    assert by_name["experimental"]["classification"] == "unclassified"
+    # Detail is one flat table (no by_environment / by_workspace summaries).
+    assert set(detail) == {"provider", "period", "classifiable", "columns", "rows"}
+    assert detail["columns"] == {"group": "Workspace", "name": "API key"}
 
 
-def test_anthropic_workspace_without_usage_is_unclassified_not_lost(tenant_id):
-    # Billed dollars with no usage detail must survive as unclassified, not vanish.
+def test_anthropic_manual_classification_persists_and_survives_resync(tenant_id):
+    cost = [_cost("ws_mcs", 100)]
+    usage = [
+        _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 0),
+        _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),
+    ]
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS)
+    # User classifies one key production. It shows immediately in the detail.
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k_a", "production")
+    detail = inference.anthropic_resource_detail(tenant_id, PERIOD)
+    by_name = {r["name"]: r for r in detail["rows"]}
+    assert by_name["service-a-prod"]["classification"] == "production"
+
+    # A later sync must NOT overwrite the manual choice, and must snapshot it onto
+    # the cost rows so reporting reflects production.
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS)
+    assert resources.get_classifications(tenant_id, "anthropic")[("api_key", "k_a")] == "production"
+    summary = inference.inference_summary(tenant_id, PERIOD)
+    assert summary["by_provider"]["anthropic"] == pytest.approx(100.0, abs=0.01)
+
+
+def test_anthropic_workspace_without_usage_is_not_lost(tenant_id):
     summary = inference.ingest_anthropic(
         tenant_id, PERIOD, [_cost("ws_mcs", 500)], [], _WORKSPACES, _API_KEYS
     )
     assert summary["total"] == 500.0
-    breakdown = inference.anthropic_breakdown(tenant_id, PERIOD)
-    assert breakdown["total"] == pytest.approx(500.0, abs=0.01)
-    assert breakdown["by_environment"] == {"unclassified": pytest.approx(500.0, abs=0.01)}
-    # Unattributed (no feature) — reported as such.
-    assert summary["unattributed"] == 500.0
-    assert summary["production"] == 0.0
+    detail = inference.anthropic_resource_detail(tenant_id, PERIOD)
+    assert sum(r["cost"] for r in detail["rows"]) == pytest.approx(500.0, abs=0.01)
+    assert all(r["classification"] == "unclassified" for r in detail["rows"])
 
 
-def test_anthropic_missing_key_metadata_degrades_to_unclassified(tenant_id):
-    # Usage references a key we have no metadata for -> unclassified, no crash.
-    cost = [_cost("ws_x", 40)]
-    usage = [_usage("ws_x", "k_unknown", "claude-sonnet-4-6", 1_000_000, 0)]
-    summary = inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, {}, {})
-    assert summary["total"] == 40.0
-    breakdown = inference.anthropic_breakdown(tenant_id, PERIOD)
-    assert breakdown["by_environment"]["unclassified"] == pytest.approx(40.0, abs=0.01)
-    assert breakdown["keys"][0]["api_key_name"] is None
-    assert breakdown["keys"][0]["workspace_name"] is None
+def test_ignore_excluded_from_reporting_totals(tenant_id):
+    cost = [_cost("ws_mcs", 100)]
+    usage = [
+        _usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1_000_000, 0),  # -> ignore
+        _usage("ws_mcs", "k_b", "claude-sonnet-4-6", 1_000_000, 0),  # -> unclassified
+    ]
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS)
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k_a", "ignore")
+    inference.ingest_anthropic(
+        tenant_id, PERIOD, cost, usage, _WORKSPACES, _API_KEYS
+    )  # re-snapshot
+
+    # The ignored $50 is excluded from reporting; the other $50 remains.
+    summary = inference.inference_summary(tenant_id, PERIOD)
+    assert summary["by_provider"]["anthropic"] == pytest.approx(50.0, abs=0.01)
+    # But the source detail still shows every resource (auditability).
+    detail = inference.anthropic_resource_detail(tenant_id, PERIOD)
+    assert sum(r["cost"] for r in detail["rows"]) == pytest.approx(100.0, abs=0.01)
 
 
 def test_run_inference_ingest_routes_anthropic_to_detailed_path(tenant_id, monkeypatch):
@@ -213,11 +235,9 @@ def test_run_inference_ingest_routes_anthropic_to_detailed_path(tenant_id, monke
     monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeAnthropic())
     summary = inference.run_inference_ingest(tenant_id, "anthropic", PERIOD, "admin-key")
     assert summary["total"] == 1000.0
-    assert summary["production"] == pytest.approx(500.0, abs=0.01)  # split 1:1
-    assert summary["unclassified"] == pytest.approx(500.0, abs=0.01)
-    # Persisted rows carry explicit identity, not the old api_key_ref overload.
-    keys = inference.anthropic_breakdown(tenant_id, PERIOD)["keys"]
-    assert {k["workspace_name"] for k in keys} == {"mcs-dev"}
+    detail = inference.anthropic_resource_detail(tenant_id, PERIOD)
+    assert {r["group"] for r in detail["rows"]} == {"mcs-dev"}
+    assert all(r["classification"] == "unclassified" for r in detail["rows"])
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,10 @@ from .providers import month_start
 
 _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
 
+# Spend the user marked "ignore" is excluded from normal reporting/optimization
+# totals. NULL (legacy / unclassified snapshot) stays included.
+_ACTIVE_ENV = "(environment IS NULL OR environment <> 'ignore')"
+
 
 def _min_confidence(current: Optional[str], candidate: Optional[str]) -> Optional[str]:
     """Most conservative (lowest) of two confidences."""
@@ -135,13 +139,13 @@ def dashboard(
         prev_inference = float(
             conn.execute(
                 "SELECT COALESCE(SUM(amount), 0) FROM inference_cost "
-                "WHERE period BETWEEN %s AND %s",
+                f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}",  # noqa: S608
                 (prev_start, prev_end),
             ).fetchone()[0]
         )
         tok = conn.execute(
             "SELECT COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0) "
-            "FROM inference_cost WHERE period BETWEEN %s AND %s",
+            f"FROM inference_cost WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}",  # noqa: S608
             (start, end),
         ).fetchone()
         tokens_in, tokens_out = int(tok[0]), int(tok[1])
@@ -332,7 +336,7 @@ def _inference_rollup(conn, start: dt.date, end: Optional[dt.date] = None) -> tu
     end = end or start
     rows = conn.execute(
         "SELECT feature_id, amount, confidence, source, provider, request_count "
-        "FROM inference_cost WHERE period BETWEEN %s AND %s",
+        f"FROM inference_cost WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}",  # noqa: S608
         (start, end),
     ).fetchall()
     hook_providers = {provider for (_f, _a, _c, src, provider, _r) in rows if src == "hook"}
@@ -614,24 +618,24 @@ def spend_by_provider(
 
         # ---- Inference: by provider + trend ----
         provider_rows = conn.execute(
-            """
+            f"""
             SELECT provider, SUM(amount), SUM(request_count)
             FROM inference_cost
-            WHERE period BETWEEN %s AND %s
+            WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
             GROUP BY provider ORDER BY SUM(amount) DESC
-            """,
+            """,  # noqa: S608
             (start, end),
         ).fetchall()
         total = sum(float(amount) for _p, amount, _req in provider_rows) or 0.0
 
         # Per-provider model split (so each provider's total breaks down by model).
         model_rows = conn.execute(
-            """
+            f"""
             SELECT provider, model, SUM(amount)
             FROM inference_cost
-            WHERE period BETWEEN %s AND %s
+            WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
             GROUP BY provider, model ORDER BY SUM(amount) DESC
-            """,
+            """,  # noqa: S608
             (start, end),
         ).fetchall()
         models_by_provider: dict[str, list] = {}
@@ -659,12 +663,12 @@ def spend_by_provider(
         trend = [
             {"period": p.isoformat(), "amount": float(amount)}
             for p, amount in conn.execute(
-                """
+                f"""
                 SELECT period, SUM(amount)
                 FROM inference_cost
-                WHERE period BETWEEN %s AND %s
+                WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
                 GROUP BY period ORDER BY period
-                """,
+                """,  # noqa: S608
                 (start, end),
             ).fetchall()
         ]

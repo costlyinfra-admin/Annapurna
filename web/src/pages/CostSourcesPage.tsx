@@ -5,10 +5,10 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type ConnectorStatus } from "../api";
-import { AnthropicBreakdown } from "../components/AnthropicBreakdown";
 import { BuildCostActions, type FeatureOption } from "../components/BuildCostActions";
 import { ConnectorRow } from "../components/ConnectorRow";
 import { SelfHostedPools } from "../components/SelfHostedPools";
+import { SourceDetail } from "../components/SourceDetail";
 import { money } from "../format";
 
 const TABS = [
@@ -23,8 +23,10 @@ export function CostSourcesPage() {
   const [connectors, setConnectors] = useState<ConnectorStatus[] | null>(null);
   const [features, setFeatures] = useState<FeatureOption[]>([]);
   const [error, setError] = useState<string | null>(null);
-  // Bumped after an Anthropic sync so the breakdown re-fetches.
-  const [anthropicVersion, setAnthropicVersion] = useState(0);
+  // Accordion: which source's inline panel is open (one at a time).
+  const [openType, setOpenType] = useState<string | null>(null);
+  // Bumped after a sync so the open source's detail re-fetches.
+  const [detailVersion, setDetailVersion] = useState(0);
 
   const refreshConnectors = useCallback(async () => {
     try {
@@ -91,19 +93,19 @@ export function CostSourcesPage() {
                   key={c.type}
                   connector={c}
                   onConnected={refreshConnectors}
+                  expanded={openType === c.type}
+                  onToggle={() => setOpenType((t) => (t === c.type ? null : c.type))}
+                  detail={<SourceDetail provider={c.type} refreshKey={detailVersion} />}
                   onSync={async () => {
                     // Backfill the last 12 months of history, not just this month.
                     const r = await api.ingestInference(c.type, undefined, 12);
                     await refreshFeatures();
-                    if (c.type === "anthropic") setAnthropicVersion((v) => v + 1);
+                    setDetailVersion((v) => v + 1);
                     return `Pulled ${money(r.total)} of ${c.name} spend across the last 12 months.`;
                   }}
                 />
               ))}
             </ul>
-          )}
-          {connectors && inference.some((c) => c.type === "anthropic" && c.connected) && (
-            <AnthropicBreakdown version={anthropicVersion} />
           )}
         </section>
       )}

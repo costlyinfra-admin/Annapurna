@@ -1,12 +1,12 @@
 /**
- * One connector in a connect list. The header shows its name/category and a
- * Connected badge or a Connect toggle. Pressing Connect expands a panel
- * *underneath* the row with source-specific setup instructions plus the
- * credential form (saved encrypted server-side). Instructions come from
- * CONNECTOR_GUIDES, keyed by connector type; connectors without a guide get
- * the generic paste-token form.
+ * One expandable cost-source card. The header shows the source, its status, and
+ * its actions; clicking Connect (not-connected) or Configure (connected) expands a
+ * panel *directly underneath this row* — never at the bottom of the page. Expansion
+ * is controlled by the parent so the list behaves as an accordion (one open at a
+ * time). Not-connected rows expand to the setup guide + credential form; connected
+ * rows expand to the provider's inline detail (`detail`).
  */
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { api, type ConnectorStatus } from "../api";
 import { CONNECTOR_GUIDES } from "../connectorGuides";
 
@@ -15,15 +15,21 @@ export function ConnectorRow({
   onConnected,
   hint,
   onSync,
+  expanded,
+  onToggle,
+  detail,
 }: {
   connector: ConnectorStatus;
   onConnected: () => void;
   hint?: string;
-  /** When set, a connected row shows a "Sync now" button that pulls the latest
-   *  data on demand and returns a short result message to display inline. */
+  /** When set, a connected row shows "Sync now"; returns a short result message. */
   onSync?: () => Promise<string>;
+  /** Whether this card's inline panel is open (accordion, controlled by parent). */
+  expanded: boolean;
+  onToggle: () => void;
+  /** Inline detail for a connected source (rendered under the row when expanded). */
+  detail?: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
   const [secret, setSecret] = useState("");
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -37,7 +43,7 @@ export function ConnectorRow({
     try {
       await api.saveCredential(connector.type, secret.trim());
       setSecret("");
-      setOpen(false);
+      onToggle(); // collapse
       onConnected();
     } finally {
       setSaving(false);
@@ -60,10 +66,15 @@ export function ConnectorRow({
   return (
     <li className="connector-row">
       <div className="connector-head">
-        <div className="connector-info">
+        <button
+          type="button"
+          className="connector-info connector-info-toggle"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
           <span className="connector-name">{connector.name}</span>
           <span className="connector-category">{hint ?? connector.category.replace("_", " ")}</span>
-        </div>
+        </button>
         {connector.connected ? (
           <span className="connector-actions">
             <span className="badge connected">Connected</span>
@@ -72,17 +83,24 @@ export function ConnectorRow({
                 {syncing ? "Syncing…" : "Sync now"}
               </button>
             )}
+            <button className="secondary" onClick={onToggle} aria-expanded={expanded}>
+              {expanded ? "Close ▴" : "Configure ▾"}
+            </button>
           </span>
         ) : (
-          <button className="secondary" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-            {open ? "Cancel" : "Connect"}
+          <button className="secondary" onClick={onToggle} aria-expanded={expanded}>
+            {expanded ? "Cancel" : "Connect"}
           </button>
         )}
       </div>
 
       {syncNote && <p className="muted connector-sync-note">{syncNote}</p>}
 
-      {open && !connector.connected && (
+      {/* Connected -> inline detail; not connected -> inline setup. Always directly
+          under this row. */}
+      {expanded && connector.connected && detail && <div className="connector-panel">{detail}</div>}
+
+      {expanded && !connector.connected && (
         <div className="connector-panel">
           {guide && (
             <div className="connector-guide">

@@ -27,6 +27,7 @@ from . import (
     build,
     claudecode,
     compute,
+    cost_sources,
     credentials,
     cursorspend,
     dashboard,
@@ -37,6 +38,7 @@ from . import (
     inference,
     okta,
     optimize_measured,
+    resources,
     seats,
     settings,
 )
@@ -54,6 +56,13 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class ClassifyRequest(BaseModel):
+    resource_type: str = Field(min_length=1, max_length=32)
+    resource_id: str = Field(min_length=1, max_length=256)
+    classification: str = Field(min_length=1, max_length=16)
+    resource_name: Optional[str] = Field(default=None, max_length=256)
 
 
 class SettingsRequest(BaseModel):
@@ -519,8 +528,11 @@ def create_app() -> FastAPI:
         try:
             if body.months > 1:
                 return inference.run_inference_backfill(
-                    user["tenant_id"], body.provider, admin_key,
-                    months=body.months, anchor=period,
+                    user["tenant_id"],
+                    body.provider,
+                    admin_key,
+                    months=body.months,
+                    anchor=period,
                 )
             return inference.run_inference_ingest(
                 user["tenant_id"], body.provider, period, admin_key
@@ -549,15 +561,32 @@ def create_app() -> FastAPI:
     ) -> dict:
         return inference.inference_summary(user["tenant_id"], _parse_period(period))
 
-    @app.get("/api/inference/anthropic/breakdown")
-    def anthropic_breakdown(
+    # ---- Cost-source resource detail + classification (shared across providers) ----
+    @app.get("/api/cost-sources/{provider}/detail")
+    def cost_source_detail(
+        provider: str,
         user: CurrentUser,
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
-        # Production vs. unclassified Anthropic spend, split by workspace + API key.
-        # No explicit period -> the latest month that has Anthropic data.
+        # The single detail table shown inline under a source: its attributable
+        # resources with their current manual classification and cost.
         resolved = _parse_period(period) if period else None
-        return inference.anthropic_breakdown(user["tenant_id"], resolved)
+        return cost_sources.resource_detail(user["tenant_id"], provider, resolved)
+
+    @app.post("/api/cost-sources/{provider}/classify")
+    def classify_resource(provider: str, body: ClassifyRequest, user: CurrentUser) -> dict:
+        try:
+            return resources.set_classification(
+                user["tenant_id"],
+                provider,
+                body.resource_type,
+                body.resource_id,
+                body.classification,
+                resource_name=body.resource_name,
+                updated_by=user["email"],
+            )
+        except resources.ResourceError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # ---- Metering hook (M7) --------------------------------------------
     @app.post("/api/hook/token")
