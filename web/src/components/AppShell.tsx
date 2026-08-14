@@ -47,16 +47,24 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-        <div className="sidebar-foot">
-          {user?.is_admin && !user?.impersonating && (
-            <Link to="/admin" className="link">
-              Admin portal →
-            </Link>
+        <div className="sidebar-bottom">
+          {user?.org_name && (
+            <div className="sidebar-org">
+              <span className="sidebar-org-label">Organization</span>
+              <span className="sidebar-org-name">{user.org_name}</span>
+            </div>
           )}
-          <span className="sidebar-email muted">{user?.email}</span>
-          <button className="link" onClick={() => logout().then(() => navigate("/login"))}>
-            Sign out
-          </button>
+          <div className="sidebar-foot">
+            {user?.is_admin && !user?.impersonating && (
+              <Link to="/admin" className="link">
+                Admin portal →
+              </Link>
+            )}
+            <span className="sidebar-email muted">{user?.email}</span>
+            <button className="link" onClick={() => logout().then(() => navigate("/login"))}>
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
       <main className="app-main">

@@ -66,11 +66,6 @@ describe("Dashboard (Overview)", () => {
     vi.mocked(api.dashboard).mockResolvedValue(DATA);
   });
 
-  it("shows the organization name above the Overview title", async () => {
-    renderDashboard();
-    expect(await screen.findByText("Transilience AI")).toBeInTheDocument();
-  });
-
   it("shows build and inference as separate columns, plus the Unattributed row", async () => {
     renderDashboard();
 
