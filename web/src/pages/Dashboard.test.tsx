@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -166,7 +166,16 @@ describe("Dashboard (Overview)", () => {
           by_model: [{ model: "claude-sonnet-4-6", amount: 1250, pct: 100 }],
         },
       ],
-      trend: [{ period: "2026-05-01", amount: 5450 }],
+      trend: [
+        {
+          period: "2026-05-01",
+          total: 5450,
+          production: 3000,
+          development: 1450,
+          internal: 500,
+          unclassified: 500,
+        },
+      ],
       build_total: 270,
       build_by_tool: [
         { tool: "claude_code", amount: 181, pct: 67.04 },
@@ -184,6 +193,15 @@ describe("Dashboard (Overview)", () => {
     // Both an inference-by-provider and a build-by-tool section render.
     expect(await screen.findByText("Inference (run) cost by provider")).toBeInTheDocument();
     expect(screen.getByText("Build cost by tool")).toBeInTheDocument();
+
+    // The inference trend is a stacked classification chart with a compact legend.
+    expect(screen.getByText("Trend · by classification")).toBeInTheDocument();
+    const legend = screen.getByLabelText("Classification legend");
+    ["Production", "Dev / Test", "Internal", "Unclassified"].forEach((label) =>
+      expect(within(legend).getByText(label)).toBeInTheDocument(),
+    );
+    // Four stacked segments render for the single month (production/dev/internal/unclassified).
+    expect(document.querySelectorAll(".trend-seg").length).toBe(4);
     // The provider tab follows the Overview's selected period (default this month).
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "this_month" }));
     expect(screen.getByText("openai")).toBeInTheDocument();

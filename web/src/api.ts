@@ -357,6 +357,17 @@ export function rangeQuery(r?: ReviewRange): string {
   return `?range=${r.kind}`;
 }
 
+// One month of inference spend, split by classification. Buckets sum to `total`
+// (Ignore is excluded upstream).
+export interface ClassificationTrendPoint {
+  period: string;
+  total: number;
+  production: number;
+  development: number;
+  internal: number;
+  unclassified: number;
+}
+
 export interface ProviderSpend {
   start: string;
   end: string;
@@ -368,7 +379,8 @@ export interface ProviderSpend {
     requests: number | null;
     by_model: { model: string; amount: number; pct: number }[];
   }[];
-  trend: { period: string; amount: number }[];
+  // Inference trend, segmented by classification per month (a stacked bar).
+  trend: ClassificationTrendPoint[];
   build_total: number;
   build_by_tool: { tool: string; amount: number; pct: number }[];
   build_trend: { period: string; amount: number }[];

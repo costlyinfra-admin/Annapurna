@@ -23,6 +23,10 @@ _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
 # totals. NULL (legacy / unclassified snapshot) stays included.
 _ACTIVE_ENV = "(environment IS NULL OR environment <> 'ignore')"
 
+# The classification buckets shown in the inference trend (Ignore is excluded, and
+# any unexpected value folds into unclassified).
+_CLASSIFICATION_BUCKETS = ("production", "development", "internal", "unclassified")
+
 
 def _min_confidence(current: Optional[str], candidate: Optional[str]) -> Optional[str]:
     """Most conservative (lowest) of two confidences."""
@@ -660,18 +664,38 @@ def spend_by_provider(
             }
             for provider, amount, req in provider_rows
         ]
-        trend = [
-            {"period": p.isoformat(), "amount": float(amount)}
-            for p, amount in conn.execute(
-                f"""
-                SELECT period, SUM(amount)
-                FROM inference_cost
-                WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
-                GROUP BY period ORDER BY period
-                """,  # noqa: S608
-                (start, end),
-            ).fetchall()
-        ]
+        # Inference trend, segmented by classification per month (a stacked bar).
+        # NULL environment (legacy / never-classified) counts as unclassified;
+        # 'ignore' is excluded (via _ACTIVE_ENV), so the four buckets sum to the
+        # month's active inference total.
+        trend_rows = conn.execute(
+            f"""
+            SELECT period, COALESCE(environment, 'unclassified') AS env, SUM(amount)
+            FROM inference_cost
+            WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
+            GROUP BY period, env ORDER BY period
+            """,  # noqa: S608
+            (start, end),
+        ).fetchall()
+        trend_by_period: dict[str, dict] = {}
+        for p, env, amount in trend_rows:
+            key = p.isoformat()
+            entry = trend_by_period.setdefault(
+                key,
+                {
+                    "period": key,
+                    "total": 0.0,
+                    "production": 0.0,
+                    "development": 0.0,
+                    "internal": 0.0,
+                    "unclassified": 0.0,
+                },
+            )
+            amt = float(amount)
+            entry["total"] += amt
+            bucket = env if env in _CLASSIFICATION_BUCKETS else "unclassified"
+            entry[bucket] += amt
+        trend = sorted(trend_by_period.values(), key=lambda t: t["period"])
 
         # ---- Build: by coding tool + trend (kept separate from inference) ----
         tool_rows = conn.execute(

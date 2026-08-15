@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { api, type ProviderSpend, type ReviewRange } from "../api";
 import { money } from "../format";
+import { ClassificationTrendChart } from "./ClassificationTrendChart";
 import { TrendChart } from "./TrendChart";
 
 const EMPTY: ProviderSpend = {
@@ -110,8 +111,8 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
             ) : (
               <div className="inference-body">
                 <div className="inference-col">
-                  <span className="chart-title">Trend</span>
-                  <TrendChart trend={data.trend} />
+                  <span className="chart-title">Trend · by classification</span>
+                  <ClassificationTrendChart trend={data.trend} />
                 </div>
                 <div className="inference-col">
                   <span className="chart-title">By provider · {money(data.total)} total</span>

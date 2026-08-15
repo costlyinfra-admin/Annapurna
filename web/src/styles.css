@@ -2215,6 +2215,60 @@ a.exec-value:hover {
   opacity: 0.82;
 }
 
+/* Stacked classification bar: segments fill the bar bottom-to-top. */
+.trend-bar-stacked {
+  background: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trend-seg {
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.trend-seg-production {
+  background: var(--good);
+}
+
+.trend-seg-development {
+  background: var(--warn);
+}
+
+.trend-seg-internal {
+  background: var(--accent);
+}
+
+.trend-seg-unclassified {
+  background: #c3cad8;
+}
+
+/* Compact legend directly under the chart. */
+.trend-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.trend-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.trend-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
 .trend-label {
   font-size: 0.72rem;
   color: var(--muted);

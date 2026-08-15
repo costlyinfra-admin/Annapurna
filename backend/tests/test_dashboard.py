@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 
 import pytest
-from annapurna import dashboard
+from annapurna import dashboard, inference, resources
+from annapurna.providers import CostRecord, UsageRecord
 from annapurna.sampledata import insert_sample_data
 
 PERIOD = dt.date(2026, 5, 1)  # sampledata's period
@@ -163,6 +165,16 @@ def test_spend_by_provider_breakdown_and_window(seeded):
     assert amounts == sorted(amounts, reverse=True)
     assert len(month["trend"]) == 1
 
+    # The trend is a per-month classification stack whose buckets sum to the total.
+    # Seeded rows have NULL environment -> counted as unclassified (not production).
+    m = month["trend"][0]
+    assert m["production"] + m["development"] + m["internal"] + m["unclassified"] == pytest.approx(
+        m["total"], abs=0.01
+    )
+    assert m["total"] == pytest.approx(month["total"], abs=0.01)
+    assert m["production"] == 0.0  # nothing auto-classified
+    assert m["unclassified"] == pytest.approx(m["total"], abs=0.01)
+
     # Each provider carries a model breakdown that sums back to its own total,
     # with per-provider pct shares adding to 100.
     for p in month["by_provider"]:
@@ -187,3 +199,96 @@ def test_spend_by_provider_breakdown_and_window(seeded):
 
 def test_detail_missing_feature_returns_none(seeded):
     assert dashboard.feature_detail(seeded, "00000000-0000-0000-0000-000000000000", PERIOD) is None
+
+
+# ---------------------------------------------------------------------------
+# Inference trend: per-month classification stack (provider-independent).
+# ---------------------------------------------------------------------------
+def _acost(ws, amount, period=PERIOD):
+    return CostRecord("anthropic", period, Decimal(str(amount)), project=ws)
+
+
+def _ausage(ws, key, period=PERIOD):
+    return UsageRecord(
+        workspace_id=ws, api_key_id=key, model="claude-sonnet-4-6", tokens_in=1_000_000
+    )
+
+
+def test_inference_trend_classification_stack(tenant_id):
+    workspaces = {"ws1": "ws-one"}
+    api_keys = {
+        "k_prod": {"name": "prod", "workspace_id": "ws1"},
+        "k_dev": {"name": "dev", "workspace_id": "ws1"},
+        "k_ign": {"name": "ign", "workspace_id": "ws1"},
+    }
+    # $99 across three equally-used keys -> $33 each; plus an OpenAI row (no env).
+    cost = [_acost("ws1", 99)]
+    usage = [_ausage("ws1", "k_prod"), _ausage("ws1", "k_dev"), _ausage("ws1", "k_ign")]
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, workspaces, api_keys)
+    inference.ingest_records(
+        tenant_id, "openai", PERIOD, [CostRecord("openai", PERIOD, Decimal("30"), project="p")]
+    )
+
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k_prod", "production")
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k_dev", "development")
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k_ign", "ignore")
+    # Re-snapshot the classifications onto the cost rows.
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, workspaces, api_keys)
+
+    data = dashboard.spend_by_provider(tenant_id, range_token="this_month")
+    assert len(data["trend"]) == 1
+    m = data["trend"][0]
+    # Each classification lands in its own stack; OpenAI (NULL env) -> unclassified.
+    assert m["production"] == pytest.approx(33.0, abs=0.01)  # from Anthropic
+    assert m["development"] == pytest.approx(33.0, abs=0.01)
+    assert m["internal"] == 0.0
+    assert m["unclassified"] == pytest.approx(30.0, abs=0.01)  # the OpenAI row
+    # Ignore ($33) is excluded: buckets sum to total, which excludes it.
+    assert m["total"] == pytest.approx(96.0, abs=0.01)
+    assert (
+        m["production"] + m["development"] + m["internal"] + m["unclassified"]
+    ) == pytest.approx(m["total"], abs=0.01)
+    # Provider totals also exclude the ignored spend.
+    by_provider = {p["provider"]: p for p in data["by_provider"]}
+    assert by_provider["anthropic"]["amount"] == pytest.approx(66.0, abs=0.01)
+    assert by_provider["openai"]["amount"] == pytest.approx(30.0, abs=0.01)
+
+
+def test_multi_month_trend_is_independent_per_month(tenant_id):
+    may, apr = dt.date(2026, 5, 1), dt.date(2026, 4, 1)
+    ws, keys = {"ws1": "ws-one"}, {"k1": {"name": "k1", "workspace_id": "ws1"}}
+    inference.ingest_anthropic(
+        tenant_id, apr, [_acost("ws1", 40, apr)], [_ausage("ws1", "k1", apr)], ws, keys
+    )
+    inference.ingest_anthropic(
+        tenant_id, may, [_acost("ws1", 60, may)], [_ausage("ws1", "k1", may)], ws, keys
+    )
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k1", "production")
+    inference.ingest_anthropic(
+        tenant_id, apr, [_acost("ws1", 40, apr)], [_ausage("ws1", "k1", apr)], ws, keys
+    )
+    inference.ingest_anthropic(
+        tenant_id, may, [_acost("ws1", 60, may)], [_ausage("ws1", "k1", may)], ws, keys
+    )
+
+    data = dashboard.spend_by_provider(tenant_id, range_token="last_3_months")
+    by_period = {t["period"]: t for t in data["trend"]}
+    assert by_period["2026-04-01"]["production"] == pytest.approx(40.0, abs=0.01)
+    assert by_period["2026-05-01"]["production"] == pytest.approx(60.0, abs=0.01)
+
+
+def test_classification_is_independent_of_feature_attribution(tenant_id):
+    # A production key with NO feature mapping is Production in the trend, yet
+    # Unattributed on the feature side — the two dimensions never conflate.
+    ws, keys = {"ws1": "ws-one"}, {"k1": {"name": "k1", "workspace_id": "ws1"}}
+    cost, usage = [_acost("ws1", 50)], [_ausage("ws1", "k1")]
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, ws, keys)
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k1", "production")
+    inference.ingest_anthropic(tenant_id, PERIOD, cost, usage, ws, keys)
+
+    trend = dashboard.spend_by_provider(tenant_id, range_token="this_month")["trend"][0]
+    assert trend["production"] == pytest.approx(50.0, abs=0.01)  # classification dimension
+
+    board = dashboard.dashboard(tenant_id, PERIOD)
+    # Attribution dimension: no feature mapping -> Unattributed inference, unchanged.
+    assert board["unattributed"]["inference_cost"] == pytest.approx(50.0, abs=0.01)
