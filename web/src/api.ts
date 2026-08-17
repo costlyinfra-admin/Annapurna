@@ -135,6 +135,98 @@ export interface SplitGroup {
   signal_ids: string[];
 }
 
+// ---- Alerts ----
+export interface AlertChannel {
+  id?: string;
+  channel: string; // in_app | email | slack | webhook
+  target?: string | null;
+  label?: string;
+  secret?: string; // write-only (never returned)
+  configured?: boolean;
+}
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  description: string | null;
+  metric: string;
+  metric_label: string;
+  scope_type: string;
+  scope_ref: string | null;
+  scope_label: string | null;
+  condition_type: string;
+  threshold: number;
+  budget_amount: number | null;
+  window: string;
+  cooldown: string;
+  recovery_notify: boolean;
+  enabled: boolean;
+  status: string; // healthy | triggered | insufficient_data | delivery_error | disabled
+  last_observed: number | null;
+  last_evaluated_at: string | null;
+  last_triggered_at: string | null;
+  next_eval_at: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  channels: AlertChannel[];
+}
+
+export interface AlertSummary {
+  triggered: number;
+  healthy: number;
+  delivery_errors: number;
+  disabled: number;
+  unread: number;
+}
+
+export interface AlertActivityEvent {
+  id: string;
+  alert_id: string;
+  alert_name: string;
+  metric: string;
+  metric_label: string;
+  scope_type: string;
+  scope_ref: string | null;
+  scope_label: string | null;
+  event_type: string; // triggered | resolved | delivery_error | test
+  observed_value: number | null;
+  threshold: number | null;
+  window: string | null;
+  message: string | null;
+  read: boolean;
+  occurred_at: string | null;
+  deliveries: { channel: string; status: string }[];
+}
+
+export interface AlertMeta {
+  metrics: { value: string; label: string }[];
+  scopes: string[];
+  conditions: string[];
+  windows: string[];
+  cooldowns: string[];
+  channels: string[];
+  valid_conditions: Record<string, string[]>;
+  valid_scopes: Record<string, string[]>;
+  templates: { id: string; label: string; rule: Partial<AlertRule> }[];
+}
+
+export type AlertInput = {
+  name: string;
+  description?: string | null;
+  metric: string;
+  scope_type: string;
+  scope_ref?: string | null;
+  condition_type: string;
+  threshold: number;
+  budget_amount?: number | null;
+  window: string;
+  cooldown: string;
+  recovery_notify: boolean;
+  enabled: boolean;
+  channels: { channel: string; target?: string | null; secret?: string }[];
+};
+
 // ---- Shared cost-source resource classification ----
 export type Classification = "production" | "development" | "internal" | "ignore" | "unclassified";
 
@@ -456,6 +548,36 @@ export const api = {
 
   updateSettings: (patch: Partial<OrgSettings>) =>
     request<OrgSettings>("/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // ---- Alerts ----
+  alertsMeta: () => request<AlertMeta>("/alerts/meta"),
+  listAlerts: () => request<{ rules: AlertRule[]; summary: AlertSummary }>("/alerts"),
+  alertsSummary: () => request<AlertSummary>("/alerts/summary"),
+  getAlert: (id: string) => request<AlertRule & { history: unknown }>(`/alerts/${id}`),
+  createAlert: (body: AlertInput) =>
+    request<AlertRule>("/alerts", { method: "POST", body: JSON.stringify(body) }),
+  updateAlert: (id: string, body: AlertInput) =>
+    request<AlertRule>(`/alerts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteAlert: (id: string) => request<void>(`/alerts/${id}`, { method: "DELETE" }),
+  enableAlert: (id: string, enabled: boolean) =>
+    request<AlertRule>(`/alerts/${id}/enable`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+  duplicateAlert: (id: string) => request<AlertRule>(`/alerts/${id}/duplicate`, { method: "POST" }),
+  testAlert: (id: string) =>
+    request<{ ok: boolean; deliveries: { channel: string; status: string }[] }>(
+      `/alerts/${id}/test`,
+      { method: "POST" },
+    ),
+  alertsActivity: () => request<{ events: AlertActivityEvent[] }>("/alerts/activity"),
+  markAlertsRead: (event_ids: string[]) =>
+    request<{ marked: number }>("/alerts/activity/read", {
+      method: "POST",
+      body: JSON.stringify({ event_ids }),
+    }),
+  markAllAlertsRead: () =>
+    request<{ marked: number }>("/alerts/activity/read-all", { method: "POST" }),
 
   connectors: () => request<ConnectorStatus[]>("/connectors"),
 

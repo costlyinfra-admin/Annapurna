@@ -487,6 +487,7 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         feature_count += _add_extended_demo(
             conn, tenant_id, {"triage": triage, "report": report, "soc": soc}
         )
+        _add_alert_demo(conn, tenant_id, {"triage": triage, "report": report})
 
     return {"features": feature_count, "tenant_id": tenant_id}
 
@@ -904,3 +905,301 @@ def _add_self_hosted_demo(conn, tenant_id) -> None:
         source="self_host",
     )
     _add_usage(conn, tenant_id, feature, 75, 210_000)
+
+
+# ==========================================================================
+# Alert demo data — a realistic mix the /alerts screen can render immediately:
+# one healthy rule, one actively triggered, one with a delivery failure, and one
+# disabled, plus a few days of triggered/resolved activity (some unread).
+# Only the demo seed turns this on; the test fixture never does.
+# ==========================================================================
+
+
+def _add_alert_rule(conn, tenant_id, **kw) -> str:
+    """Insert one alert_rule with sensible demo defaults; returns its id."""
+    cols = {
+        "name": kw["name"],
+        "description": kw.get("description"),
+        "metric": kw.get("metric", "inference_cost"),
+        "scope_type": kw.get("scope_type", "organization"),
+        "scope_ref": kw.get("scope_ref"),
+        "condition_type": kw.get("condition_type", "exceeds"),
+        "threshold": kw["threshold"],
+        "budget_amount": kw.get("budget_amount"),
+        "window": kw.get("window", "monthly"),
+        "cooldown": kw.get("cooldown", "day"),
+        "recovery_notify": kw.get("recovery_notify", True),
+        "enabled": kw.get("enabled", True),
+        "status": kw.get("status", "healthy"),
+        "last_observed": kw.get("last_observed"),
+        "last_evaluated_at": kw.get("last_evaluated_at"),
+        "last_triggered_at": kw.get("last_triggered_at"),
+        "created_by": kw.get("created_by", "cto@acme.com"),
+    }
+    row = conn.execute(
+        """
+        INSERT INTO alert_rule
+            (tenant_id, name, description, metric, scope_type, scope_ref,
+             condition_type, threshold, budget_amount, "window", cooldown,
+             recovery_notify, enabled, status, last_observed, last_evaluated_at,
+             last_triggered_at, next_eval_at, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, now(), %s)
+        RETURNING id
+        """,
+        (
+            tenant_id,
+            cols["name"],
+            cols["description"],
+            cols["metric"],
+            cols["scope_type"],
+            cols["scope_ref"],
+            cols["condition_type"],
+            cols["threshold"],
+            cols["budget_amount"],
+            cols["window"],
+            cols["cooldown"],
+            cols["recovery_notify"],
+            cols["enabled"],
+            cols["status"],
+            cols["last_observed"],
+            cols["last_evaluated_at"],
+            cols["last_triggered_at"],
+            cols["created_by"],
+        ),
+    ).fetchone()
+    return row[0]
+
+
+def _add_alert_dest(conn, tenant_id, alert_id, channel, target=None) -> None:
+    conn.execute(
+        """
+        INSERT INTO alert_destination (tenant_id, alert_id, channel, target)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (tenant_id, alert_id, channel, target),
+    )
+
+
+def _add_alert_event(conn, tenant_id, alert_id, incident_id, **kw) -> str:
+    row = conn.execute(
+        """
+        INSERT INTO alert_event
+            (tenant_id, alert_id, incident_id, event_type, event_key,
+             observed_value, threshold, "window", message, read, occurred_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (
+            tenant_id,
+            alert_id,
+            incident_id,
+            kw["event_type"],
+            kw["event_key"],
+            kw.get("observed_value"),
+            kw.get("threshold"),
+            kw.get("window", "monthly"),
+            kw.get("message"),
+            kw.get("read", False),
+            kw["occurred_at"],
+        ),
+    ).fetchone()
+    return row[0]
+
+
+def _add_alert_notif(conn, tenant_id, alert_id, event_id, channel, status, error=None) -> None:
+    conn.execute(
+        """
+        INSERT INTO alert_notification
+            (tenant_id, alert_id, event_id, channel, status, attempts, error)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (tenant_id, alert_id, event_id, channel, status, 3 if status == "failed" else 1, error),
+    )
+
+
+def _add_alert_demo(conn, tenant_id, features: dict) -> None:
+    now = _dt.datetime.now(_dt.timezone.utc)
+    day = _dt.timedelta(days=1)
+
+    # 1) Healthy — combined AI spend under a monthly budget.
+    healthy = _add_alert_rule(
+        conn,
+        tenant_id,
+        name="Monthly AI budget",
+        description="Warns before combined build + inference spend blows the monthly budget.",
+        metric="combined_cost",
+        condition_type="budget_pct",
+        threshold=90,
+        budget_amount=25000,
+        window="monthly",
+        status="healthy",
+        last_observed=18240,
+        last_evaluated_at=now - _dt.timedelta(hours=1),
+    )
+    _add_alert_dest(conn, tenant_id, healthy, "in_app")
+    _add_alert_dest(conn, tenant_id, healthy, "email", "cto@acme.com")
+
+    # 2) Triggered — a feature's daily inference cost is over the line right now.
+    triggered = _add_alert_rule(
+        conn,
+        tenant_id,
+        name="Threat triage daily inference",
+        description="Catches a runaway day of inference on the busiest feature.",
+        metric="inference_cost",
+        scope_type="feature",
+        scope_ref=features["triage"],
+        condition_type="exceeds",
+        threshold=1200,
+        window="daily",
+        status="triggered",
+        last_observed=1638,
+        last_evaluated_at=now - _dt.timedelta(minutes=20),
+        last_triggered_at=now - _dt.timedelta(hours=6),
+    )
+    _add_alert_dest(conn, tenant_id, triggered, "in_app")
+    _add_alert_dest(conn, tenant_id, triggered, "slack", "hooks.slack.com/services/•••••")
+    incident = conn.execute(
+        """
+        INSERT INTO alert_incident (tenant_id, alert_id, status, opened_at,
+                                    observed_value, threshold)
+        VALUES (%s, %s, 'open', %s, %s, %s) RETURNING id
+        """,
+        (tenant_id, triggered, now - _dt.timedelta(hours=6), 1638, 1200),
+    ).fetchone()[0]
+    trig_evt = _add_alert_event(
+        conn,
+        tenant_id,
+        triggered,
+        incident,
+        event_type="triggered",
+        event_key=f"triggered:{incident}",
+        observed_value=1638,
+        threshold=1200,
+        window="daily",
+        message="Daily inference cost exceeded $1,200.",
+        read=False,
+        occurred_at=now - _dt.timedelta(hours=6),
+    )
+    _add_alert_notif(conn, tenant_id, triggered, trig_evt, "in_app", "sent")
+    _add_alert_notif(conn, tenant_id, triggered, trig_evt, "slack", "sent")
+
+    # 3) Delivery error — the rule itself is fine, but its webhook is failing.
+    delivery = _add_alert_rule(
+        conn,
+        tenant_id,
+        name="Unattributed spend watch",
+        description="Flags a jump in spend we can't yet attribute to a feature.",
+        metric="unattributed_cost",
+        condition_type="exceeds",
+        threshold=2000,
+        window="monthly",
+        status="delivery_error",
+        last_observed=2450,
+        last_evaluated_at=now - _dt.timedelta(minutes=35),
+        last_triggered_at=now - day,
+    )
+    _add_alert_dest(conn, tenant_id, delivery, "in_app")
+    _add_alert_dest(conn, tenant_id, delivery, "webhook", "https://ops.acme.com/hooks/•••••")
+    d_incident = conn.execute(
+        """
+        INSERT INTO alert_incident (tenant_id, alert_id, status, opened_at,
+                                    observed_value, threshold)
+        VALUES (%s, %s, 'open', %s, %s, %s) RETURNING id
+        """,
+        (tenant_id, delivery, now - day, 2450, 2000),
+    ).fetchone()[0]
+    d_trig = _add_alert_event(
+        conn,
+        tenant_id,
+        delivery,
+        d_incident,
+        event_type="triggered",
+        event_key=f"triggered:{d_incident}",
+        observed_value=2450,
+        threshold=2000,
+        message="Unattributed spend exceeded $2,000.",
+        read=True,
+        occurred_at=now - day,
+    )
+    _add_alert_notif(conn, tenant_id, delivery, d_trig, "in_app", "sent")
+    _add_alert_notif(
+        conn,
+        tenant_id,
+        delivery,
+        d_trig,
+        "webhook",
+        "failed",
+        "HTTP 503 from endpoint after 3 attempts",
+    )
+    _add_alert_event(
+        conn,
+        tenant_id,
+        delivery,
+        d_incident,
+        event_type="delivery_error",
+        event_key=f"delivery:{d_trig}",
+        observed_value=2450,
+        threshold=2000,
+        message="Webhook delivery failed (HTTP 503).",
+        read=False,
+        occurred_at=now - day + _dt.timedelta(minutes=1),
+    )
+
+    # 4) Disabled — kept around but paused.
+    disabled = _add_alert_rule(
+        conn,
+        tenant_id,
+        name="Token usage spike (paused)",
+        description="Watches for a sudden jump in token volume. Paused during migration.",
+        metric="token_usage",
+        condition_type="increase_pct",
+        threshold=40,
+        window="weekly",
+        enabled=False,
+        status="disabled",
+        last_evaluated_at=now - 5 * day,
+    )
+    _add_alert_dest(conn, tenant_id, disabled, "in_app")
+    _add_alert_dest(conn, tenant_id, disabled, "email", "cto@acme.com")
+
+    # A few days of resolved history on the healthy budget rule so the Activity
+    # feed and "last triggered" reads look lived-in (a past incident, resolved).
+    past = conn.execute(
+        """
+        INSERT INTO alert_incident (tenant_id, alert_id, status, opened_at,
+                                    resolved_at, observed_value, threshold)
+        VALUES (%s, %s, 'resolved', %s, %s, %s, %s) RETURNING id
+        """,
+        (tenant_id, healthy, now - 4 * day, now - 3 * day, 24100, 22500),
+    ).fetchone()[0]
+    past_trig = _add_alert_event(
+        conn,
+        tenant_id,
+        healthy,
+        past,
+        event_type="triggered",
+        event_key=f"triggered:{past}",
+        observed_value=24100,
+        threshold=22500,
+        message="Combined AI spend reached 96% of the monthly budget.",
+        read=True,
+        occurred_at=now - 4 * day,
+    )
+    _add_alert_notif(conn, tenant_id, healthy, past_trig, "in_app", "sent")
+    _add_alert_notif(conn, tenant_id, healthy, past_trig, "email", "sent")
+    past_res = _add_alert_event(
+        conn,
+        tenant_id,
+        healthy,
+        past,
+        event_type="resolved",
+        event_key=f"resolved:{past}",
+        observed_value=19800,
+        threshold=22500,
+        message="Combined AI spend fell back under budget.",
+        read=True,
+        occurred_at=now - 3 * day,
+    )
+    _add_alert_notif(conn, tenant_id, healthy, past_res, "in_app", "sent")
+    _add_alert_notif(conn, tenant_id, healthy, past_res, "email", "sent")

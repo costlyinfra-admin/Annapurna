@@ -6,7 +6,8 @@
  * entire customer UI runs in that tenant (context switched server-side) — no pages
  * are duplicated for the admin.
  */
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
 
@@ -16,12 +17,39 @@ const NAV = [
   { to: "/cost-sources", label: "Cost sources", end: false },
   { to: "/features", label: "Features", end: false },
   { to: "/install-sdk", label: "Install SDK", end: false },
+  { to: "/alerts", label: "Alerts", end: false, icon: "bell" },
   { to: "/settings", label: "Settings", end: false },
 ];
+
+function BellIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden className="nav-icon">
+      <path
+        fill="currentColor"
+        d="M10 2a5 5 0 0 0-5 5v2.6l-1.2 2.4A1 1 0 0 0 4.7 13.5h10.6a1 1 0 0 0 .9-1.5L15 9.6V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z"
+      />
+    </svg>
+  );
+}
 
 export function AppShell() {
   const { user, logout, refresh } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [alertBadge, setAlertBadge] = useState(0);
+
+  const refreshBadge = useCallback(() => {
+    api
+      .alertsSummary()
+      .then((s) => setAlertBadge(s.unread))
+      .catch(() => setAlertBadge(0));
+  }, []);
+
+  // Refresh the unread badge on mount and whenever navigation lands on /alerts
+  // (where the user may mark items read).
+  useEffect(() => {
+    refreshBadge();
+  }, [refreshBadge, location.pathname]);
 
   const exitImpersonation = async () => {
     await api.stopImpersonate();
@@ -43,7 +71,15 @@ export function AppShell() {
               end={item.end}
               className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
             >
-              {item.label}
+              <span className="nav-link-label">
+                {item.icon === "bell" && <BellIcon />}
+                {item.label}
+              </span>
+              {item.to === "/alerts" && alertBadge > 0 && (
+                <span className="nav-badge" aria-label={`${alertBadge} unread alerts`}>
+                  {alertBadge > 99 ? "99+" : alertBadge}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

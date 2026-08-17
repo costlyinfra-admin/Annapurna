@@ -7,6 +7,9 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { AdminShell } from "./components/AdminShell";
 import { AppShell } from "./components/AppShell";
+import { AlertDetailPage } from "./pages/AlertDetailPage";
+import { AlertFormPage } from "./pages/AlertFormPage";
+import { AlertsPage } from "./pages/AlertsPage";
 import { CopilotPage } from "./pages/CopilotPage";
 import { CostSourcesPage } from "./pages/CostSourcesPage";
 import { Dashboard } from "./pages/Dashboard";
@@ -77,6 +80,10 @@ export function App() {
         <Route path="/features" element={<FeaturesPage />} />
         <Route path="/features/:id" element={<FeatureDetail />} />
         <Route path="/install-sdk" element={<InstallSdkPage />} />
+        <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/alerts/new" element={<AlertFormPage />} />
+        <Route path="/alerts/:id" element={<AlertDetailPage />} />
+        <Route path="/alerts/:id/edit" element={<AlertFormPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route

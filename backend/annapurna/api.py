@@ -23,6 +23,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import (
     __version__,
     admin,
+    alerts,
+    alerts_eval,
     auth,
     build,
     claudecode,
@@ -47,6 +49,90 @@ from .providers import ProviderError
 
 logger = logging.getLogger("annapurna.api")
 
+# Quick-start alert templates — prefill the create form but stay fully editable.
+_ALERT_TEMPLATES = [
+    {
+        "id": "monthly_budget",
+        "label": "Monthly AI spend exceeds budget",
+        "rule": {
+            "name": "Monthly AI spend over budget",
+            "metric": "combined_cost",
+            "scope_type": "organization",
+            "condition_type": "budget_pct",
+            "threshold": 100,
+            "budget_amount": 10000,
+            "window": "monthly",
+            "cooldown": "day",
+        },
+    },
+    {
+        "id": "daily_spike",
+        "label": "Daily inference cost spikes by 30%",
+        "rule": {
+            "name": "Daily inference cost spike",
+            "metric": "inference_cost",
+            "scope_type": "organization",
+            "condition_type": "increase_pct",
+            "threshold": 30,
+            "window": "daily",
+            "cooldown": "day",
+        },
+    },
+    {
+        "id": "unattributed",
+        "label": "Unattributed spend exceeds 10% of total",
+        "rule": {
+            "name": "High unattributed spend",
+            "metric": "unattributed_cost",
+            "scope_type": "organization",
+            "condition_type": "budget_pct",
+            "threshold": 10,
+            "budget_amount": 10000,
+            "window": "monthly",
+            "cooldown": "week",
+        },
+    },
+    {
+        "id": "feature_cpu",
+        "label": "Feature cost per active user exceeds a threshold",
+        "rule": {
+            "name": "Feature cost/user too high",
+            "metric": "cost_per_user",
+            "scope_type": "feature",
+            "condition_type": "exceeds",
+            "threshold": 50,
+            "window": "monthly",
+            "cooldown": "week",
+        },
+    },
+    {
+        "id": "provider_spend",
+        "label": "Provider spend exceeds a threshold",
+        "rule": {
+            "name": "Provider spend threshold",
+            "metric": "inference_cost",
+            "scope_type": "provider",
+            "condition_type": "exceeds",
+            "threshold": 1000,
+            "window": "monthly",
+            "cooldown": "day",
+        },
+    },
+    {
+        "id": "token_usage",
+        "label": "Model token usage exceeds a threshold",
+        "rule": {
+            "name": "Model token usage threshold",
+            "metric": "token_usage",
+            "scope_type": "model",
+            "condition_type": "exceeds",
+            "threshold": 100000000,
+            "window": "monthly",
+            "cooldown": "day",
+        },
+    },
+]
+
 
 class SignupRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
@@ -56,6 +142,36 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class AlertChannel(BaseModel):
+    channel: str = Field(min_length=1, max_length=16)
+    target: Optional[str] = Field(default=None, max_length=2048)
+    secret: Optional[str] = Field(default=None, max_length=2048)
+
+
+class AlertRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    metric: str = Field(min_length=1, max_length=32)
+    scope_type: str = Field(default="organization", max_length=16)
+    scope_ref: Optional[str] = Field(default=None, max_length=256)
+    condition_type: str = Field(min_length=1, max_length=16)
+    threshold: float
+    budget_amount: Optional[float] = None
+    window: str = Field(min_length=1, max_length=16)
+    cooldown: str = Field(default="day", max_length=16)
+    recovery_notify: bool = True
+    enabled: bool = True
+    channels: list[AlertChannel] = Field(default_factory=list)
+
+
+class AlertEnableRequest(BaseModel):
+    enabled: bool
+
+
+class MarkReadRequest(BaseModel):
+    event_ids: list[str] = Field(default_factory=list)
 
 
 class ClassifyRequest(BaseModel):
@@ -587,6 +703,100 @@ def create_app() -> FastAPI:
             )
         except resources.ResourceError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # ---- Alerts (cost monitoring) --------------------------------------
+    # Every route is tenant-scoped through CurrentUser + RLS, so a user can only
+    # ever touch their own organization's rules/events/destinations.
+    @app.get("/api/alerts/meta")
+    def alerts_meta(user: CurrentUser) -> dict:
+        # Vocabulary + valid combinations + quick-start templates for the form.
+        return {
+            "metrics": [{"value": m, "label": alerts.METRIC_LABELS[m]} for m in alerts.METRICS],
+            "scopes": list(alerts.SCOPES),
+            "conditions": list(alerts.CONDITIONS),
+            "windows": list(alerts.WINDOWS),
+            "cooldowns": list(alerts.COOLDOWNS),
+            "channels": list(alerts.CHANNELS),
+            "valid_conditions": {m: list(alerts.valid_conditions(m)) for m in alerts.METRICS},
+            "valid_scopes": {m: list(alerts.valid_scopes(m)) for m in alerts.METRICS},
+            "templates": _ALERT_TEMPLATES,
+        }
+
+    @app.get("/api/alerts")
+    def list_alerts(user: CurrentUser) -> dict:
+        return {
+            "rules": alerts.list_rules(user["tenant_id"]),
+            "summary": alerts.summary_counts(user["tenant_id"]),
+        }
+
+    @app.get("/api/alerts/summary")
+    def alerts_summary(user: CurrentUser) -> dict:
+        return alerts.summary_counts(user["tenant_id"])
+
+    @app.get("/api/alerts/activity")
+    def alerts_activity(user: CurrentUser) -> dict:
+        return {"events": alerts.list_activity(user["tenant_id"])}
+
+    @app.post("/api/alerts/activity/read")
+    def alerts_mark_read(body: MarkReadRequest, user: CurrentUser) -> dict:
+        return {"marked": alerts.mark_read(user["tenant_id"], body.event_ids)}
+
+    @app.post("/api/alerts/activity/read-all")
+    def alerts_mark_all_read(user: CurrentUser) -> dict:
+        return {"marked": alerts.mark_all_read(user["tenant_id"])}
+
+    @app.post("/api/alerts", status_code=status.HTTP_201_CREATED)
+    def create_alert(body: AlertRequest, user: CurrentUser) -> dict:
+        try:
+            return alerts.create_rule(
+                user["tenant_id"], body.model_dump(), created_by=user["email"]
+            )
+        except alerts.AlertError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @app.get("/api/alerts/{alert_id}")
+    def get_alert(alert_id: str, user: CurrentUser) -> dict:
+        rule = alerts.get_rule(user["tenant_id"], alert_id)
+        if rule is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        return {**rule, "history": alerts.rule_events(user["tenant_id"], alert_id)}
+
+    @app.put("/api/alerts/{alert_id}")
+    def update_alert(alert_id: str, body: AlertRequest, user: CurrentUser) -> dict:
+        try:
+            rule = alerts.update_rule(user["tenant_id"], alert_id, body.model_dump())
+        except alerts.AlertError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if rule is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        return rule
+
+    @app.post("/api/alerts/{alert_id}/enable")
+    def enable_alert(alert_id: str, body: AlertEnableRequest, user: CurrentUser) -> dict:
+        rule = alerts.set_enabled(user["tenant_id"], alert_id, body.enabled)
+        if rule is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        return rule
+
+    @app.post("/api/alerts/{alert_id}/duplicate", status_code=status.HTTP_201_CREATED)
+    def duplicate_alert(alert_id: str, user: CurrentUser) -> dict:
+        rule = alerts.duplicate_rule(user["tenant_id"], alert_id, created_by=user["email"])
+        if rule is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        return rule
+
+    @app.post("/api/alerts/{alert_id}/test")
+    def test_alert(alert_id: str, user: CurrentUser) -> dict:
+        result = alerts_eval.send_test(user["tenant_id"], alert_id)
+        if not result.get("ok"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        return result
+
+    @app.delete("/api/alerts/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_alert(alert_id: str, user: CurrentUser) -> Response:
+        if not alerts.delete_rule(user["tenant_id"], alert_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     # ---- Metering hook (M7) --------------------------------------------
     @app.post("/api/hook/token")

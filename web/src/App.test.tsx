@@ -17,6 +17,7 @@ vi.mock("./api", async (importActual) => {
       signup: vi.fn(),
       listFeatures: vi.fn(),
       dashboard: vi.fn(),
+      alertsSummary: vi.fn(),
     },
   };
 });
@@ -44,6 +45,13 @@ describe("App routing", () => {
 
   it("sends authenticated users into the app shell on the Overview", async () => {
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
+    vi.mocked(api.alertsSummary).mockResolvedValue({
+      triggered: 0,
+      healthy: 0,
+      delivery_errors: 0,
+      disabled: 0,
+      unread: 0,
+    });
     vi.mocked(api.dashboard).mockResolvedValue({
       period: "2026-05-01",
       start: "2026-05-01",
