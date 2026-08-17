@@ -80,16 +80,25 @@ on first deploy.
 > protection — but if you do, set Cloudflare **SSL/TLS → Overview → Full (strict)**
 > so it talks to Render over HTTPS. Simplest path: just keep it **DNS only**.
 
-## Step 4 — Scheduled cost ingest (GitHub Actions, free)
+## Step 4 — Scheduled ingest & alerts (GitHub Actions, free)
 
-The daily ingest job ([`.github/workflows/ingest.yml`](../.github/workflows/ingest.yml))
-just needs the same secrets. In GitHub: **Settings → Secrets and variables →
-Actions → New repository secret**, add three:
+The daily job ([`.github/workflows/ingest.yml`](../.github/workflows/ingest.yml))
+pulls fresh cost data and then **evaluates alert rules** and dispatches
+notifications. In GitHub: **Settings → Secrets and variables → Actions → New
+repository secret**, add the three core secrets:
 
 - `DATABASE_URL`, `APP_SECRET_KEY`, `ANNAPURNA_APP_DB_PASSWORD`
 
-It runs daily; you can also trigger it anytime from the **Actions** tab
-(**Scheduled ingest → Run workflow**).
+For email alerts (via [Resend](https://resend.com)) and clickable links in
+notifications, also add these **optional** secrets:
+
+- `RESEND_API_KEY` — a Resend API key
+- `ALERT_EMAIL_FROM` — a verified Resend sender (e.g. `alerts@costlyinfra.com`)
+- `APP_BASE_URL` — your app's base URL (e.g. `https://annapurna.costlyinfra.com`)
+
+Without them, in-app / Slack / webhook alerts still work; email is reported as
+"unconfigured" (never a fake success). It runs daily; you can also trigger it
+anytime from the **Actions** tab (**Scheduled ingest & alerts → Run workflow**).
 
 ## Step 5 — First use
 
@@ -131,6 +140,9 @@ using the ingest token from **POST `/api/hook/token`** (offered in onboarding).
 | `ANNAPURNA_SECURE_COOKIES` | set to `true` in prod (blueprint default) | Secure session cookie over HTTPS |
 | `ANNAPURNA_STATIC_DIR` | set by the Docker image | Tells the API to also serve the web app |
 | `ANNAPURNA_ADMIN_EMAILS` | Render (comma-separated) | Unlocks the internal Admin Portal for these accounts |
+| `RESEND_API_KEY` | GitHub secrets (optional) | Resend API key — enables email alert delivery |
+| `ALERT_EMAIL_FROM` | GitHub secrets (optional) | Verified Resend sender address for alert emails |
+| `APP_BASE_URL` | GitHub secrets (optional) | App base URL for deep links in alert notifications |
 
 ## Internal Admin Portal (`admin.annapurna.costlyinfra.com`)
 

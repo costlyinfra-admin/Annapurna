@@ -85,6 +85,16 @@ export function previewText(r: {
   return `Notify me when ${r.window} ${metric}${scopePart} ${cond}.`;
 }
 
+/**
+ * The most relevant in-app cost view for a rule's scope — feature detail for a
+ * feature-scoped alert, Cost Sources for provider/model, otherwise the Overview.
+ */
+export function costLink(scopeType: string, scopeRef?: string | null): string {
+  if (scopeType === "feature" && scopeRef) return `/features/${scopeRef}`;
+  if (scopeType === "provider" || scopeType === "model") return "/cost-sources";
+  return "/";
+}
+
 /** How a rule's condition reads in the table. */
 export function conditionText(r: AlertRule): string {
   if (r.condition_type === "exceeds") return `exceeds ${money(r.threshold)}`;

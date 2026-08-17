@@ -8,6 +8,7 @@ import { api, ApiError, type AlertActivityEvent, type AlertRule, type AlertSumma
 import {
   CHANNEL_LABELS,
   conditionText,
+  costLink,
   EVENT_LABELS,
   METRIC_LABELS,
   SCOPE_LABELS,
@@ -454,7 +455,7 @@ function ActivityTab({
                 </span>
               )}
               <span>{timeAgo(e.occurred_at)}</span>
-              <Link to="/?range=this_month" className="link">
+              <Link to={costLink(e.scope_type, e.scope_ref)} className="link">
                 View cost
               </Link>
               {!e.read && (

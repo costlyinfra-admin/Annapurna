@@ -271,3 +271,68 @@ def test_channel_failure_is_independent_and_visible(tenant_id, monkeypatch):
     assert any(e["event_type"] == "delivery_error" for e in hist["events"])
     # The underlying alert state is preserved despite the delivery problem.
     assert alerts.get_rule(tenant_id, rule["id"])["status"] == "triggered"
+
+
+class _FakeResp:
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+
+def _enable_resend(monkeypatch, capture=None):
+    """Configure Resend and stub the HTTP seam; optionally capture the request."""
+    monkeypatch.setattr(notify, "RESEND_API_KEY", "re_test_key")
+    monkeypatch.setattr(notify, "ALERT_EMAIL_FROM", "alerts@acme.com")
+    monkeypatch.setattr(notify, "EMAIL_ENABLED", True)
+
+    def fake_post(url, payload, timeout=8.0, headers=None):
+        if capture is not None:
+            capture.append({"url": url, "payload": payload, "headers": headers})
+        return _FakeResp(200)
+
+    monkeypatch.setattr(notify, "_http_post", fake_post)
+
+
+def test_email_sends_via_resend_when_configured(tenant_id, monkeypatch):
+    calls: list[dict] = []
+    _enable_resend(monkeypatch, calls)
+    rule = alerts.create_rule(
+        tenant_id,
+        _rule(threshold=100, channels=[{"channel": "email", "target": "cto@acme.com"}]),
+    )
+    _add_inference(tenant_id, 150)
+    alerts_eval.evaluate_rule(tenant_id, rule["id"], now=NOW)
+    hist = alerts.rule_events(tenant_id, rule["id"])
+    statuses = {n["channel"]: n["status"] for n in hist["notifications"]}
+    assert statuses["email"] == "sent"  # real send, not "unconfigured"
+    # Posted to Resend with the recipient, sender, and a bearer token in the header.
+    assert calls and calls[0]["url"] == "https://api.resend.com/emails"
+    assert calls[0]["payload"]["to"] == ["cto@acme.com"]
+    assert calls[0]["payload"]["from"] == "alerts@acme.com"
+    assert calls[0]["headers"]["Authorization"] == "Bearer re_test_key"
+    # The secret must never be persisted on the notification row.
+    assert all("re_test_key" not in (n.get("error") or "") for n in hist["notifications"])
+
+
+def test_email_rejected_by_resend_is_a_permanent_failure(tenant_id, monkeypatch):
+    _enable_resend(monkeypatch)
+    # A 401 (bad key / unverified domain) is a 4xx -> permanent, no retry, no fake success.
+    monkeypatch.setattr(notify, "_http_post", lambda *a, **k: _FakeResp(401))
+    rule = alerts.create_rule(
+        tenant_id,
+        _rule(threshold=100, channels=[{"channel": "email", "target": "cto@acme.com"}]),
+    )
+    _add_inference(tenant_id, 150)
+    alerts_eval.evaluate_rule(tenant_id, rule["id"], now=NOW)
+    hist = alerts.rule_events(tenant_id, rule["id"])
+    statuses = {n["channel"]: n["status"] for n in hist["notifications"]}
+    assert statuses["email"] == "failed"
+    assert any(e["event_type"] == "delivery_error" for e in hist["events"])
+    # Alert state itself is unaffected by the delivery failure.
+    assert alerts.get_rule(tenant_id, rule["id"])["status"] == "triggered"
+
+
+def test_deep_link_path_matches_scope():
+    assert alerts_eval._deep_link_path("feature", "abc-123") == "/features/abc-123"
+    assert alerts_eval._deep_link_path("provider", "anthropic") == "/cost-sources"
+    assert alerts_eval._deep_link_path("model", "claude") == "/cost-sources"
+    assert alerts_eval._deep_link_path("organization", None) == "/"

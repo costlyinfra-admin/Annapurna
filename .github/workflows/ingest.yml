@@ -1,8 +1,13 @@
-name: Scheduled ingest
+name: Scheduled ingest & alerts
 
-# Free cron: pulls each tenant's provider/coding costs and reconciles the hook,
-# running the same job as `make ingest` against the production database.
-# Requires repo secrets: DATABASE_URL, ANNAPURNA_APP_DB_PASSWORD, APP_SECRET_KEY.
+# Free cron: pulls each tenant's provider/coding costs and reconciles the hook
+# (the same job as `make ingest`), then evaluates alert rules against the fresh
+# data and dispatches any notifications.
+#
+# Required repo secrets: DATABASE_URL, ANNAPURNA_APP_DB_PASSWORD, APP_SECRET_KEY.
+# Optional (email + deep links in notifications): RESEND_API_KEY, ALERT_EMAIL_FROM,
+# APP_BASE_URL. Without them, in-app/Slack/webhook still work and email is reported
+# as "unconfigured" (never a fake success).
 
 on:
   schedule:
@@ -11,7 +16,7 @@ on:
 
 jobs:
   ingest:
-    name: Run cost ingest
+    name: Run cost ingest & alert evaluation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +35,15 @@ jobs:
           ANNAPURNA_APP_DB_PASSWORD: ${{ secrets.ANNAPURNA_APP_DB_PASSWORD }}
           APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
         run: python -m annapurna.inference
+      - name: Evaluate alert rules
+        working-directory: backend
+        # Runs even if ingest fails, so alerts still evaluate on the last-good data.
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANNAPURNA_APP_DB_PASSWORD: ${{ secrets.ANNAPURNA_APP_DB_PASSWORD }}
+          APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+        run: python -m annapurna.alerts_eval

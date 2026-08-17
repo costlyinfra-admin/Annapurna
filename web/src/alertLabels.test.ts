@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conditionText, previewText, statusClass } from "./alertLabels";
+import { conditionText, costLink, previewText, statusClass } from "./alertLabels";
 
 describe("alertLabels", () => {
   it("builds a plain-language preview for a fixed-value rule", () => {
@@ -47,5 +47,12 @@ describe("alertLabels", () => {
 
   it("maps status to a namespaced css class", () => {
     expect(statusClass("delivery_error")).toBe("alert-status alert-status-delivery_error");
+  });
+
+  it("links each scope to the most relevant cost view", () => {
+    expect(costLink("feature", "abc-123")).toBe("/features/abc-123");
+    expect(costLink("provider", "anthropic")).toBe("/cost-sources");
+    expect(costLink("model", "claude")).toBe("/cost-sources");
+    expect(costLink("organization", null)).toBe("/");
   });
 });

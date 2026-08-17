@@ -21,9 +21,13 @@ import httpx
 from . import alerts
 from .db import app_dsn, connect, tenant_tx
 
-# Email needs external infra (SMTP/provider). Until it's configured we surface the
-# email channel as "unconfigured" rather than pretending a message went out.
-EMAIL_ENABLED = bool(os.environ.get("ALERT_EMAIL_PROVIDER_URL"))
+# Email delivery uses Resend (https://resend.com). Both the API key and a verified
+# sender address are required; until they're set we surface the email channel as
+# "unconfigured" rather than pretending a message went out.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+ALERT_EMAIL_FROM = os.environ.get("ALERT_EMAIL_FROM")
+EMAIL_ENABLED = bool(RESEND_API_KEY and ALERT_EMAIL_FROM)
+_RESEND_ENDPOINT = "https://api.resend.com/emails"
 
 _MAX_ATTEMPTS = 3
 
@@ -32,8 +36,10 @@ def _sleep(seconds: float) -> None:  # seam so tests don't actually wait
     time.sleep(seconds)
 
 
-def _http_post(url: str, payload: dict, timeout: float = 8.0):  # seam for tests
-    return httpx.post(url, json=payload, timeout=timeout, follow_redirects=False)
+def _http_post(url: str, payload: dict, timeout: float = 8.0, headers: Optional[dict] = None):
+    # Seam for tests. `headers` carries auth for provider APIs (e.g. Resend); it is
+    # never logged or persisted, so a bearer token can't leak into alert_notification.
+    return httpx.post(url, json=payload, timeout=timeout, headers=headers, follow_redirects=False)
 
 
 def is_safe_url(url: str) -> tuple[bool, str]:
@@ -71,7 +77,9 @@ def is_safe_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _post_with_retry(url: str, payload: dict) -> tuple[str, Optional[str], int]:
+def _post_with_retry(
+    url: str, payload: dict, headers: Optional[dict] = None
+) -> tuple[str, Optional[str], int]:
     """POST with bounded exponential backoff on TRANSIENT failures only.
 
     Returns (status, error, attempts). 4xx and redirects are permanent -> no retry.
@@ -79,7 +87,7 @@ def _post_with_retry(url: str, payload: dict) -> tuple[str, Optional[str], int]:
     last_error = "Delivery failed."
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            resp = _http_post(url, payload)
+            resp = _http_post(url, payload, headers=headers)
         except Exception as exc:  # noqa: BLE001 — network/transport error is transient
             last_error = f"Delivery error: {type(exc).__name__}."
         else:
@@ -104,8 +112,11 @@ def _deliver(dest: dict, payload: dict) -> tuple[str, Optional[str], int]:
     if channel == "email":
         if not EMAIL_ENABLED:
             return "unconfigured", "Email delivery is not configured.", 1
-        # A real provider send would go here; we never fake success.
-        return "unconfigured", "Email provider adapter is not wired up yet.", 1
+        to = dest.get("target")
+        if not to:
+            return "unconfigured", "Email has no recipient configured.", 1
+        headers = {"Authorization": f"Bearer {RESEND_API_KEY}"}
+        return _post_with_retry(_RESEND_ENDPOINT, _email_body(to, payload), headers)
     if channel in ("slack", "webhook"):
         url = dest.get("target")
         if not url:
@@ -121,6 +132,21 @@ def _deliver(dest: dict, payload: dict) -> tuple[str, Optional[str], int]:
 def _slack_body(payload: dict) -> dict:
     """A minimal Slack incoming-webhook body (text only)."""
     return {"text": payload.get("text", "Annapurna alert")}
+
+
+def _email_body(to: str, payload: dict) -> dict:
+    """A Resend send-email request body built from the alert payload."""
+    org = payload.get("org", "your organization")
+    kind = {"resolved": "Resolved", "test": "Test"}.get(payload.get("event_type"), "Triggered")
+    metric = payload.get("metric", "AI cost")
+    subject = f"[{org}] Alert {kind}: {metric}"
+    text = payload.get("text", "Annapurna alert")
+    return {
+        "from": ALERT_EMAIL_FROM,
+        "to": [to],
+        "subject": subject,
+        "text": text,
+    }
 
 
 def dispatch(tenant_id: str, alert_id: str, event_id: str, payload: dict) -> list[dict]:

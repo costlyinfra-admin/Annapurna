@@ -351,11 +351,24 @@ def _message(event_type: str, rule: dict, observed: Decimal, threshold) -> str:
     )
 
 
+def _deep_link_path(scope_type: str, scope_ref) -> str:
+    """The most relevant in-app cost view for a rule's scope.
+
+    Feature-scoped alerts open that feature's detail page; provider/model alerts
+    open Cost Sources; everything else lands on the Overview.
+    """
+    if scope_type == "feature" and scope_ref:
+        return f"/features/{scope_ref}"
+    if scope_type in ("provider", "model"):
+        return "/cost-sources"
+    return "/"
+
+
 def _payload(
     tenant_id: str, alert_id: str, event_type: str, observed, threshold, rule: dict
 ) -> dict:
     base = os.environ.get("APP_BASE_URL", "")
-    link = f"{base}/?range=this_month"
+    link = f"{base}{_deep_link_path(rule['scope_type'], rule['scope_ref'])}"
     org = _org_name(tenant_id)
     text = (
         f"[{org}] Alert {'RESOLVED' if event_type == 'resolved' else 'TRIGGERED'}: "
