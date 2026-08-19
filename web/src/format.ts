@@ -41,3 +41,11 @@ export function shortDate(iso: string): string {
     minute: "2-digit",
   });
 }
+
+/** "claude_code" -> "Claude Code". A display label for coding-tool ids. */
+export function prettyTool(tool: string): string {
+  return tool
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { REFRESH_ALERTS_EVENT } from "../pages/Dashboard";
 
 const NAV = [
   { to: "/", label: "Overview", end: true },
@@ -50,6 +51,12 @@ export function AppShell() {
   useEffect(() => {
     refreshBadge();
   }, [refreshBadge, location.pathname]);
+
+  // The Overview's refresh button re-polls the badge alongside its own data.
+  useEffect(() => {
+    window.addEventListener(REFRESH_ALERTS_EVENT, refreshBadge);
+    return () => window.removeEventListener(REFRESH_ALERTS_EVENT, refreshBadge);
+  }, [refreshBadge]);
 
   const exitImpersonation = async () => {
     await api.stopImpersonate();

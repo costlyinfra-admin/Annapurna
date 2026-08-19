@@ -5,8 +5,9 @@
  */
 import { useEffect, useState } from "react";
 import { api, type ProviderSpend, type ReviewRange } from "../api";
-import { money } from "../format";
+import { money, prettyTool } from "../format";
 import { ClassificationTrendChart } from "./ClassificationTrendChart";
+import { SpendBars } from "./SpendBars";
 import { TrendChart } from "./TrendChart";
 
 const EMPTY: ProviderSpend = {
@@ -17,53 +18,11 @@ const EMPTY: ProviderSpend = {
   trend: [],
   build_total: 0,
   build_by_tool: [],
+  build_by_developer: [],
   build_trend: [],
   customer_total: 0,
   by_customer: [],
 };
-
-/** "claude_code" -> "Claude Code". */
-function prettyTool(tool: string): string {
-  return tool
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
-type ModelBar = { label: string; amount: number; pct: number };
-type Bar = { label: string; amount: number; pct: number; models?: ModelBar[] };
-
-function SpendBars({ rows }: { rows: Bar[] }) {
-  return (
-    <ul className="provider-bars">
-      {rows.map((r) => (
-        <li key={r.label} className="provider-bar-row">
-          <div className="provider-bar-head">
-            <span className="provider-bar-name">{r.label}</span>
-            <span className="provider-bar-amt">
-              {money(r.amount)} · {r.pct.toFixed(0)}%
-            </span>
-          </div>
-          <div className="provider-bar-track">
-            <div className="provider-bar-fill" style={{ width: `${Math.max(2, r.pct)}%` }} />
-          </div>
-          {r.models && r.models.length > 0 && (
-            <ul className="model-subrows">
-              {r.models.map((m) => (
-                <li key={m.label} className="model-subrow">
-                  <span className="model-subrow-name">{m.label}</span>
-                  <span className="model-subrow-amt">
-                    {money(m.amount)} · {m.pct.toFixed(0)}%
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export function ProviderBreakdown({ range }: { range: ReviewRange }) {
   const [data, setData] = useState<ProviderSpend | null>(null);

@@ -1,0 +1,42 @@
+/**
+ * Horizontal spend bars with optional sub-rows — the shared bar list used by the
+ * Overview's "By provider" and "By developer" breakdowns. Each row shows a labelled
+ * amount + share; sub-rows (models under a provider, tools under a developer) render
+ * beneath their parent.
+ */
+import { money } from "../format";
+
+type SubBar = { label: string; amount: number; pct: number };
+export type Bar = { label: string; amount: number; pct: number; models?: SubBar[] };
+
+export function SpendBars({ rows }: { rows: Bar[] }) {
+  return (
+    <ul className="provider-bars">
+      {rows.map((r) => (
+        <li key={r.label} className="provider-bar-row">
+          <div className="provider-bar-head">
+            <span className="provider-bar-name">{r.label}</span>
+            <span className="provider-bar-amt">
+              {money(r.amount)} · {r.pct.toFixed(0)}%
+            </span>
+          </div>
+          <div className="provider-bar-track">
+            <div className="provider-bar-fill" style={{ width: `${Math.max(2, r.pct)}%` }} />
+          </div>
+          {r.models && r.models.length > 0 && (
+            <ul className="model-subrows">
+              {r.models.map((m) => (
+                <li key={m.label} className="model-subrow">
+                  <span className="model-subrow-name">{m.label}</span>
+                  <span className="model-subrow-amt">
+                    {money(m.amount)} · {m.pct.toFixed(0)}%
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}

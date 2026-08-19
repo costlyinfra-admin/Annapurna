@@ -729,6 +729,44 @@ def spend_by_provider(
             ).fetchall()
         ]
 
+        # ---- Build: by developer, each broken down by tool ----
+        # Build cost is the only cost attributable to a person (who ran which
+        # coding tool). Rows with no developer (e.g. fine-tuning, seat pools) fall
+        # into an Unattributed bucket so developers + Unattributed reconcile to the
+        # build total.
+        dev_rows = conn.execute(
+            """
+            SELECT developer_id, tool, SUM(amount)
+            FROM build_cost
+            WHERE period BETWEEN %s AND %s
+            GROUP BY developer_id, tool ORDER BY SUM(amount) DESC
+            """,
+            (start, end),
+        ).fetchall()
+        developers: dict[str, dict] = {}
+        for developer_id, tool, amount in dev_rows:
+            dev = developer_id or "Unattributed"
+            entry = developers.setdefault(dev, {"developer_id": dev, "amount": 0.0, "by_tool": []})
+            entry["amount"] += float(amount)
+            entry["by_tool"].append((tool, float(amount)))
+        build_by_developer = [
+            {
+                "developer_id": d["developer_id"],
+                "amount": d["amount"],
+                "pct": (d["amount"] / build_total * 100.0) if build_total else 0.0,
+                "by_tool": [
+                    {
+                        "tool": tool,
+                        "amount": amt,
+                        # Share of THIS developer's build spend (tools sum to ~100%).
+                        "pct": (amt / d["amount"] * 100.0) if d["amount"] else 0.0,
+                    }
+                    for tool, amt in sorted(d["by_tool"], key=lambda t: -t[1])
+                ],
+            }
+            for d in sorted(developers.values(), key=lambda d: -d["amount"])
+        ]
+
         # ---- Per-customer metered spend (from SDK metadata.customer_id) ----
         customer_rows = conn.execute(
             """
@@ -758,6 +796,7 @@ def spend_by_provider(
         "trend": trend,
         "build_total": build_total,
         "build_by_tool": build_by_tool,
+        "build_by_developer": build_by_developer,
         "build_trend": build_trend,
         "customer_total": customer_total,
         "by_customer": by_customer,

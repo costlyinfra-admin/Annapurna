@@ -1252,6 +1252,41 @@ a.pr-ref:hover {
   margin: 1.25rem 0 1rem;
 }
 
+/* "Last updated …" + refresh, sitting at the right of the Overview header. */
+.last-updated {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.last-updated-text {
+  font-size: 0.8rem;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--ink-soft);
+  background: var(--bg);
+}
+
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Review-period selector. */
 .period-controls {
   display: flex;

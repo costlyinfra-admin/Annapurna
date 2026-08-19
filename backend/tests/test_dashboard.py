@@ -191,6 +191,21 @@ def test_spend_by_provider_breakdown_and_window(seeded):
     # Build trend is its own series, not summed with inference.
     assert "build_trend" in month
 
+    # Build cost also breaks down by developer, each with a per-tool split, and
+    # developers reconcile to the same build total (invariant 4: nothing dropped).
+    devs = month["build_by_developer"]
+    assert devs, "seeded data should attribute build cost to developers"
+    assert month["build_total"] == pytest.approx(sum(d["amount"] for d in devs), abs=1e-6)
+    assert abs(sum(d["pct"] for d in devs) - 100.0) < 1e-6
+    # Ordered by spend descending.
+    dev_amounts = [d["amount"] for d in devs]
+    assert dev_amounts == sorted(dev_amounts, reverse=True)
+    # Each developer's tools sum back to that developer's total (shares add to 100).
+    for d in devs:
+        assert d["by_tool"], f"{d['developer_id']} should have a tool breakdown"
+        assert abs(sum(t["amount"] for t in d["by_tool"]) - d["amount"]) < 1e-6
+        assert abs(sum(t["pct"] for t in d["by_tool"]) - 100.0) < 1e-6
+
     # A 3-month range pulls in prior months and yields three trend points.
     quarter = dashboard.spend_by_provider(seeded, range_token="last_3_months")
     assert len(quarter["trend"]) == 3

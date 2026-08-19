@@ -181,6 +181,20 @@ describe("Dashboard (Overview)", () => {
         { tool: "claude_code", amount: 181, pct: 67.04 },
         { tool: "cursor", amount: 89, pct: 32.96 },
       ],
+      build_by_developer: [
+        {
+          developer_id: "erin",
+          amount: 181,
+          pct: 67.04,
+          by_tool: [{ tool: "claude_code", amount: 181, pct: 100 }],
+        },
+        {
+          developer_id: "frank",
+          amount: 89,
+          pct: 32.96,
+          by_tool: [{ tool: "cursor", amount: 89, pct: 100 }],
+        },
+      ],
       build_trend: [{ period: "2026-05-01", amount: 270 }],
       customer_total: 900,
       by_customer: [{ customer_id: "acme", amount: 900, pct: 100, requests: 1200 }],
@@ -227,5 +241,56 @@ describe("Dashboard (Overview)", () => {
       target: { value: "last_3_months" },
     });
     await waitFor(() => expect(api.dashboard).toHaveBeenCalledWith({ kind: "last_3_months" }));
+  });
+
+  it("switches to the By developer tab and shows build cost per developer", async () => {
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      start: "2026-05-01",
+      end: "2026-05-01",
+      total: 0,
+      by_provider: [],
+      trend: [],
+      build_total: 270,
+      build_by_tool: [],
+      build_by_developer: [
+        {
+          developer_id: "erin",
+          amount: 181,
+          pct: 67.04,
+          by_tool: [{ tool: "claude_code", amount: 181, pct: 100 }],
+        },
+        {
+          developer_id: "frank",
+          amount: 89,
+          pct: 32.96,
+          by_tool: [{ tool: "cursor", amount: 89, pct: 100 }],
+        },
+      ],
+      build_trend: [{ period: "2026-05-01", amount: 270 }],
+      customer_total: 0,
+      by_customer: [],
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+
+    fireEvent.click(screen.getByRole("tab", { name: "By developer" }));
+    expect(await screen.findByText("Build cost by developer")).toBeInTheDocument();
+    expect(screen.getByText("erin")).toBeInTheDocument();
+    expect(screen.getByText("frank")).toBeInTheDocument();
+    expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
+    // Each developer breaks down by the tool they used.
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+  });
+
+  it("refreshes data and signals an alerts refresh when the refresh button is clicked", async () => {
+    const dispatch = vi.spyOn(window, "dispatchEvent");
+    renderDashboard();
+    await screen.findByText("Key insights");
+    expect(api.dashboard).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh data and alerts" }));
+    // Re-fetches the dashboard and fires the alerts-refresh window event.
+    await waitFor(() => expect(api.dashboard).toHaveBeenCalledTimes(2));
+    expect(dispatch.mock.calls.some(([e]) => e.type === "annapurna:refresh-alerts")).toBe(true);
   });
 });

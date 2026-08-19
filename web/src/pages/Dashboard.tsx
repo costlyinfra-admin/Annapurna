@@ -16,12 +16,16 @@ import {
   type ReviewRange,
 } from "../api";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
+import { DeveloperBreakdown } from "../components/DeveloperBreakdown";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import { PeriodSelector } from "../components/PeriodSelector";
 import { ProviderBreakdown } from "../components/ProviderBreakdown";
 import { compact, money, num } from "../format";
 
-type OverviewTab = "features" | "providers";
+type OverviewTab = "features" | "providers" | "developers";
+
+/** Notify the app shell (which owns the alerts badge) to re-poll alert state. */
+export const REFRESH_ALERTS_EVENT = "annapurna:refresh-alerts";
 
 /** What the month-over-month delta is compared against, per selected range. */
 const DELTA_LABEL: Record<RangeKind, string> = {
@@ -49,6 +53,8 @@ export function Dashboard() {
   const [range, setRange] = useState<ReviewRange>({ kind: "this_month" });
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -56,7 +62,11 @@ export function Dashboard() {
     setError(null);
     api
       .dashboard(range)
-      .then((d) => active && setData(d))
+      .then((d) => {
+        if (!active) return;
+        setData(d);
+        setLoadedAt(new Date());
+      })
       .catch(
         (err) =>
           active &&
@@ -65,7 +75,14 @@ export function Dashboard() {
     return () => {
       active = false;
     };
-  }, [range]);
+  }, [range, refreshKey]);
+
+  // Refresh everything the Overview shows — its cost data and the alerts badge
+  // (owned by the app shell, signalled via a window event).
+  const refreshAll = () => {
+    setRefreshKey((k) => k + 1);
+    window.dispatchEvent(new Event(REFRESH_ALERTS_EVENT));
+  };
 
   const hasFeatures = !!data && data.features.length > 0;
   const hasBuild = !!data && data.totals.build_cost > 0;
@@ -77,6 +94,23 @@ export function Dashboard() {
     <div className="content">
       <div className="dash-head">
         <h1>Overview</h1>
+        <div className="last-updated">
+          {loadedAt && (
+            <span className="muted last-updated-text">
+              Last updated {loadedAt.toLocaleString()}
+            </span>
+          )}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={refreshAll}
+            disabled={data === null}
+            aria-label="Refresh data and alerts"
+            title="Refresh data and alerts"
+          >
+            <RefreshIcon />
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -160,6 +194,15 @@ export function Dashboard() {
           >
             By provider
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "developers"}
+            className={tab === "developers" ? "tab active" : "tab"}
+            onClick={() => setTab("developers")}
+          >
+            By developer
+          </button>
         </div>
       )}
 
@@ -233,7 +276,29 @@ export function Dashboard() {
       )}
 
       {data && tab === "providers" && <ProviderBreakdown range={range} />}
+
+      {data && tab === "developers" && <DeveloperBreakdown range={range} />}
     </div>
+  );
+}
+
+/** Circular-arrow refresh glyph. */
+function RefreshIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <polyline points="21 3 21 9 15 9" />
+    </svg>
   );
 }
 

@@ -475,6 +475,12 @@ export interface ProviderSpend {
   trend: ClassificationTrendPoint[];
   build_total: number;
   build_by_tool: { tool: string; amount: number; pct: number }[];
+  build_by_developer: {
+    developer_id: string;
+    amount: number;
+    pct: number;
+    by_tool: { tool: string; amount: number; pct: number }[];
+  }[];
   build_trend: { period: string; amount: number }[];
   customer_total: number;
   by_customer: { customer_id: string; amount: number; pct: number; requests: number | null }[];
