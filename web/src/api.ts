@@ -719,7 +719,7 @@ export const api = {
     }),
 
   importBuildCost: (csv: string, tool?: string, period?: string) =>
-    request<{ total: number }>("/build/import", {
+    request<{ total: number; months_imported?: number }>("/build/import", {
       method: "POST",
       body: JSON.stringify({ csv, tool, period }),
     }),

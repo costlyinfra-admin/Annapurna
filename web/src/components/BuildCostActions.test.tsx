@@ -14,18 +14,20 @@ describe("BuildCostActions — CSV help", () => {
     vi.mocked(api.listSeatSources).mockResolvedValue([]);
   });
 
-  it("documents the developer,github_handle,tool,amount format with an example", async () => {
+  it("documents the developer,github_handle,tool,amount,months format with an example", async () => {
     render(<BuildCostActions features={[]} onChanged={async () => {}} />);
 
     // Expand the CSV import card (awaiting the button also flushes the mount effect).
     fireEvent.click(await screen.findByRole("button", { name: /Import a CSV/ }));
 
-    // The header format is documented and github_handle is explained.
-    expect(screen.getByText("developer,github_handle,tool,amount")).toBeInTheDocument();
+    // The header format (now including months) is documented, github_handle explained.
+    expect(screen.getByText("developer,github_handle,tool,amount,months")).toBeInTheDocument();
     expect(screen.getByText(/attribute PRs to features/i)).toBeInTheDocument();
-    // The example row uses the new format.
+    // The optional months column and its backfill behaviour are explained.
+    expect(screen.getByText(/backfill history/i)).toBeInTheDocument();
+    // The example row uses the new format with a months value.
     expect(
-      screen.getByPlaceholderText(/Muzaffar,Muzaffar-ni,claude_code,50\.00/),
+      screen.getByPlaceholderText(/John,John-ni,claude_code,50\.00,12/),
     ).toBeInTheDocument();
   });
 });
