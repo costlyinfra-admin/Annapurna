@@ -484,7 +484,7 @@ export function BuildCostActions({
             onChange={(e) => setCsv(e.target.value)}
             rows={3}
             placeholder={
-              "developer,github_handle,tool,amount\nMuzaffar,Muzaffar-ni,claude_code,50.00"
+              "developer,github_handle,tool,amount\nJohn,John-ni,claude_code,50.00"
             }
           />
           <span className="inline">
