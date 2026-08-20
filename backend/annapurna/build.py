@@ -20,7 +20,7 @@ import datetime as dt
 import io
 from collections import defaultdict
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Optional
 
 from .db import app_dsn, connect, tenant_tx
@@ -34,22 +34,48 @@ _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
 
 @dataclass
 class DeveloperSpend:
+    # `developer_id` is the attribution / grouping key (the GitHub handle when we
+    # have one, else the display name / login). `name` and `handle` are the
+    # separately-stored display identities; both are optional (legacy / automated
+    # imports supply only the key).
     developer_id: str
     tool: str
     amount: Decimal
     period: Optional[dt.date] = None
+    name: Optional[str] = None
+    handle: Optional[str] = None
 
 
 class CsvImportError(Exception):
     """Raised when a coding-tool CSV cannot be parsed."""
 
 
+def developer_label(name: Optional[str], handle: Optional[str], fallback: str = "") -> str:
+    """Display label for a developer.
+
+    "Name (handle)" when both are known; the name alone when the handle is
+    missing; the handle alone when the name is missing; otherwise a fallback
+    (the raw attribution key), so nothing renders blank.
+    """
+    name = (name or "").strip()
+    handle = (handle or "").strip()
+    if name and handle:
+        return f"{name} ({handle})"
+    return name or handle or fallback
+
+
 def parse_csv(
     text: str, default_tool: Optional[str] = None, default_period: Optional[dt.date] = None
 ) -> list[DeveloperSpend]:
-    """Parse a coding-tool export. Columns: developer, amount, [tool], [period].
+    """Parse a coding-tool export.
 
-    Header names are flexible (developer/developer_id/email/user; amount/cost/spend).
+    Preferred format (one row per developer):
+        developer,github_handle,tool,amount
+    where `developer` is a display name and `github_handle` is the GitHub login
+    used for PR attribution (matched case-insensitively). Legacy exports without a
+    github_handle column (developer,amount[,tool]) are still accepted — there the
+    developer column is the attribution key. Header names are matched
+    case-insensitively and flexibly.
     """
     reader = csv.DictReader(io.StringIO(text.strip()))
     if reader.fieldnames is None:
@@ -62,22 +88,43 @@ def parse_csv(
                 return row[fields[n]].strip()
         return None
 
+    # A github_handle column signals the newer name+handle format; without it we
+    # fall back to the legacy single-identity behaviour (unchanged).
+    has_handle_col = any(h in fields for h in ("github_handle", "github", "handle"))
+
     spends: list[DeveloperSpend] = []
     for i, row in enumerate(reader, start=2):  # row 1 is the header
-        developer = pick(row, "developer", "developer_id", "email", "user", "login")
+        if has_handle_col:
+            name = pick(row, "developer", "name", "user")
+            handle = pick(row, "github_handle", "github", "handle")
+            if not name and not handle:
+                raise CsvImportError(f"Row {i}: a developer name or github_handle is required.")
+            # Attribute by handle when present; otherwise fall back to the name.
+            developer_id = handle or name
+        else:
+            developer_id = pick(row, "developer", "developer_id", "email", "user", "login")
+            name = handle = None
+            if not developer_id:
+                raise CsvImportError(f"Row {i}: missing developer.")
+
         amount_raw = pick(row, "amount", "cost", "spend")
-        if developer is None or amount_raw is None:
-            raise CsvImportError(f"Row {i}: missing developer or amount.")
+        if amount_raw is None:
+            raise CsvImportError(f"Row {i}: missing amount.")
         try:
             amount = Decimal(amount_raw.replace("$", "").replace(",", ""))
-        except Exception as exc:
+        except InvalidOperation as exc:
             raise CsvImportError(f"Row {i}: invalid amount '{amount_raw}'.") from exc
+        if amount < 0:
+            raise CsvImportError(f"Row {i}: amount cannot be negative, got '{amount_raw}'.")
+
         tool = (pick(row, "tool") or default_tool or "").strip()
         if tool not in VALID_TOOLS:
             raise CsvImportError(
                 f"Row {i}: tool must be one of {sorted(VALID_TOOLS)}, got '{tool}'."
             )
-        spends.append(DeveloperSpend(developer, tool, amount, default_period))
+        spends.append(
+            DeveloperSpend(developer_id, tool, amount, default_period, name=name, handle=handle)
+        )
     if not spends:
         raise CsvImportError("CSV contained no spend rows.")
     return spends
@@ -99,7 +146,11 @@ def _split_amount(total: Decimal, weights: dict[str, int]) -> dict[str, Decimal]
 
 
 def _developer_feature_distribution(conn) -> dict[str, dict[str, int]]:
-    """actor -> {feature_id: number of authored PRs attributed to that feature}."""
+    """actor(lowercased) -> {feature_id: number of authored PRs attributed to it}.
+
+    Keyed by the lowercased GitHub login so attribution matches handles
+    case-insensitively (GitHub logins are themselves case-insensitive).
+    """
     rows = conn.execute(
         """
         SELECT fs.actor, fs.feature_id
@@ -110,8 +161,13 @@ def _developer_feature_distribution(conn) -> dict[str, dict[str, int]]:
     ).fetchall()
     dist: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for actor, feature_id in rows:
-        dist[actor][str(feature_id)] += 1
+        dist[actor.lower()][str(feature_id)] += 1
     return dist
+
+
+def _attribution_key(spend: DeveloperSpend) -> str:
+    """The lowercased GitHub handle used to match PRs (falls back to the key)."""
+    return (spend.handle or spend.developer_id).lower()
 
 
 def allocate_and_store(tenant_id: str, spends: list[DeveloperSpend], period: dt.date) -> dict:
@@ -126,7 +182,7 @@ def allocate_and_store(tenant_id: str, spends: list[DeveloperSpend], period: dt.
             (start, list(tools)),
         )
         for spend in spends:
-            feature_counts = dist.get(spend.developer_id, {})
+            feature_counts = dist.get(_attribution_key(spend), {})
             if not feature_counts:
                 # No attributable PRs -> Unattributed bucket (feature_id NULL).
                 _insert_build_cost(conn, tenant_id, None, spend, spend.amount, "low", start)
@@ -141,10 +197,21 @@ def _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, p
     conn.execute(
         """
         INSERT INTO build_cost
-            (tenant_id, feature_id, developer_id, tool, amount, period, confidence, source)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, 'coding_tool+github')
+            (tenant_id, feature_id, developer_id, developer_name, github_handle, tool,
+             amount, period, confidence, source)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'coding_tool+github')
         """,
-        (tenant_id, feature_id, spend.developer_id, spend.tool, amount, period, confidence),
+        (
+            tenant_id,
+            feature_id,
+            spend.developer_id,
+            spend.name,
+            spend.handle,
+            spend.tool,
+            amount,
+            period,
+            confidence,
+        ),
     )
 
 

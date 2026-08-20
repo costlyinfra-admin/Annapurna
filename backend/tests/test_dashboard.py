@@ -205,6 +205,10 @@ def test_spend_by_provider_breakdown_and_window(seeded):
         assert d["by_tool"], f"{d['developer_id']} should have a tool breakdown"
         assert abs(sum(t["amount"] for t in d["by_tool"]) - d["amount"]) < 1e-6
         assert abs(sum(t["pct"] for t in d["by_tool"]) - 100.0) < 1e-6
+        # Every developer carries a non-empty display label.
+        assert d["label"]
+    # The seed stores both a name and a handle, so at least one label combines them.
+    assert any(d["label"].endswith(")") and " (" in d["label"] for d in devs)
 
     # A 3-month range pulls in prior months and yields three trend points.
     quarter = dashboard.spend_by_provider(seeded, range_token="last_3_months")

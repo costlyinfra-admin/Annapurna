@@ -184,12 +184,14 @@ describe("Dashboard (Overview)", () => {
       build_by_developer: [
         {
           developer_id: "erin",
+          label: "Erin (erin)",
           amount: 181,
           pct: 67.04,
           by_tool: [{ tool: "claude_code", amount: 181, pct: 100 }],
         },
         {
           developer_id: "frank",
+          label: "Frank (frank)",
           amount: 89,
           pct: 32.96,
           by_tool: [{ tool: "cursor", amount: 89, pct: 100 }],
@@ -254,13 +256,16 @@ describe("Dashboard (Overview)", () => {
       build_by_tool: [],
       build_by_developer: [
         {
-          developer_id: "erin",
+          developer_id: "Muzaffar-ni",
+          label: "Muzaffar (Muzaffar-ni)",
           amount: 181,
           pct: 67.04,
           by_tool: [{ tool: "claude_code", amount: 181, pct: 100 }],
         },
         {
+          // Handle unavailable -> the label is just the name.
           developer_id: "frank",
+          label: "Frank",
           amount: 89,
           pct: 32.96,
           by_tool: [{ tool: "cursor", amount: 89, pct: 100 }],
@@ -275,8 +280,9 @@ describe("Dashboard (Overview)", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "By developer" }));
     expect(await screen.findByText("Build cost by developer")).toBeInTheDocument();
-    expect(screen.getByText("erin")).toBeInTheDocument();
-    expect(screen.getByText("frank")).toBeInTheDocument();
+    // The combined "Name (handle)" label renders; name-only falls back gracefully.
+    expect(screen.getByText("Muzaffar (Muzaffar-ni)")).toBeInTheDocument();
+    expect(screen.getByText("Frank")).toBeInTheDocument();
     expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
     // Each developer breaks down by the tool they used.
     expect(screen.getByText("Claude Code")).toBeInTheDocument();

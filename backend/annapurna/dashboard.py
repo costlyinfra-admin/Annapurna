@@ -14,6 +14,7 @@ import datetime as dt
 from typing import Optional
 
 from . import optimize
+from .build import developer_label
 from .db import app_dsn, connect, tenant_tx
 from .providers import month_start
 
@@ -734,24 +735,35 @@ def spend_by_provider(
         # coding tool). Rows with no developer (e.g. fine-tuning, seat pools) fall
         # into an Unattributed bucket so developers + Unattributed reconcile to the
         # build total.
+        # `label` combines the display name and GitHub handle ("Name (handle)"),
+        # falling back to whichever is present — this is the only view that shows
+        # the combined identity.
         dev_rows = conn.execute(
             """
-            SELECT developer_id, tool, SUM(amount)
+            SELECT developer_id, developer_name, github_handle, tool, SUM(amount)
             FROM build_cost
             WHERE period BETWEEN %s AND %s
-            GROUP BY developer_id, tool ORDER BY SUM(amount) DESC
+            GROUP BY developer_id, developer_name, github_handle, tool
+            ORDER BY SUM(amount) DESC
             """,
             (start, end),
         ).fetchall()
         developers: dict[str, dict] = {}
-        for developer_id, tool, amount in dev_rows:
+        for developer_id, dev_name, handle, tool, amount in dev_rows:
             dev = developer_id or "Unattributed"
-            entry = developers.setdefault(dev, {"developer_id": dev, "amount": 0.0, "by_tool": []})
+            entry = developers.setdefault(
+                dev,
+                {"developer_id": dev, "name": None, "handle": None, "amount": 0.0, "by_tool": []},
+            )
+            # name/handle are consistent within a developer_id; keep the first seen.
+            entry["name"] = entry["name"] or dev_name
+            entry["handle"] = entry["handle"] or handle
             entry["amount"] += float(amount)
             entry["by_tool"].append((tool, float(amount)))
         build_by_developer = [
             {
                 "developer_id": d["developer_id"],
+                "label": developer_label(d["name"], d["handle"], fallback=d["developer_id"]),
                 "amount": d["amount"],
                 "pct": (d["amount"] / build_total * 100.0) if build_total else 0.0,
                 "by_tool": [

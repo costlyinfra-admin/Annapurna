@@ -54,15 +54,76 @@ def test_split_amount_is_exact():
 
 
 def test_parse_csv_flexible_headers_and_amounts():
+    # Legacy format (no github_handle column) still parses; name/handle stay None.
     text = 'developer,tool,amount\nalice,cursor,100\nbob,claude_code,"$1,234.50"\n'
     spends = build.parse_csv(text)
     assert spends[0] == DeveloperSpend("alice", "cursor", Decimal("100"), None)
+    assert spends[0].name is None and spends[0].handle is None
     assert spends[1].amount == Decimal("1234.50")
+
+
+def test_parse_csv_new_name_and_handle_format():
+    text = "developer,github_handle,tool,amount\nMuzaffar,Muzaffar-ni,claude_code,50.00\n"
+    (spend,) = build.parse_csv(text)
+    assert spend.name == "Muzaffar"
+    assert spend.handle == "Muzaffar-ni"
+    assert spend.developer_id == "Muzaffar-ni"  # handle is the attribution key
+    assert spend.amount == Decimal("50.00")
+
+
+def test_parse_csv_handle_only_and_name_only():
+    # Name missing -> handle is both key and identity.
+    (s1,) = build.parse_csv("developer,github_handle,tool,amount\n,octo,cursor,10\n")
+    assert s1.name is None and s1.handle == "octo" and s1.developer_id == "octo"
+    # Handle missing -> name is the key.
+    (s2,) = build.parse_csv("developer,github_handle,tool,amount\nDana,,cursor,10\n")
+    assert s2.handle is None and s2.name == "Dana" and s2.developer_id == "Dana"
 
 
 def test_parse_csv_rejects_bad_tool():
     with pytest.raises(build.CsvImportError):
         build.parse_csv("developer,tool,amount\nalice,myspace,10\n")
+
+
+def test_parse_csv_rejects_blanks_and_invalid_amounts():
+    # Both name and handle blank in the new format.
+    with pytest.raises(build.CsvImportError, match="name or github_handle"):
+        build.parse_csv("developer,github_handle,tool,amount\n,,cursor,10\n")
+    # Missing amount.
+    with pytest.raises(build.CsvImportError, match="missing amount"):
+        build.parse_csv("developer,github_handle,tool,amount\nA,a,cursor,\n")
+    # Non-numeric amount.
+    with pytest.raises(build.CsvImportError, match="invalid amount"):
+        build.parse_csv("developer,github_handle,tool,amount\nA,a,cursor,lots\n")
+    # Negative amount.
+    with pytest.raises(build.CsvImportError, match="cannot be negative"):
+        build.parse_csv("developer,github_handle,tool,amount\nA,a,cursor,-5\n")
+    # Legacy format: missing developer.
+    with pytest.raises(build.CsvImportError, match="missing developer"):
+        build.parse_csv("developer,tool,amount\n,cursor,10\n")
+
+
+def test_developer_label_variants():
+    assert build.developer_label("Muzaffar", "Muzaffar-ni") == "Muzaffar (Muzaffar-ni)"
+    assert build.developer_label("Muzaffar", None) == "Muzaffar"
+    assert build.developer_label("", "octo") == "octo"
+    assert build.developer_label(None, None, fallback="Unattributed") == "Unattributed"
+
+
+def test_attribution_uses_github_handle_case_insensitively(discovered):
+    # Display name differs from the handle, and the handle's case differs from the
+    # recorded PR actor ('alice') — attribution should still land on Alice's feature.
+    text = (
+        "developer,github_handle,tool,amount\n"
+        "Alice Smith,ALICE,cursor,100\n"
+        "Muzaffar,Muzaffar-ni,claude_code,50\n"  # no PRs -> Unattributed
+    )
+    spends = build.parse_csv(text)
+    summary = build.allocate_and_store(discovered, spends, PERIOD)
+
+    features = {f["name"]: f for f in summary["features"]}
+    assert features["Threat"]["amount"] == 100.0  # matched despite ALICE vs alice
+    assert summary["unattributed"] == 50.0  # Muzaffar had no attributable PRs
 
 
 def test_allocation_by_pr_overlap(discovered):

@@ -477,6 +477,8 @@ export interface ProviderSpend {
   build_by_tool: { tool: string; amount: number; pct: number }[];
   build_by_developer: {
     developer_id: string;
+    // Display label: "Name (handle)", or whichever identity is available.
+    label: string;
     amount: number;
     pct: number;
     by_tool: { tool: string; amount: number; pct: number }[];

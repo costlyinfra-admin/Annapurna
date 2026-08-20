@@ -87,16 +87,24 @@ def _add_build_cost(
     confidence,
     period=DEFAULT_PERIOD,
 ):
+    # The seed's developer_id is the GitHub login (it lines up with PR actors);
+    # store a lowercased handle and a prettified display name so the Overview "By
+    # developer" view shows the "Name (handle)" format.
+    handle = developer_id.lower()
+    display_name = developer_id.replace("-", " ").replace("_", " ").title()
     conn.execute(
         """
-        INSERT INTO build_cost (tenant_id, feature_id, developer_id, tool,
-                                pr_ref, amount, period, confidence, source)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO build_cost (tenant_id, feature_id, developer_id, developer_name,
+                                github_handle, tool, pr_ref, amount, period,
+                                confidence, source)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
             feature_id,
             developer_id,
+            display_name,
+            handle,
             tool,
             pr_ref,
             amount,

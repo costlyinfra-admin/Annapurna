@@ -468,19 +468,24 @@ export function BuildCostActions({
         <MethodCard
           id="csv"
           title="Import a CSV"
-          tagline="Works for any tool. Paste developer, tool, amount."
+          tagline="Works for any tool. Paste developer, github handle, tool, amount."
           openId={openId}
           setOpenId={setOpenId}
         >
           <p className="method-help">
-            A universal fallback. Assemble a simple sheet of <code>developer,tool,amount</code> —
-            one row per developer — and paste it here.
+            A universal fallback. Assemble a simple sheet with a header row of{" "}
+            <code>developer,github_handle,tool,amount</code> — one row per developer — and paste it
+            here. <code>developer</code> is the display name; <code>github_handle</code> is their
+            GitHub login, used to attribute PRs to features (matched case-insensitively). The tool
+            column is optional if you pick a tool below.
           </p>
           <textarea
             value={csv}
             onChange={(e) => setCsv(e.target.value)}
             rows={3}
-            placeholder={"alice,cursor,40\nbob,claude_code,180"}
+            placeholder={
+              "developer,github_handle,tool,amount\nMuzaffar,Muzaffar-ni,claude_code,50.00"
+            }
           />
           <span className="inline">
             <select value={tool} onChange={(e) => setTool(e.target.value)}>

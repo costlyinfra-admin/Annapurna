@@ -58,7 +58,7 @@ export function DeveloperBreakdown({ range }: { range: ReviewRange }) {
               <span className="chart-title">By developer · {money(data.build_total)} total</span>
               <SpendBars
                 rows={data.build_by_developer.map((d) => ({
-                  label: d.developer_id,
+                  label: d.label,
                   amount: d.amount,
                   pct: d.pct,
                   models: d.by_tool.map((t) => ({
