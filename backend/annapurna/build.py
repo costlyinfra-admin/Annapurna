@@ -30,6 +30,9 @@ from .seatpricing import seat_price
 
 VALID_TOOLS = {"claude_code", "cursor", "copilot", "codex"}
 _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
+# Upper bound on the optional CSV `months` column — matches the provider ingest
+# history cap, and guards against a typo turning into thousands of rows.
+MAX_MONTHS = 24
 
 
 @dataclass
@@ -37,13 +40,15 @@ class DeveloperSpend:
     # `developer_id` is the attribution / grouping key (the GitHub handle when we
     # have one, else the display name / login). `name` and `handle` are the
     # separately-stored display identities; both are optional (legacy / automated
-    # imports supply only the key).
+    # imports supply only the key). `months` is how many consecutive monthly
+    # records this row represents, ending at the import period (default 1).
     developer_id: str
     tool: str
     amount: Decimal
     period: Optional[dt.date] = None
     name: Optional[str] = None
     handle: Optional[str] = None
+    months: int = 1
 
 
 class CsvImportError(Exception):
@@ -70,12 +75,13 @@ def parse_csv(
     """Parse a coding-tool export.
 
     Preferred format (one row per developer):
-        developer,github_handle,tool,amount
+        developer,github_handle,tool,amount[,months]
     where `developer` is a display name and `github_handle` is the GitHub login
-    used for PR attribution (matched case-insensitively). Legacy exports without a
-    github_handle column (developer,amount[,tool]) are still accepted — there the
-    developer column is the attribution key. Header names are matched
-    case-insensitively and flexibly.
+    used for PR attribution (matched case-insensitively). The optional `months`
+    column backfills history: `...,50.00,12` writes twelve monthly $50 records
+    ending at the import period. Legacy exports without a github_handle column
+    (developer,amount[,tool]) are still accepted — there the developer column is
+    the attribution key. Header names are matched case-insensitively and flexibly.
     """
     reader = csv.DictReader(io.StringIO(text.strip()))
     if reader.fieldnames is None:
@@ -122,8 +128,26 @@ def parse_csv(
             raise CsvImportError(
                 f"Row {i}: tool must be one of {sorted(VALID_TOOLS)}, got '{tool}'."
             )
+
+        months_raw = pick(row, "months", "month_count", "num_months")
+        if months_raw is None:
+            months = 1
+        else:
+            try:
+                months = int(months_raw)
+            except ValueError as exc:
+                raise CsvImportError(
+                    f"Row {i}: months must be a whole number, got '{months_raw}'."
+                ) from exc
+            if months < 1 or months > MAX_MONTHS:
+                raise CsvImportError(
+                    f"Row {i}: months must be between 1 and {MAX_MONTHS}, got '{months_raw}'."
+                )
+
         spends.append(
-            DeveloperSpend(developer_id, tool, amount, default_period, name=name, handle=handle)
+            DeveloperSpend(
+                developer_id, tool, amount, default_period, name=name, handle=handle, months=months
+            )
         )
     if not spends:
         raise CsvImportError("CSV contained no spend rows.")
@@ -170,27 +194,55 @@ def _attribution_key(spend: DeveloperSpend) -> str:
     return (spend.handle or spend.developer_id).lower()
 
 
+def _month_span(start: dt.date, months: int) -> list[dt.date]:
+    """`months` first-of-month dates ending at (and newest-first from) `start`:
+    [start, start-1mo, …, start-(months-1)mo]."""
+    out = []
+    year, month = start.year, start.month
+    for _ in range(months):
+        out.append(dt.date(year, month, 1))
+        month -= 1
+        if month == 0:
+            month, year = 12, year - 1
+    return out
+
+
 def allocate_and_store(tenant_id: str, spends: list[DeveloperSpend], period: dt.date) -> dict:
-    """Allocate developer spend to features and persist build_cost rows."""
-    start = month_start(period)
+    """Allocate developer spend to features and persist build_cost rows.
+
+    Each row is written to every month in its span (its `months` value, ending at
+    `period`), so a single CSV can backfill history. The same PR-authorship split
+    is applied to each month.
+    """
+    anchor = month_start(period)
+    # Exactly the (tool, period) cells this import writes — replaced idempotently,
+    # grouped by tool so we never delete a month a different tool owns.
+    tool_periods: dict[str, set] = defaultdict(set)
+    for s in spends:
+        tool_periods[s.tool].update(_month_span(anchor, s.months))
+
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         dist = _developer_feature_distribution(conn)
-        tools = {s.tool for s in spends}
-        # Idempotent: replace this period's rows for the tools being imported.
-        conn.execute(
-            "DELETE FROM build_cost WHERE period = %s AND tool = ANY(%s)",
-            (start, list(tools)),
-        )
+        for tool, periods in tool_periods.items():
+            conn.execute(
+                "DELETE FROM build_cost WHERE tool = %s AND period = ANY(%s)",
+                (tool, list(periods)),
+            )
         for spend in spends:
             feature_counts = dist.get(_attribution_key(spend), {})
-            if not feature_counts:
-                # No attributable PRs -> Unattributed bucket (feature_id NULL).
-                _insert_build_cost(conn, tenant_id, None, spend, spend.amount, "low", start)
-                continue
-            confidence = "high" if len(feature_counts) == 1 else "med"
-            for feature_id, amount in _split_amount(spend.amount, feature_counts).items():
-                _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, start)
-    return build_summary(tenant_id, period)
+            for p in _month_span(anchor, spend.months):
+                if not feature_counts:
+                    # No attributable PRs -> Unattributed bucket (feature_id NULL).
+                    _insert_build_cost(conn, tenant_id, None, spend, spend.amount, "low", p)
+                    continue
+                confidence = "high" if len(feature_counts) == 1 else "med"
+                for feature_id, amount in _split_amount(spend.amount, feature_counts).items():
+                    _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, p)
+
+    summary = build_summary(tenant_id, period)
+    # How many months of history this import covers (for the UI's confirmation).
+    summary["months_imported"] = max((s.months for s in spends), default=1)
+    return summary
 
 
 def _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, period):

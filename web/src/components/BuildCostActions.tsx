@@ -227,7 +227,12 @@ export function BuildCostActions({
     try {
       const r = await api.importBuildCost(csv, tool, monthParam);
       setCsv("");
-      setNote(`Imported build cost (total ${r.total}).`);
+      const months = r.months_imported ?? 1;
+      setNote(
+        months > 1
+          ? `Imported build cost across ${months} months (current month total ${money(r.total)}).`
+          : `Imported build cost (total ${money(r.total)}).`,
+      );
       await onChanged();
     } catch (err) {
       setNote(err instanceof ApiError ? err.message : "Import failed.");
@@ -468,23 +473,25 @@ export function BuildCostActions({
         <MethodCard
           id="csv"
           title="Import a CSV"
-          tagline="Works for any tool. Paste developer, github handle, tool, amount."
+          tagline="Works for any tool. Paste developer, github handle, tool, amount, months."
           openId={openId}
           setOpenId={setOpenId}
         >
           <p className="method-help">
             A universal fallback. Assemble a simple sheet with a header row of{" "}
-            <code>developer,github_handle,tool,amount</code> — one row per developer — and paste it
-            here. <code>developer</code> is the display name; <code>github_handle</code> is their
-            GitHub login, used to attribute PRs to features (matched case-insensitively). The tool
-            column is optional if you pick a tool below.
+            <code>developer,github_handle,tool,amount,months</code> — one row per developer — and
+            paste it here. <code>developer</code> is the display name; <code>github_handle</code> is
+            their GitHub login, used to attribute PRs to features (matched case-insensitively). The
+            tool column is optional if you pick a tool below. <code>months</code> is optional too
+            (default 1) — set it to backfill history: <code>…,50.00,12</code> records $50 for each
+            of the last 12 months, ending with the current month.
           </p>
           <textarea
             value={csv}
             onChange={(e) => setCsv(e.target.value)}
             rows={3}
             placeholder={
-              "developer,github_handle,tool,amount\nMuzaffar,Muzaffar-ni,claude_code,50.00"
+              "developer,github_handle,tool,amount,months\nJohn Smith,johnsmith,claude_code,50.00,12"
             }
           />
           <span className="inline">

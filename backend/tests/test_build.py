@@ -158,6 +158,41 @@ def test_reimport_is_idempotent(discovered):
     assert summary["total"] == 100.0  # not doubled
 
 
+def test_parse_csv_months_column():
+    # An explicit months value is parsed.
+    (s,) = build.parse_csv("developer,github_handle,tool,amount,months\nA,a,cursor,50,12\n")
+    assert s.months == 12
+    # Absent or blank -> defaults to a single month.
+    (s1,) = build.parse_csv("developer,github_handle,tool,amount\nA,a,cursor,50\n")
+    assert s1.months == 1
+    (s2,) = build.parse_csv("developer,github_handle,tool,amount,months\nA,a,cursor,50,\n")
+    assert s2.months == 1
+    # Zero, negative, fractional, non-numeric, and over-cap are all rejected.
+    for bad in ("0", "-3", "1.5", "lots", "999"):
+        with pytest.raises(build.CsvImportError, match="months"):
+            build.parse_csv(f"developer,github_handle,tool,amount,months\nA,a,cursor,50,{bad}\n")
+
+
+def test_allocate_backfills_history_months(discovered):
+    # months=3 backfills May, Apr, Mar 2026 with an identical record each.
+    text = "developer,github_handle,tool,amount,months\nAlice,alice,cursor,100,3\n"
+    summary = build.allocate_and_store(discovered, build.parse_csv(text), PERIOD)
+    assert summary["months_imported"] == 3
+    assert summary["total"] == 100.0  # anchor month holds the full $100
+
+    for m in (dt.date(2026, 5, 1), dt.date(2026, 4, 1), dt.date(2026, 3, 1)):
+        month = build.build_summary(discovered, m)
+        assert month["total"] == 100.0
+        # Attribution (Alice -> Threat) is applied identically to every month.
+        assert {f["name"]: f["amount"] for f in month["features"]} == {"Threat": 100.0}
+    # The month just before the span is untouched.
+    assert build.build_summary(discovered, dt.date(2026, 2, 1))["total"] == 0.0
+
+    # Re-importing the same span replaces rather than doubling any month.
+    build.allocate_and_store(discovered, build.parse_csv(text), PERIOD)
+    assert build.build_summary(discovered, dt.date(2026, 4, 1))["total"] == 100.0
+
+
 class _FakeCopilotGitHub:
     def __enter__(self):
         return self
