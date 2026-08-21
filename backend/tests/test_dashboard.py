@@ -20,6 +20,27 @@ def seeded(tenant_id, app_env):
     return tenant_id
 
 
+def test_default_period_tracks_inference_not_a_later_build_backfill(seeded, app_env):
+    # Reproduces the "Sync now / refresh 12 months" bug: a build backfill reaches a
+    # later month (Aug 2026) than the latest inference (May 2026). The default
+    # "this month" must NOT jump to the build-only August — that reported the
+    # current-month inference as ~$0. It stays on the latest inference month.
+    app_env.execute(
+        """
+        INSERT INTO build_cost (tenant_id, developer_id, tool, amount, period, confidence, source)
+        VALUES (%s, 'zoe', 'cursor', 120, '2026-08-01', 'low', 'coding_tool+github')
+        """,
+        (seeded,),
+    )
+    app_env.commit()
+
+    data = dashboard.dashboard(seeded)  # no range -> default period
+    assert data["period"] == "2026-05-01"  # latest INFERENCE month, not Aug build
+    assert data["totals"]["inference_cost"] > 0  # May's real spend, not August's $0
+    # The out-of-range August build row is excluded from the default month's total.
+    assert data["totals"]["build_cost"] == 341.75  # May: 181 + 88.5 + 42.25 + 30
+
+
 def test_dashboard_keeps_build_and_inference_separate(seeded):
     data = dashboard.dashboard(seeded, PERIOD)
     by_name = {f["name"]: f for f in data["features"]}
