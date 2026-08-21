@@ -99,6 +99,22 @@ describe("CostSourcesPage", () => {
     expect(await screen.findByText(/Pulled .* of Anthropic spend/)).toBeInTheDocument();
   });
 
+  it("surfaces per-month backfill errors instead of importing silently", async () => {
+    vi.mocked(api.connectors).mockResolvedValue([
+      { type: "anthropic", name: "Anthropic", category: "inference", connected: true },
+    ]);
+    vi.mocked(api.ingestInference).mockResolvedValue({
+      total: 3200,
+      months: 12,
+      errors: [{ period: "2026-08-01", error: "Provider API error 400: ending_at" }],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Sync now" }));
+    // The failing month and its reason are shown, not swallowed.
+    expect(await screen.findByText(/1 month failed/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-08: Provider API error 400/)).toBeInTheDocument();
+  });
+
   it("expands a connected source's detail inline and classifies a resource", async () => {
     vi.mocked(api.connectors).mockResolvedValue([
       { type: "anthropic", name: "Anthropic", category: "inference", connected: true },

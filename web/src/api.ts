@@ -702,7 +702,12 @@ export const api = {
     }),
 
   ingestInference: (provider: string, period?: string, months?: number) =>
-    request<{ total: number; months?: number }>("/inference/ingest", {
+    request<{
+      total: number;
+      months?: number;
+      by_month?: { period: string; total: number; rows: number }[];
+      errors?: { period: string; error: string }[];
+    }>("/inference/ingest", {
       method: "POST",
       body: JSON.stringify({ provider, period, months }),
     }),

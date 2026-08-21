@@ -12,6 +12,7 @@ from annapurna.providers import (
     OpenAICostClient,
     ProviderError,
     aggregate,
+    month_query_end,
     month_start,
     next_month,
 )
@@ -20,6 +21,56 @@ from annapurna.providers import (
 def test_month_helpers():
     assert month_start(dt.date(2026, 5, 17)) == dt.date(2026, 5, 1)
     assert next_month(dt.date(2026, 12, 1)) == dt.date(2027, 1, 1)
+
+
+def test_month_query_end_caps_current_month_to_date():
+    today = dt.date(2026, 8, 20)
+    # A fully-elapsed month queries the whole month (first of next month).
+    assert month_query_end(dt.date(2026, 5, 1), today=today) == dt.date(2026, 6, 1)
+    # The current (in-progress) month is capped at tomorrow — month-to-date, never
+    # the future Sept 1 that made the current month import nothing.
+    assert month_query_end(dt.date(2026, 8, 1), today=today) == dt.date(2026, 8, 21)
+
+
+def test_anthropic_current_month_queries_month_to_date_not_future():
+    # Simulate the real Cost Report: a FUTURE ending_at returns nothing; only a
+    # month-to-date ending_at returns the current month's spend. This is exactly
+    # why the current month previously imported no rows.
+    today = dt.date.today()
+    cap = (today + dt.timedelta(days=1)).isoformat()
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        end = request.url.params.get("ending_at")
+        captured["ending_at"] = end
+        if end > cap:  # future -> the real API yields no data
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "results": [
+                            {
+                                "workspace_id": "ws_triage",
+                                "description": "claude-sonnet-4-6",
+                                "amount": "4200.00",  # cents -> $42.00
+                                "currency": "USD",
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    records = client.fetch_costs(today)  # the CURRENT month
+    # ending_at is capped to tomorrow, so month-to-date cost imports (not empty),
+    # and it reconciles with the Cost Report's returned dollars.
+    assert captured["ending_at"] == cap
+    assert sum((r.amount for r in records), Decimal("0")) == Decimal("42.00")
 
 
 def test_aggregate_sums_same_key_project_model():

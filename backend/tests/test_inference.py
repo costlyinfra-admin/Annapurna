@@ -61,6 +61,51 @@ def test_attribution_confidence_and_unattributed(tenant_id):
     assert summary["total"] == 6810.0
 
 
+def test_anthropic_current_month_ingest_reconciles_with_cost_report(tenant_id, monkeypatch):
+    # "Verify August's month-to-date total against the Cost Report": ingesting the
+    # CURRENT month persists exactly the Cost Report's authoritative dollars.
+    today = dt.date.today()
+
+    class _FakeAnthropic:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):  # authoritative month-to-date billed dollars
+            return [
+                CostRecord("anthropic", period, Decimal("4200.00"), project="ws_triage", model="c")
+            ]
+
+        def fetch_usage(self, period):  # identity split (never the dollar source)
+            return [
+                UsageRecord(
+                    workspace_id="ws_triage",
+                    api_key_id="key1",
+                    model="claude-sonnet-4-6",
+                    tokens_in=1000,
+                    tokens_out=500,
+                    request_count=10,
+                )
+            ]
+
+        def fetch_workspaces(self):
+            return {"ws_triage": "Triage"}
+
+        def fetch_api_keys(self):
+            return {"key1": {"name": "prod", "workspace_id": "ws_triage"}}
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeAnthropic())
+    summary = inference.run_inference_ingest(tenant_id, "anthropic", today, "admin-key")
+
+    # The ingest total equals the Cost Report total, and it lands on the current month.
+    assert summary["total"] == 4200.0
+    assert summary["period"] == today.replace(day=1).isoformat()
+    view = inference.inference_summary(tenant_id, today)
+    assert view["by_provider"]["anthropic"] == 4200.0  # reconciles with the bill
+
+
 def test_reingest_is_idempotent(tenant_id):
     _mapped_tenant(tenant_id)
     records = [_record("anthropic", 4200, api_key_ref="key:triage")]

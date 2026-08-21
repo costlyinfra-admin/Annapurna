@@ -101,7 +101,14 @@ export function CostSourcesPage() {
                     const r = await api.ingestInference(c.type, undefined, 12);
                     await refreshFeatures();
                     setDetailVersion((v) => v + 1);
-                    return `Pulled ${money(r.total)} of ${c.name} spend across the last 12 months.`;
+                    const base = `Pulled ${money(r.total)} of ${c.name} spend across the last 12 months.`;
+                    // Surface per-month failures instead of silently importing nothing.
+                    const errs = r.errors ?? [];
+                    if (errs.length === 0) return base;
+                    const detail = errs
+                      .map((e) => `${e.period.slice(0, 7)}: ${e.error}`)
+                      .join("; ");
+                    return `${base} ⚠ ${errs.length} month${errs.length === 1 ? "" : "s"} failed — ${detail}`;
                   }}
                 />
               ))}

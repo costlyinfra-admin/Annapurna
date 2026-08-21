@@ -39,24 +39,23 @@ def _min_confidence(current: Optional[str], candidate: Optional[str]) -> Optiona
 
 
 def _resolve_period(conn, period: Optional[dt.date]) -> dt.date:
-    """Use the given month, or the latest month that reflects current spend.
+    """Use the given month, or the latest month that has any cost/usage data.
 
-    Inference (recurring run cost) defines the billing period, so the default
-    "current month" tracks the latest inference month. A lumpy or back-filled
-    build/usage import that reaches further ahead must NOT pull the default onto a
-    month with no inference (which would report the current-month cost as ~$0) — so
-    inference wins, and build/usage are only fallbacks when there is no inference
-    at all. See the ``COALESCE`` order below.
+    "This month" (the default) is the actual current calendar month once a working
+    sync has ingested it — the latest-with-data fallback only matters before any
+    data lands. We deliberately do NOT special-case one cost table over another: if
+    the current month reads as empty, that is an honest signal to sync, surfaced by
+    the per-month backfill errors, not something to paper over here.
     """
     if period is not None:
         return month_start(period)
     row = conn.execute(
         """
-        SELECT COALESCE(
-            (SELECT max(period) FROM inference_cost),
-            (SELECT max(period) FROM build_cost),
-            (SELECT max(period) FROM feature_usage)
-        )
+        SELECT max(p) FROM (
+            SELECT max(period) p FROM build_cost
+            UNION ALL SELECT max(period) FROM inference_cost
+            UNION ALL SELECT max(period) FROM feature_usage
+        ) periods
         """
     ).fetchone()
     return row[0] if row and row[0] else month_start(dt.date.today())

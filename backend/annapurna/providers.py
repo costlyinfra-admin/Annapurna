@@ -84,6 +84,20 @@ def next_month(start: dt.date) -> dt.date:
     return (start.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
 
 
+def month_query_end(start: dt.date, *, today: Optional[dt.date] = None) -> dt.date:
+    """Exclusive end date for a cost query over the month beginning at ``start``.
+
+    A fully-elapsed month ends at the first of the next month. The CURRENT
+    (in-progress) month is instead capped at *tomorrow*, so we query month-to-date
+    rather than into the future: provider cost APIs (Anthropic's cost/usage reports
+    among them) reject — or silently return nothing for — a future ``ending_at``,
+    which is why the current month otherwise imports no rows. Past months are
+    unaffected (``next_month`` is already <= tomorrow).
+    """
+    today = today or dt.date.today()
+    return min(next_month(start), today + dt.timedelta(days=1))
+
+
 def aggregate(records: list[CostRecord]) -> list[CostRecord]:
     """Collapse records sharing (api_key_ref, project, model) into one row."""
     buckets: dict[tuple, CostRecord] = {}
@@ -170,7 +184,7 @@ class AnthropicCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # capped at tomorrow -> month-to-date, never future
         resp = self._get(
             "/v1/organizations/cost_report",
             params={
@@ -192,7 +206,7 @@ class AnthropicCostClient(_BaseCostClient):
         detail, not billing.
         """
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # capped at tomorrow -> month-to-date, never future
         out: list[UsageRecord] = []
         page: Optional[str] = None
         while True:
@@ -256,7 +270,7 @@ class OpenAICostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         resp = self._get(
             "/v1/organization/costs",
             params={
@@ -284,7 +298,7 @@ class GoogleCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         resp = self._get(
             "/v1/cost",
             params={"start_date": start.isoformat(), "end_date": end.isoformat()},
@@ -469,7 +483,7 @@ class HostedUsageCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         resp = self._get(
             self.path,
             params={"start_date": start.isoformat(), "end_date": end.isoformat()},
@@ -586,7 +600,7 @@ class BedrockCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         body = json.dumps(
             {
                 "TimePeriod": {"Start": start.isoformat(), "End": end.isoformat()},
@@ -705,7 +719,7 @@ class AzureCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         token = self._token()
         body = {
             "type": "ActualCost",
@@ -773,7 +787,7 @@ class LiteLLMCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         resp = self._get(
             "/global/spend/report",
             params={"start_date": start.isoformat(), "end_date": end.isoformat()},
@@ -840,7 +854,7 @@ class VercelGatewayCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         params = {"start": start.isoformat(), "end": end.isoformat()}
         if self._team:
             params["teamId"] = self._team
@@ -902,7 +916,7 @@ class ModalCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         resp = http_get_with_retry(
             self._client,
             self._url,
@@ -951,7 +965,7 @@ class ElevenLabsCostClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         start_ms = int(
             dt.datetime(start.year, start.month, start.day, tzinfo=dt.timezone.utc).timestamp()
             * 1000
@@ -1003,7 +1017,7 @@ class _AnalyticsGatewayClient(_BaseCostClient):
 
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
-        end = next_month(start)
+        end = month_query_end(start)  # month-to-date, never into the future
         resp = http_get_with_retry(
             self._client,
             self._url,
