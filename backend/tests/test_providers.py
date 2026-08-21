@@ -210,6 +210,35 @@ def test_openai_parses_costs():
     assert records[0].amount == Decimal("1850.00")
 
 
+def test_anthropic_cost_report_stamps_the_bucket_day():
+    # Each daily bucket's date is captured, so cost can be persisted per day.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "starting_at": "2026-05-04T00:00:00Z",
+                        "results": [
+                            {"workspace_id": "ws", "description": "c", "amount": "1000.00"}
+                        ],
+                    },
+                    {
+                        "starting_at": "2026-05-05T00:00:00Z",
+                        "results": [{"workspace_id": "ws", "description": "c", "amount": "500.00"}],
+                    },
+                ]
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    by_day = {r.period: r.amount for r in client.fetch_costs(dt.date(2026, 5, 1))}
+    assert by_day[dt.date(2026, 5, 4)] == Decimal("10.00")  # cents -> dollars, per day
+    assert by_day[dt.date(2026, 5, 5)] == Decimal("5.00")
+
+
 def test_openai_costs_paginate_the_full_month():
     # Same class of bug as Anthropic: the Costs API paginates daily buckets, so a
     # long month must be paged through rather than truncated to the first page.

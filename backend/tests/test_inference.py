@@ -173,6 +173,79 @@ def test_anthropic_estimates_not_yet_billed_current_month(tenant_id, monkeypatch
     assert inference.inference_summary(tenant_id, today)["by_provider"]["anthropic"] == 10.0
 
 
+def test_daily_rows_roll_up_to_the_monthly_total(tenant_id, monkeypatch):
+    # Anthropic reports 3 daily cost buckets across a month; the daily table keeps
+    # each day, and summing them equals the single monthly inference_cost total.
+    from annapurna.db import app_dsn, connect, tenant_tx
+
+    d1, d2, d3 = dt.date(2026, 5, 4), dt.date(2026, 5, 5), dt.date(2026, 5, 20)
+
+    class _FakeAnthropic:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):  # 3 days, one workspace
+            return [
+                CostRecord(
+                    "anthropic",
+                    d,
+                    Decimal(str(amt)),
+                    project="ws",
+                    model="c",
+                    tokens_in=100,
+                    tokens_out=50,
+                )
+                for d, amt in [(d1, 30), (d2, 45), (d3, 25)]
+            ]
+
+        def fetch_usage(self, period):
+            return [
+                UsageRecord(
+                    workspace_id="ws",
+                    api_key_id="k",
+                    model="c",
+                    tokens_in=100,
+                    tokens_out=50,
+                    request_count=1,
+                    day=d,
+                )
+                for d in (d1, d2, d3)
+            ]
+
+        def fetch_workspaces(self):
+            return {"ws": "Workspace"}
+
+        def fetch_api_keys(self):
+            return {"k": {"name": "key", "workspace_id": "ws"}}
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeAnthropic())
+    inference.run_inference_ingest(tenant_id, "anthropic", dt.date(2026, 5, 1), "key")
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        monthly = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM inference_cost "
+            "WHERE provider='anthropic' AND period=%s AND source='cost_api'",
+            (dt.date(2026, 5, 1),),
+        ).fetchone()[0]
+        daily = conn.execute(
+            "SELECT day, SUM(amount) FROM inference_cost_daily "
+            "WHERE provider='anthropic' AND source='cost_api' GROUP BY day ORDER BY day",
+            (),
+        ).fetchall()
+
+    assert float(monthly) == 100.0  # 30 + 45 + 25
+    # Three distinct days persisted, each with its own amount, summing to the month.
+    assert {d.isoformat(): float(a) for d, a in daily} == {
+        "2026-05-04": 30.0,
+        "2026-05-05": 45.0,
+        "2026-05-20": 25.0,
+    }
+    assert round(sum(float(a) for _d, a in daily), 2) == float(monthly)
+
+
 def test_anthropic_no_estimate_for_a_past_month(tenant_id, monkeypatch):
     # A fully-elapsed month is entirely billed -> no estimate, even if usage > billed.
     class _FakeAnthropic:

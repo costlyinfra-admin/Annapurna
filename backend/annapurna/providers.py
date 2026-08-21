@@ -68,6 +68,7 @@ class UsageRecord:
     tokens_out: int = 0
     cached_tokens_in: int = 0
     request_count: int = 0
+    day: Optional[dt.date] = None  # the usage day (from the report's daily bucket)
 
 
 class ProviderError(Exception):
@@ -82,6 +83,23 @@ def month_start(day: dt.date) -> dt.date:
 
 def next_month(start: dt.date) -> dt.date:
     return (start.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+
+
+def _bucket_day(bucket: dict, fallback: dt.date) -> dt.date:
+    """The day a cost/usage bucket represents, from its ``starting_at``/``start_time``.
+
+    Provider reports return daily buckets; this pulls the day so we can persist cost
+    at day resolution. Falls back to the month anchor if a bucket omits its date.
+    """
+    raw = bucket.get("starting_at") or bucket.get("start_time")
+    if raw is None:
+        return fallback
+    if isinstance(raw, (int, float)):  # epoch seconds (OpenAI)
+        return dt.datetime.fromtimestamp(raw, dt.timezone.utc).date()
+    try:
+        return dt.date.fromisoformat(str(raw)[:10])
+    except ValueError:
+        return fallback
 
 
 def month_query_end(start: dt.date, *, today: Optional[dt.date] = None) -> dt.date:
@@ -234,7 +252,7 @@ class AnthropicCostClient(_BaseCostClient):
             data = self._get(
                 "/v1/organizations/usage_report/messages", params, self._headers()
             ).json()
-            out.extend(_parse_anthropic_usage(data))
+            out.extend(_parse_anthropic_usage(data, start))
             if data.get("has_more") and data.get("next_page"):
                 page = data["next_page"]
                 continue
@@ -365,6 +383,7 @@ def _int_or_none(value) -> Optional[int]:
 
 def _parse_anthropic(payload: dict, period: dt.date):
     for bucket in payload.get("data", []):
+        day = _bucket_day(bucket, period)  # daily bucket -> the actual day
         for item in bucket.get("results", []) or bucket.get("items", []):
             raw = _to_decimal(item.get("amount"))
             if raw is None:
@@ -385,7 +404,7 @@ def _parse_anthropic(payload: dict, period: dt.date):
                 input_tokens = uncached + creation + cache_read
             yield CostRecord(
                 provider="anthropic",
-                period=period,
+                period=day,
                 amount=amount,
                 currency=item.get("currency", "USD"),
                 api_key_ref=item.get("api_key_id"),
@@ -399,9 +418,10 @@ def _parse_anthropic(payload: dict, period: dt.date):
             )
 
 
-def _parse_anthropic_usage(payload: dict):
+def _parse_anthropic_usage(payload: dict, period: dt.date):
     """Yield UsageRecords from a Messages Usage Report response (tolerant parsing)."""
     for bucket in payload.get("data", []):
+        day = _bucket_day(bucket, period)  # daily bucket -> the actual usage day
         for item in bucket.get("results", []) or bucket.get("items", []):
             if not isinstance(item, dict):
                 continue
@@ -424,6 +444,7 @@ def _parse_anthropic_usage(payload: dict):
                 request_count=_int_or_none(item.get("request_count"))
                 or _int_or_none(item.get("num_requests"))
                 or 0,
+                day=day,
             )
 
 
@@ -438,6 +459,7 @@ def _openai_cached_tokens(item: dict) -> Optional[int]:
 
 def _parse_openai(payload: dict, period: dt.date):
     for bucket in payload.get("data", []):
+        day = _bucket_day(bucket, period)  # daily bucket -> the actual day
         for item in bucket.get("results", []):
             amount = _to_decimal(
                 (item.get("amount") or {}).get("value")
@@ -448,7 +470,7 @@ def _parse_openai(payload: dict, period: dt.date):
                 continue
             yield CostRecord(
                 provider="openai",
-                period=period,
+                period=day,
                 amount=amount,
                 currency=(item.get("amount") or {}).get("currency", "USD")
                 if isinstance(item.get("amount"), dict)

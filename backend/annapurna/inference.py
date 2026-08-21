@@ -14,6 +14,7 @@ Confidence ladder (design §7.3):
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import logging
 from collections import defaultdict
@@ -22,7 +23,20 @@ from typing import Optional
 
 from . import credentials, pricing, resources
 from .db import admin_dsn, app_dsn, connect, tenant_tx
-from .providers import CostRecord, UsageRecord, make_cost_client, month_start
+from .providers import (
+    CostRecord,
+    UsageRecord,
+    aggregate,
+    make_cost_client,
+    month_start,
+    next_month,
+)
+
+
+def _aggregate_month(records: list[CostRecord], month: dt.date) -> list[CostRecord]:
+    """Collapse day-grain records into one row per key/model for the month."""
+    return aggregate([dataclasses.replace(r, period=month) for r in records])
+
 
 # 'ignore'-classified spend is excluded from normal reporting totals. NULL
 # (legacy/unclassified) stays included. Two forms: bare and for the aliased table.
@@ -146,23 +160,120 @@ def run_inference_backfill(
     }
 
 
+_DAILY_COLS = (
+    "tenant_id, feature_id, provider, model, api_key_ref, amount, currency, day, "
+    "tokens_in, tokens_out, request_count, cached_tokens_in, workspace_id, "
+    "workspace_name, api_key_id, api_key_name, environment, source, confidence"
+)
+
+
+def _insert_daily(
+    conn,
+    tenant_id,
+    *,
+    day,
+    provider,
+    amount,
+    source,
+    confidence,
+    currency="USD",
+    feature_id=None,
+    model=None,
+    api_key_ref=None,
+    tokens_in=None,
+    tokens_out=None,
+    request_count=None,
+    cached_tokens_in=None,
+    workspace_id=None,
+    workspace_name=None,
+    api_key_id=None,
+    api_key_name=None,
+    environment=None,
+) -> None:
+    """Persist one day-resolution inference-cost row (the additive daily table)."""
+    conn.execute(
+        f"INSERT INTO inference_cost_daily ({_DAILY_COLS}) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (
+            tenant_id,
+            feature_id,
+            provider,
+            model,
+            api_key_ref,
+            amount,
+            currency,
+            day,
+            tokens_in,
+            tokens_out,
+            request_count,
+            cached_tokens_in,
+            workspace_id,
+            workspace_name,
+            api_key_id,
+            api_key_name,
+            environment,
+            source,
+            confidence,
+        ),
+    )
+
+
+def _delete_daily(conn, provider: str, start: dt.date, source: str) -> None:
+    """Idempotent per (provider, month, source): clear the month's daily rows."""
+    conn.execute(
+        "DELETE FROM inference_cost_daily "
+        "WHERE provider = %s AND day >= %s AND day < %s AND source = %s",
+        (provider, start, next_month(start), source),
+    )
+
+
 def ingest_records(
     tenant_id: str, provider: str, period: dt.date, records: list[CostRecord]
 ) -> dict:
-    """Attribute and persist already-fetched cost records (idempotent per month)."""
+    """Attribute and persist already-fetched cost records (idempotent per month).
+
+    Records arrive at DAY resolution (each stamped with its bucket's day). We write
+    them to the daily table as-is, and a month-aggregated rollup to inference_cost —
+    so the monthly authority is unchanged (one row per key/model) while the daily
+    detail is preserved.
+    """
     start = month_start(period)
     attributed = Decimal("0")
     unattributed = Decimal("0")
 
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         maps = _load_mappings(conn)
-        # Idempotent: replace this provider+period's connector rows.
+        # Idempotent: replace this provider+month's connector rows (monthly + daily).
         conn.execute(
             "DELETE FROM inference_cost "
             "WHERE provider = %s AND period = %s AND source = 'cost_api'",
             (provider, start),
         )
+        _delete_daily(conn, provider, start, "cost_api")
+
+        # Daily rows, at the resolution the API returned.
         for record in records:
+            feature_id, confidence = _attribute(record, maps)
+            _insert_daily(
+                conn,
+                tenant_id,
+                day=record.period,
+                provider=record.provider,
+                model=record.model,
+                api_key_ref=record.api_key_ref or record.project,
+                amount=record.amount,
+                currency=record.currency,
+                tokens_in=record.tokens_in,
+                tokens_out=record.tokens_out,
+                request_count=record.request_count,
+                cached_tokens_in=record.cached_tokens_in,
+                source="cost_api",
+                confidence=confidence,
+            )
+
+        # Monthly rollup (one row per key/model), unchanged authority.
+        monthly = _aggregate_month(records, start)
+        for record in monthly:
             feature_id, confidence = _attribute(record, maps)
             conn.execute(
                 """
@@ -345,6 +456,76 @@ def _estimate_unbilled(
     return (billed_total * ratio).quantize(Decimal("0.01"))
 
 
+def _anthropic_daily_rows(cost_records, usage_records, class_map, maps, workspaces, api_keys):
+    """Reconcile Anthropic billed dollars PER DAY into day-resolution rows.
+
+    Mirrors the monthly reconciliation (allocate each workspace's billed dollars
+    across its usage by priced weight), but grouped by day — so the daily rows sum,
+    per month, to the same authoritative billed total. Returns dicts ready for
+    ``_insert_daily``.
+    """
+    billed: dict = defaultdict(lambda: defaultdict(lambda: Decimal("0")))  # day -> ws -> $
+    for r in cost_records:
+        billed[r.period][r.project] += r.amount
+
+    usage: dict = defaultdict(lambda: defaultdict(dict))  # day -> ws -> {(key,model,tier): rec}
+    for u in usage_records:
+        bucket = usage[u.day][u.workspace_id]
+        k = (u.api_key_id, u.model, u.service_tier)
+        agg = bucket.get(k)
+        if agg is None:
+            bucket[k] = dataclasses.replace(u)
+        else:
+            agg.tokens_in += u.tokens_in
+            agg.tokens_out += u.tokens_out
+            agg.cached_tokens_in += u.cached_tokens_in
+            agg.request_count += u.request_count
+
+    out: list[dict] = []
+    for day, ws_billed in billed.items():
+        for ws_id, authoritative in ws_billed.items():
+            rows = list(usage.get(day, {}).get(ws_id, {}).values())
+            allocations = _allocate(authoritative, [_usage_weight(r) for r in rows])
+            if rows and sum(allocations, Decimal("0")) > 0:
+                for row, amount in zip(rows, allocations):
+                    env = class_map.get(
+                        ("api_key", row.api_key_id), resources.DEFAULT_CLASSIFICATION
+                    )
+                    feature_id, confidence = _attribute_detail(row.api_key_id, ws_id, maps)
+                    out.append(
+                        {
+                            "day": day,
+                            "feature_id": feature_id,
+                            "model": row.model,
+                            "api_key_ref": row.api_key_id,
+                            "amount": amount,
+                            "tokens_in": row.tokens_in or None,
+                            "tokens_out": row.tokens_out or None,
+                            "request_count": row.request_count or None,
+                            "cached_tokens_in": row.cached_tokens_in or None,
+                            "workspace_id": ws_id,
+                            "workspace_name": workspaces.get(ws_id),
+                            "api_key_id": row.api_key_id,
+                            "api_key_name": api_keys.get(row.api_key_id or "", {}).get("name"),
+                            "environment": env,
+                            "confidence": confidence,
+                        }
+                    )
+            else:
+                env = class_map.get(("workspace", ws_id), resources.DEFAULT_CLASSIFICATION)
+                out.append(
+                    {
+                        "day": day,
+                        "amount": authoritative,
+                        "workspace_id": ws_id,
+                        "workspace_name": workspaces.get(ws_id),
+                        "environment": env,
+                        "confidence": "low",
+                    }
+                )
+    return out
+
+
 def ingest_anthropic(
     tenant_id: str,
     period: dt.date,
@@ -487,6 +668,16 @@ def ingest_anthropic(
                 by_env[environment] = by_env.get(environment, Decimal("0")) + authoritative
                 unattributed += authoritative
                 rows_written += 1
+
+        # Daily-resolution billed rows (additive detail table): the same billed
+        # dollars reconciled PER DAY, so daily trends and an exact MTD are possible.
+        # The monthly rows above are untouched; summing these over a month equals the
+        # monthly billed total.
+        _delete_daily(conn, "anthropic", start, "cost_api")
+        for daily in _anthropic_daily_rows(
+            cost_records, usage_records, class_map, maps, workspaces, api_keys
+        ):
+            _insert_daily(conn, tenant_id, provider="anthropic", source="cost_api", **daily)
 
         # Estimated, not-yet-billed rows for the current month (source cost_api_est),
         # allocated across usage exactly like the billed dollars so they attribute to
