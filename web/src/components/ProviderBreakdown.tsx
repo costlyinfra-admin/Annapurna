@@ -17,6 +17,7 @@ const EMPTY: ProviderSpend = {
   total: 0,
   by_provider: [],
   trend: [],
+  daily_trend: [],
   build_total: 0,
   build_by_tool: [],
   build_by_developer: [],
@@ -43,6 +44,11 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
   }, [range]);
 
   const nothing = data && data.by_provider.length === 0 && data.build_by_tool.length === 0;
+  // Use the day-resolution trend for short ranges (a single month), the monthly
+  // rollup for longer ones — and only when daily data is actually present.
+  const useDaily =
+    (range.kind === "this_month" || range.kind === "last_month") &&
+    (data?.daily_trend.length ?? 0) > 0;
 
   return (
     <>
@@ -73,8 +79,10 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
             ) : (
               <div className="inference-body">
                 <div className="inference-col">
-                  <span className="chart-title">Trend · by classification</span>
-                  <ClassificationTrendChart trend={data.trend} />
+                  <span className="chart-title">
+                    {useDaily ? "Daily trend · by classification" : "Trend · by classification"}
+                  </span>
+                  <ClassificationTrendChart trend={useDaily ? data.daily_trend : data.trend} />
                 </div>
                 <div className="inference-col">
                   <span className="chart-title">By provider · {money(data.total)} total</span>

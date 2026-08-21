@@ -131,6 +131,34 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
         assert o["confidence"] in {"high", "med", "low"} and o["rationale"]
 
 
+def test_spend_by_provider_daily_trend(seeded, app_env):
+    # The By provider tab exposes a day-resolution trend from inference_cost_daily.
+    for day, amt, env in [
+        (dt.date(2026, 5, 4), 30, "production"),
+        (dt.date(2026, 5, 5), 45, "development"),
+        (dt.date(2026, 5, 20), 25, "production"),
+    ]:
+        app_env.execute(
+            """
+            INSERT INTO inference_cost_daily
+                (tenant_id, provider, model, amount, day, environment, source, confidence)
+            VALUES (%s, 'anthropic', 'c', %s, %s, %s, 'cost_api', 'high')
+            """,
+            (seeded, amt, day, env),
+        )
+    app_env.commit()
+
+    data = dashboard.spend_by_provider(seeded, range_token="this_month")
+    by_day = {p["period"]: p for p in data["daily_trend"]}
+    assert by_day["2026-05-04"]["production"] == 30.0
+    assert by_day["2026-05-05"]["development"] == 45.0
+    assert by_day["2026-05-20"]["total"] == 25.0
+    # One point per day, buckets summing to each day's total.
+    for p in data["daily_trend"]:
+        parts = p["production"] + p["development"] + p["internal"] + p["unclassified"]
+        assert round(parts, 2) == round(p["total"], 2)
+
+
 def test_spend_by_provider_workspace_api_key_breakdown(seeded, app_env):
     # Anthropic rows carry workspace/api_key identity; the By provider tab rolls it
     # up into a workspace -> API key breakdown that reconciles to the inference total.

@@ -16,7 +16,7 @@ from typing import Optional
 from . import optimize
 from .build import developer_label
 from .db import app_dsn, connect, tenant_tx
-from .providers import month_start
+from .providers import month_start, next_month
 
 _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
 
@@ -744,6 +744,39 @@ def spend_by_provider(
             entry[bucket] += amt
         trend = sorted(trend_by_period.values(), key=lambda t: t["period"])
 
+        # ---- Inference: DAILY trend (from the day-resolution table) ----
+        # Same classification-bucketed shape as the monthly trend, one point per day
+        # over the range. The UI uses this for short ranges (a month or two) and the
+        # monthly trend for long ones.
+        daily_rows = conn.execute(
+            f"""
+            SELECT day, COALESCE(environment, 'unclassified') AS env, SUM(amount)
+            FROM inference_cost_daily
+            WHERE day >= %s AND day < %s AND {_ACTIVE_ENV}
+            GROUP BY day, env ORDER BY day
+            """,  # noqa: S608
+            (start, next_month(end)),
+        ).fetchall()
+        daily_by_day: dict[str, dict] = {}
+        for d, env, amount in daily_rows:
+            key = d.isoformat()
+            entry = daily_by_day.setdefault(
+                key,
+                {
+                    "period": key,
+                    "total": 0.0,
+                    "production": 0.0,
+                    "development": 0.0,
+                    "internal": 0.0,
+                    "unclassified": 0.0,
+                },
+            )
+            amt = float(amount)
+            entry["total"] += amt
+            bucket = env if env in _CLASSIFICATION_BUCKETS else "unclassified"
+            entry[bucket] += amt
+        daily_trend = sorted(daily_by_day.values(), key=lambda t: t["period"])
+
         # ---- Build: by coding tool + trend (kept separate from inference) ----
         tool_rows = conn.execute(
             """
@@ -893,6 +926,7 @@ def spend_by_provider(
         "total": total,
         "by_provider": by_provider,
         "trend": trend,
+        "daily_trend": daily_trend,
         "build_total": build_total,
         "build_by_tool": build_by_tool,
         "build_by_developer": build_by_developer,

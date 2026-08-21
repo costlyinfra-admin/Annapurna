@@ -187,6 +187,7 @@ describe("Dashboard (Overview)", () => {
           unclassified: 500,
         },
       ],
+      daily_trend: [],
       build_total: 270,
       build_by_tool: [
         { tool: "claude_code", amount: 181, pct: 67.04 },
@@ -276,6 +277,7 @@ describe("Dashboard (Overview)", () => {
       total: 0,
       by_provider: [],
       trend: [],
+      daily_trend: [],
       build_total: 270,
       build_by_tool: [],
       build_by_developer: [

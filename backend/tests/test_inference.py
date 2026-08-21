@@ -246,6 +246,74 @@ def test_daily_rows_roll_up_to_the_monthly_total(tenant_id, monkeypatch):
     assert round(sum(float(a) for _d, a in daily), 2) == float(monthly)
 
 
+def test_estimate_is_day_precise_when_usage_has_daily_detail(tenant_id, monkeypatch):
+    # Billed through the 18th ($100 for 1,000 tokens => $0.10/token). Usage on the
+    # 19th and 20th (200 tokens) is not yet billed -> precise estimate = 200*0.10=$20,
+    # NOT the coarse whole-month ratio.
+    today = dt.date.today()
+    m = today.replace(day=1)
+    billed_day, d19, d20 = m.replace(day=18), m.replace(day=19), m.replace(day=20)
+
+    class _FakeAnthropic:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):  # billed only through the 18th
+            return [
+                CostRecord(
+                    "anthropic",
+                    billed_day,
+                    Decimal("100.00"),
+                    project="ws",
+                    model="c",
+                    tokens_in=800,
+                    tokens_out=200,
+                )
+            ]
+
+        def fetch_usage(self, period):  # billed day + two trailing unbilled days
+            return [
+                UsageRecord(
+                    workspace_id="ws",
+                    api_key_id="k",
+                    model="c",
+                    tokens_in=800,
+                    tokens_out=200,
+                    day=billed_day,
+                ),  # billed
+                UsageRecord(
+                    workspace_id="ws",
+                    api_key_id="k",
+                    model="c",
+                    tokens_in=80,
+                    tokens_out=20,
+                    day=d19,
+                ),  # not billed
+                UsageRecord(
+                    workspace_id="ws",
+                    api_key_id="k",
+                    model="c",
+                    tokens_in=80,
+                    tokens_out=20,
+                    day=d20,
+                ),  # not billed
+            ]
+
+        def fetch_workspaces(self):
+            return {"ws": "Workspace"}
+
+        def fetch_api_keys(self):
+            return {"k": {"name": "key", "workspace_id": "ws"}}
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeAnthropic())
+    summary = inference.run_inference_ingest(tenant_id, "anthropic", today, "key")
+    assert summary["total"] == 100.0  # billed authority
+    assert summary["estimated"] == 20.0  # 200 trailing tokens * $0.10/token (day-precise)
+
+
 def test_anthropic_no_estimate_for_a_past_month(tenant_id, monkeypatch):
     # A fully-elapsed month is entirely billed -> no estimate, even if usage > billed.
     class _FakeAnthropic:

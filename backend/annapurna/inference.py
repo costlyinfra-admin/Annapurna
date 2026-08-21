@@ -438,22 +438,35 @@ def _estimate_unbilled(
     """Estimate not-yet-billed inference spend for the CURRENT month.
 
     Anthropic's Cost Report lags usage by a day or two, so the most recent usage
-    carries no billed dollars yet. Scale the authoritative billed dollars by the
-    ratio of not-yet-billed tokens (Usage Report, through today) to billed tokens
-    (Cost Report). This uses Anthropic's OWN effective rate, so it needs no external
-    price list and stays right even for models we don't list-price.
+    carries no billed dollars yet. We price that gap at Anthropic's OWN effective
+    rate (billed dollars / billed tokens) — no external price list, and right even
+    for models we don't list-price.
 
-    Returns 0 for a past (fully-billed) month, or when the Cost Report carries no
-    token detail to calibrate against — an honest "no estimate" rather than a guess.
+    Day-precise when the Usage Report carries per-day detail: price the tokens on
+    the days AFTER the last billed day. Falls back to a whole-month token ratio when
+    day info is absent. Returns 0 for a past (fully-billed) month, or when the Cost
+    Report has no token detail to calibrate against.
     """
     if start != month_start(dt.date.today()) or billed_total <= 0:
         return Decimal("0")
     billed_tokens = sum(_tokens(r) for r in cost_records)
-    usage_tokens = sum(_tokens(r) for r in usage_records)
-    if billed_tokens <= 0 or usage_tokens <= billed_tokens:
+    if billed_tokens <= 0:
         return Decimal("0")
-    ratio = Decimal(usage_tokens - billed_tokens) / Decimal(billed_tokens)
-    return (billed_total * ratio).quantize(Decimal("0.01"))
+    rate = billed_total / Decimal(billed_tokens)  # Anthropic's own $/token
+
+    # Precise path: tokens on days beyond the last billed day are not yet billed.
+    billed_days = [r.period for r in cost_records if r.period]
+    last_billed = max(billed_days) if billed_days else start
+    trailing = sum(_tokens(u) for u in usage_records if u.day and u.day > last_billed)
+    if trailing > 0:
+        return (Decimal(trailing) * rate).quantize(Decimal("0.01"))
+
+    # Fallback: no per-day usage detail -> scale by the whole-month token gap.
+    usage_tokens = sum(_tokens(u) for u in usage_records)
+    if usage_tokens <= billed_tokens:
+        return Decimal("0")
+    gap = Decimal(usage_tokens - billed_tokens) / Decimal(billed_tokens)
+    return (billed_total * gap).quantize(Decimal("0.01"))
 
 
 def _anthropic_daily_rows(cost_records, usage_records, class_map, maps, workspaces, api_keys):

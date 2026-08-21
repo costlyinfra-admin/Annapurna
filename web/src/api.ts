@@ -478,6 +478,8 @@ export interface ProviderSpend {
   }[];
   // Inference trend, segmented by classification per month (a stacked bar).
   trend: ClassificationTrendPoint[];
+  // Same shape at DAY resolution (used for short ranges); empty for older data.
+  daily_trend: ClassificationTrendPoint[];
   build_total: number;
   build_by_tool: { tool: string; amount: number; pct: number }[];
   build_by_developer: {

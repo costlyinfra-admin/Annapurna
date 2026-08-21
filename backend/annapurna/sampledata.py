@@ -13,6 +13,7 @@ test build their data through here.
 
 from __future__ import annotations
 
+import calendar as _cal
 import datetime as _dt
 
 import psycopg
@@ -163,6 +164,20 @@ def _add_inference_cost(
             source,
             confidence,
         ),
+    )
+
+
+def _add_inference_daily(
+    conn, tenant_id, feature_id, day, amount, environment, model="claude-sonnet-4-6"
+):
+    """One day-resolution inference row (inference_cost_daily) for the demo trend."""
+    conn.execute(
+        """
+        INSERT INTO inference_cost_daily (tenant_id, feature_id, provider, model, amount,
+                                          day, environment, source, confidence)
+        VALUES (%s, %s, 'anthropic', %s, %s, %s, %s, 'cost_api', 'high')
+        """,
+        (tenant_id, feature_id, model, amount, day, environment),
     )
 
 
@@ -716,6 +731,27 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
             "high",
             workspace=ws,
             api_key=key,
+        )
+
+    # Day-resolution inference for the current month, so the Overview "By provider"
+    # tab renders a DAILY trend (a real sync writes inference_cost_daily; here we
+    # synthesize a gentle daily rhythm split across two classifications).
+    _wave = [0.6, 0.8, 1.0, 1.3, 1.6, 1.2, 0.9]  # weekly-ish shape, cycled by day
+    _ndays = _cal.monthrange(DEFAULT_PERIOD.year, DEFAULT_PERIOD.month)[1]
+    for _i in range(_ndays):
+        _day = DEFAULT_PERIOD.replace(day=_i + 1)
+        _mult = _wave[_i % len(_wave)]
+        _add_inference_daily(
+            conn, tenant_id, base["triage"], _day, round(180 * _mult, 2), "production"
+        )
+        _add_inference_daily(
+            conn,
+            tenant_id,
+            base["soc"],
+            _day,
+            round(60 * _mult, 2),
+            "development",
+            "claude-haiku-4-5",
         )
 
     # Build cost recurs too — backfill a monthly build series for each base
