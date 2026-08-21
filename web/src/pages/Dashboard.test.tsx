@@ -227,9 +227,11 @@ describe("Dashboard (Overview)", () => {
     await screen.findByText("Key insights");
 
     fireEvent.click(screen.getByRole("tab", { name: "By provider" }));
-    // Both an inference-by-provider and a build-by-tool section render.
+    // Spend by source splits into Inference / Build sub-tabs; Inference is default.
     expect(await screen.findByText("Inference (run) cost by provider")).toBeInTheDocument();
-    expect(screen.getByText("Build cost by tool")).toBeInTheDocument();
+    // Build cost lives on the other sub-tab — hidden until selected.
+    expect(screen.queryByText("Build cost by tool")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claude Code")).not.toBeInTheDocument();
 
     // The inference trend is a stacked classification chart with a compact legend.
     expect(screen.getByText("Trend · by classification")).toBeInTheDocument();
@@ -243,18 +245,21 @@ describe("Dashboard (Overview)", () => {
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "this_month" }));
     expect(screen.getByText("openai")).toBeInTheDocument();
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
-    // Build cost broken out by tool, with a friendly tool label.
-    expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
-    // Provider resource identity: workspace -> API key breakdown.
+    // Inference sub-tab also carries workspace/API-key and per-customer breakdowns.
     expect(screen.getByText("Inference cost by workspace & API key")).toBeInTheDocument();
     expect(screen.getByText("Triage WS")).toBeInTheDocument();
     expect(screen.getByText("triage-key")).toBeInTheDocument();
-    // Per-customer metered spend, shown only when the SDK tagged customers.
     expect(screen.getByText("Inference cost by customer")).toBeInTheDocument();
     expect(screen.getByText("acme")).toBeInTheDocument();
-    // The summary/insights stay put across tabs; only the breakdown swaps,
-    // so the feature table is gone but Key insights remains.
+
+    // Switch to the Build cost sub-tab: build shows, inference-by-provider hides.
+    fireEvent.click(screen.getByRole("tab", { name: "Build cost" }));
+    expect(screen.getByText("Build cost by tool")).toBeInTheDocument();
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
+    expect(screen.queryByText("Inference (run) cost by provider")).not.toBeInTheDocument();
+
+    // The summary/insights stay put across tabs; only the breakdown swaps.
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.getByText("Key insights")).toBeInTheDocument();
   });

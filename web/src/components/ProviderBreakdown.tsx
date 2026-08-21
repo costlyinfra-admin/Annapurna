@@ -1,8 +1,8 @@
 /**
  * Overview "By provider" tab — tenant-wide spend by source over the Overview's
- * selected review period, in never-blended sections (invariant 2): inference (run)
- * cost by provider, build cost by coding tool/developer, and — where the provider
- * exposes it (today Anthropic) — inference by workspace & API key. Each has bars.
+ * selected review period. Inference (run) and build cost never blend (invariant 2),
+ * so they live on two sub-tabs here: Inference cost (default — by provider, by
+ * workspace/API key, by customer) and Build cost (by coding tool).
  */
 import { useEffect, useState } from "react";
 import { api, type ProviderSpend, type ReviewRange } from "../api";
@@ -30,6 +30,7 @@ const EMPTY: ProviderSpend = {
 
 export function ProviderBreakdown({ range }: { range: ReviewRange }) {
   const [data, setData] = useState<ProviderSpend | null>(null);
+  const [sourceTab, setSourceTab] = useState<"inference" | "build">("inference");
 
   useEffect(() => {
     let active = true;
@@ -56,7 +57,7 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
         <div>
           <h2>Spend by source</h2>
           <span className="section-sub muted">
-            Inference (run) and build cost, shown separately — never blended.
+            Inference (run) and build cost are never blended — switch between them below.
           </span>
         </div>
       </div>
@@ -71,6 +72,32 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
           </p>
         </div>
       ) : (
+        <>
+          {/* Inference (run) and build cost never blend — split into two views. */}
+          <div className="tabs" role="tablist" aria-label="Spend by source">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === "inference"}
+              className={sourceTab === "inference" ? "tab active" : "tab"}
+              onClick={() => setSourceTab("inference")}
+            >
+              Inference cost
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === "build"}
+              className={sourceTab === "build" ? "tab active" : "tab"}
+              onClick={() => setSourceTab("build")}
+            >
+              Build cost
+            </button>
+          </div>
+        </>
+      )}
+
+      {data && !nothing && sourceTab === "inference" && (
         <>
           <section className="detail-section">
             <h3 className="breakdown-subhead">Inference (run) cost by provider</h3>
@@ -99,30 +126,6 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
                         amount: m.amount,
                         pct: m.pct,
                       })),
-                    }))}
-                  />
-                </div>
-              </div>
-            )}
-          </section>
-
-          <section className="detail-section">
-            <h3 className="breakdown-subhead">Build cost by tool</h3>
-            {data.build_by_tool.length === 0 ? (
-              <p className="muted">No build cost in this window.</p>
-            ) : (
-              <div className="inference-body">
-                <div className="inference-col">
-                  <span className="chart-title">Trend</span>
-                  <TrendChart trend={data.build_trend} />
-                </div>
-                <div className="inference-col">
-                  <span className="chart-title">By tool · {money(data.build_total)} total</span>
-                  <SpendBars
-                    rows={data.build_by_tool.map((t) => ({
-                      label: prettyTool(t.tool),
-                      amount: t.amount,
-                      pct: t.pct,
                     }))}
                   />
                 </div>
@@ -170,6 +173,32 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
             </section>
           )}
         </>
+      )}
+
+      {data && !nothing && sourceTab === "build" && (
+        <section className="detail-section">
+          <h3 className="breakdown-subhead">Build cost by tool</h3>
+          {data.build_by_tool.length === 0 ? (
+            <p className="muted">No build cost in this window.</p>
+          ) : (
+            <div className="inference-body">
+              <div className="inference-col">
+                <span className="chart-title">Trend</span>
+                <TrendChart trend={data.build_trend} />
+              </div>
+              <div className="inference-col">
+                <span className="chart-title">By tool · {money(data.build_total)} total</span>
+                <SpendBars
+                  rows={data.build_by_tool.map((t) => ({
+                    label: prettyTool(t.tool),
+                    amount: t.amount,
+                    pct: t.pct,
+                  }))}
+                />
+              </div>
+            </div>
+          )}
+        </section>
       )}
     </>
   );
