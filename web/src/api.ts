@@ -305,6 +305,8 @@ export interface FeatureDetail {
   status: string;
   discovery_confidence: string | null;
   period: string;
+  start: string;
+  end: string;
   headline: {
     build_cost: number;
     inference_cost: number;
@@ -420,7 +422,8 @@ export interface CopilotOverview {
 }
 
 export interface FeatureInference {
-  window: string;
+  start: string;
+  end: string;
   total: number;
   by_model: { model: string; amount: number; pct: number; requests: number | null }[];
   trend: { period: string; amount: number }[];
@@ -639,16 +642,14 @@ export const api = {
   // ---- The three screens (M6) ----
   dashboard: (range?: ReviewRange) => request<Dashboard>(`/dashboard${rangeQuery(range)}`),
 
-  featureDetail: (id: string, period?: string) =>
-    request<FeatureDetail>(`/features/${id}/detail${period ? `?period=${period}` : ""}`),
+  featureDetail: (id: string, range?: ReviewRange) =>
+    request<FeatureDetail>(`/features/${id}/detail${rangeQuery(range)}`),
 
-  featureInference: (id: string, window: "month" | "quarter" | "year") =>
-    request<FeatureInference>(`/features/${id}/inference?window=${window}`),
+  featureInference: (id: string, range?: ReviewRange) =>
+    request<FeatureInference>(`/features/${id}/inference${rangeQuery(range)}`),
 
-  featureOpportunities: (id: string, period?: string) =>
-    request<FeatureOpportunities>(
-      `/features/${id}/opportunities${period ? `?period=${period}` : ""}`,
-    ),
+  featureOpportunities: (id: string, range?: ReviewRange) =>
+    request<FeatureOpportunities>(`/features/${id}/opportunities${rangeQuery(range)}`),
 
   applyOpportunity: (id: string, lever: string, projectedMonthly: number) =>
     request<{ lever: string; applied_on: string }>(`/features/${id}/opportunities/apply`, {

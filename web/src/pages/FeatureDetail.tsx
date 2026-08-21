@@ -1,12 +1,12 @@
 /**
- * Feature drill-down (design §9.3), organized into two clear sections:
- *   - Developer cost: total build spend, contributors, and per-developer breakdown.
- *   - Inference cost: a trend chart + an interactive by-model donut, with a
- *     month / quarter / year window filter.
- * Plus the evidence trail — the actual signals behind every number.
+ * Feature drill-down (design §9.3). A single review-period filter at the top
+ * (the same presets as the Overview, preserved in the URL) scopes every cost on
+ * the page — developer/build cost, inference cost, and the optimization anchor —
+ * so the totals reconcile with the Overview's feature row. Engineering activity
+ * (commits / PRs / files) and the evidence trail are all-time, and labelled so.
  */
-import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   api,
   ApiError,
@@ -15,25 +15,60 @@ import {
   type FeatureOpportunities,
   type Opportunity,
   type OptimizationAction,
+  type RangeKind,
+  type ReviewRange,
 } from "../api";
 import { ConfidenceBadge } from "../components/badges";
+import { PeriodSelector } from "../components/PeriodSelector";
 import { TrendChart } from "../components/TrendChart";
 import { compact, money, num } from "../format";
 
 const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
 
+const NAMED_KINDS: RangeKind[] = [
+  "this_month",
+  "last_month",
+  "last_3_months",
+  "last_6_months",
+  "last_12_months",
+];
+
+/** Read the review range from the URL (?range=… or ?start=&end=), default this month. */
+function rangeFromParams(sp: URLSearchParams): ReviewRange {
+  const start = sp.get("start");
+  const end = sp.get("end");
+  if (start && end) return { kind: "custom", start, end };
+  const k = sp.get("range") as RangeKind | null;
+  if (k && NAMED_KINDS.includes(k)) return { kind: k };
+  return { kind: "this_month" };
+}
+
+/** The URL params for a range (mirrors the API's rangeQuery param names). */
+function paramsForRange(r: ReviewRange): Record<string, string> {
+  if (r.kind === "custom") return r.start && r.end ? { start: r.start, end: r.end } : {};
+  return { range: r.kind };
+}
+
 export function FeatureDetail() {
   const { id = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Keyed on the query string so `range`'s identity is stable between renders
+  // (the effect below and the child sections depend on it).
+  const spString = searchParams.toString();
+  const range = useMemo(() => rangeFromParams(new URLSearchParams(spString)), [spString]);
+  const setRange = (r: ReviewRange) => setSearchParams(paramsForRange(r), { replace: true });
+
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setDetail(await api.featureDetail(id));
+      setError(null);
+      setDetail(await api.featureDetail(id, range));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load this feature.");
     }
-  }, [id]);
+  }, [id, range]);
 
   useEffect(() => {
     load();
@@ -51,6 +86,13 @@ export function FeatureDetail() {
       <Link to="/" className="link breadcrumb">
         ← All features
       </Link>
+
+      {/* Review-period filter — scopes every cost on this page, mirroring the
+          Overview's presets and preserved in the URL. */}
+      <div className="period-controls detail-period">
+        <span className="muted period-label">Showing costs for</span>
+        <PeriodSelector value={range} onChange={setRange} />
+      </div>
 
       {error && (
         <p className="error" role="alert">
@@ -83,7 +125,7 @@ export function FeatureDetail() {
               <h2>Developer cost</h2>
               <div className="section-stats">
                 <span>
-                  <strong>{money(detail.build_total)}</strong> total
+                  <strong>{money(detail.build_total)}</strong> in period
                 </span>
                 <span>
                   <strong>{num(detail.build_contributors)}</strong> contributor
@@ -92,49 +134,57 @@ export function FeatureDetail() {
               </div>
             </div>
             {detail.build_by_developer.length === 0 ? (
-              <p className="muted">No build cost imported yet.</p>
+              <p className="muted">No build cost in this period.</p>
             ) : (
-              <table className="mini-table">
-                <thead>
-                  <tr>
-                    <th>Developer</th>
-                    <th>Tool</th>
-                    <th className="num">Amount</th>
-                    <th className="num">Commits</th>
-                    <th className="num">PRs</th>
-                    <th className="num">Files</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.build_by_developer.map((d, i) => (
-                    <tr key={i}>
-                      <td>{d.developer_id}</td>
-                      <td>{d.tool.replace("_", " ")}</td>
-                      <td className="num">{money(d.amount)}</td>
-                      <td className="num">{num(d.commits)}</td>
-                      <td className="num">{num(d.prs)}</td>
-                      <td className="num">{num(d.files_changed)}</td>
+              <>
+                <table className="mini-table">
+                  <thead>
+                    <tr>
+                      <th>Developer</th>
+                      <th>Tool</th>
+                      <th className="num">Amount</th>
+                      <th className="num">Commits</th>
+                      <th className="num">PRs</th>
+                      <th className="num">Files</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {detail.build_by_developer.map((d, i) => (
+                      <tr key={i}>
+                        <td>{d.developer_id}</td>
+                        <td>{d.tool.replace("_", " ")}</td>
+                        <td className="num">{money(d.amount)}</td>
+                        <td className="num">{num(d.commits)}</td>
+                        <td className="num">{num(d.prs)}</td>
+                        <td className="num">{num(d.files_changed)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="muted legend">
+                  Amount is for the selected period; commits, PRs, and files are all-time
+                  engineering activity.
+                </p>
+              </>
             )}
           </section>
 
           {/* ---- Inference cost ---- */}
           <InferenceSection
             featureId={detail.feature_id}
-            monthlyInference={detail.headline.inference_cost}
+            range={range}
             sourceLabel={inferenceLabel}
           />
 
           {/* ---- Optimization opportunities ---- */}
-          <OptimizationSection featureId={detail.feature_id} />
+          <OptimizationSection featureId={detail.feature_id} range={range} />
 
-          {/* ---- Evidence trail ---- */}
+          {/* ---- Evidence trail (all-time) ---- */}
           <section className="evidence-trail">
             <h2>Evidence trail</h2>
-            <p className="muted">Every number above traces back to these signals.</p>
+            <p className="muted">
+              The all-time signals behind this feature — every number above traces back to these.
+            </p>
             {detail.evidence.length === 0 ? (
               <p className="muted">No signals recorded.</p>
             ) : (
@@ -177,17 +227,18 @@ const EFFORT_LABELS: Record<string, string> = {
   high: "High effort",
 };
 
-function OptimizationSection({ featureId }: { featureId: string }) {
+function OptimizationSection({ featureId, range }: { featureId: string; range: ReviewRange }) {
   const [data, setData] = useState<FeatureOpportunities | null>(null);
   const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setData(await api.featureOpportunities(featureId));
+      setFailed(false);
+      setData(await api.featureOpportunities(featureId, range));
     } catch {
       setFailed(true);
     }
-  }, [featureId]);
+  }, [featureId, range]);
 
   useEffect(() => {
     load();
@@ -482,32 +533,30 @@ function DirectionalGroup({ opps, total }: { opps: Opportunity[]; total: number 
   );
 }
 
-const WINDOWS = ["month", "quarter", "year"] as const;
-type Window = (typeof WINDOWS)[number];
-
 function InferenceSection({
   featureId,
-  monthlyInference,
+  range,
   sourceLabel,
 }: {
   featureId: string;
-  monthlyInference: number;
+  range: ReviewRange;
   sourceLabel: string;
 }) {
-  const [window, setWindow] = useState<Window>("month");
   const [data, setData] = useState<FeatureInference | null>(null);
   const [hover, setHover] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
+    setData(null);
+    setHover(null);
     api
-      .featureInference(featureId, window)
+      .featureInference(featureId, range)
       .then((d) => active && setData(d))
-      .catch(() => active && setData({ window, total: 0, by_model: [], trend: [] }));
+      .catch(() => active && setData({ start: "", end: "", total: 0, by_model: [], trend: [] }));
     return () => {
       active = false;
     };
-  }, [featureId, window]);
+  }, [featureId, range]);
 
   return (
     <section className="detail-section">
@@ -515,22 +564,8 @@ function InferenceSection({
         <div>
           <h2>Inference cost</h2>
           <span className="section-sub muted">
-            {money(monthlyInference)}/mo · {sourceLabel}
+            {money(data?.total ?? 0)} in period · {sourceLabel}
           </span>
-        </div>
-        <div className="window-filter" role="group" aria-label="Time window">
-          {WINDOWS.map((w) => (
-            <button
-              key={w}
-              className={w === window ? "active" : ""}
-              onClick={() => {
-                setHover(null);
-                setWindow(w);
-              }}
-            >
-              {w[0].toUpperCase() + w.slice(1)}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -545,7 +580,7 @@ function InferenceSection({
           <div className="inference-col">
             <span className="chart-title">By model</span>
             {data.by_model.length === 0 ? (
-              <p className="muted">No inference cost in this window.</p>
+              <p className="muted">No inference cost in this period.</p>
             ) : (
               <div className="pie-wrap">
                 <DonutPie models={data.by_model} hover={hover} setHover={setHover} />

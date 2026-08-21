@@ -131,12 +131,35 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
         assert o["confidence"] in {"high", "med", "low"} and o["rationale"]
 
 
+def test_feature_detail_reconciles_with_overview_over_range(seeded):
+    # A feature's detail totals must equal its Overview row for the SAME range.
+    board = dashboard.dashboard(seeded, range_token="last_3_months")
+    report = next(f for f in board["features"] if f["name"] == "Report generator")
+
+    detail = dashboard.feature_detail(seeded, report["feature_id"], range_token="last_3_months")
+    assert detail["build_total"] == report["build_cost"]
+    assert detail["headline"]["inference_cost"] == report["inference_cost"]
+    # Per-developer build spend reconciles with the feature's build total.
+    assert round(sum(d["amount"] for d in detail["build_by_developer"]), 2) == round(
+        detail["build_total"], 2
+    )
+
+    # The range genuinely widens inference vs a single month (report has 3 months
+    # of history), proving the detail respects the selected period — and the single
+    # month still reconciles with that month's Overview row.
+    one_month = dashboard.feature_detail(seeded, report["feature_id"], range_token="this_month")
+    assert detail["headline"]["inference_cost"] > one_month["headline"]["inference_cost"]
+    board_month = dashboard.dashboard(seeded, range_token="this_month")
+    report_month = next(f for f in board_month["features"] if f["name"] == "Report generator")
+    assert one_month["headline"]["inference_cost"] == report_month["inference_cost"]
+
+
 def test_feature_inference_breakdown_and_window(seeded):
     data = dashboard.dashboard(seeded, PERIOD)
     report_id = next(f for f in data["features"] if f["name"] == "Report generator")["feature_id"]
 
-    # Month window: three models summing to the month's $1,850, gpt-4o on top.
-    month = dashboard.feature_inference(seeded, report_id, "month")
+    # This-month range: three models summing to the month's $1,850, gpt-4o on top.
+    month = dashboard.feature_inference(seeded, report_id, range_token="this_month")
     by_model = {m["model"]: m for m in month["by_model"]}
     assert set(by_model) == {"gpt-4o", "claude-sonnet-4-6", "claude-haiku-4-5"}
     assert by_model["gpt-4o"]["amount"] == 1250.0
@@ -145,8 +168,8 @@ def test_feature_inference_breakdown_and_window(seeded):
     assert round(by_model["gpt-4o"]["pct"]) == 68  # 1250 / 1850
     assert len(month["trend"]) == 1  # just the latest month
 
-    # Quarter window pulls in the prior months: gpt-4o 1250 + 1000 + 800, 3 trend points.
-    quarter = dashboard.feature_inference(seeded, report_id, "quarter")
+    # Last-3-months range pulls in the prior months: gpt-4o 1250 + 1000 + 800, 3 trend points.
+    quarter = dashboard.feature_inference(seeded, report_id, range_token="last_3_months")
     q_by_model = {m["model"]: m for m in quarter["by_model"]}
     assert q_by_model["gpt-4o"]["amount"] == 3050.0
     assert len(quarter["trend"]) == 3

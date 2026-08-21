@@ -1,9 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Opportunity } from "../api";
 import { AuthProvider } from "../auth/AuthContext";
 import { FeatureDetail } from "./FeatureDetail";
+
+/** Surfaces the router's current query string so tests can assert URL state. */
+function LocationProbe() {
+  return <div data-testid="loc">{useLocation().search}</div>;
+}
 
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
@@ -92,6 +97,8 @@ const DETAIL = {
   status: "confirmed",
   discovery_confidence: "high",
   period: "2026-05-01",
+  start: "2026-05-01",
+  end: "2026-05-01",
   headline: { build_cost: 181, inference_cost: 4200, active_users: 540, avg_latency_ms: 820 },
   build_total: 181,
   build_contributors: 2,
@@ -137,7 +144,8 @@ const DETAIL = {
 };
 
 const INFERENCE = {
-  window: "month",
+  start: "2026-05-01",
+  end: "2026-05-01",
   total: 1850,
   by_model: [
     { model: "gpt-4o", amount: 1250, pct: 67.6, requests: 60000 },
@@ -154,6 +162,7 @@ function renderDetail() {
         <Routes>
           <Route path="/features/:id" element={<FeatureDetail />} />
         </Routes>
+        <LocationProbe />
       </AuthProvider>
     </MemoryRouter>,
   );
@@ -186,12 +195,14 @@ describe("FeatureDetail", () => {
     expect(screen.getByText("$181")).toBeInTheDocument(); // total build spend
     expect(screen.getByText("alice")).toBeInTheDocument();
 
-    // Inference cost section: window filter + connector indicator.
+    // A single review-period filter at the top scopes the page (default this month).
+    expect(screen.getByRole("combobox", { name: "Review period" })).toBeInTheDocument();
+    // Inference cost section: connector indicator + in-period total (no /mo window buttons).
     expect(screen.getByText("Inference cost")).toBeInTheDocument();
     expect(screen.getByText(/connector-derived/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Month" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Quarter" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Year" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Month" })).not.toBeInTheDocument();
+    // Engineering activity is labelled as all-time, distinct from the period costs.
+    expect(screen.getByText(/commits, PRs, and files are all-time/)).toBeInTheDocument();
 
     // Pie (by model) + trend chart load from the inference endpoint.
     expect(await screen.findByText("gpt-4o")).toBeInTheDocument();
@@ -329,12 +340,37 @@ describe("FeatureDetail", () => {
     expect(screen.getAllByText("we verify it").length).toBeGreaterThan(0);
   });
 
-  it("refetches the breakdown when the window changes", async () => {
+  it("refetches every section when the review period changes, and reflects it in the URL", async () => {
     renderDetail();
     await screen.findByText("gpt-4o");
-    expect(api.featureInference).toHaveBeenCalledWith("f1", "month");
+    // Default range is this month; all three cost sections fetch with it.
+    expect(api.featureDetail).toHaveBeenCalledWith("f1", { kind: "this_month" });
+    expect(api.featureInference).toHaveBeenCalledWith("f1", { kind: "this_month" });
+    expect(api.featureOpportunities).toHaveBeenCalledWith("f1", { kind: "this_month" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Quarter" }));
-    await waitFor(() => expect(api.featureInference).toHaveBeenCalledWith("f1", "quarter"));
+    fireEvent.change(screen.getByRole("combobox", { name: "Review period" }), {
+      target: { value: "last_3_months" },
+    });
+    await waitFor(() =>
+      expect(api.featureInference).toHaveBeenCalledWith("f1", { kind: "last_3_months" }),
+    );
+    expect(api.featureDetail).toHaveBeenCalledWith("f1", { kind: "last_3_months" });
+    expect(api.featureOpportunities).toHaveBeenCalledWith("f1", { kind: "last_3_months" });
+    // The chosen range is preserved in the URL.
+    expect(screen.getByTestId("loc").textContent).toContain("range=last_3_months");
+  });
+
+  it("reads the initial review period from the URL", async () => {
+    render(
+      <MemoryRouter initialEntries={["/features/f1?range=last_6_months"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/features/:id" element={<FeatureDetail />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "AI threat triage" });
+    expect(api.featureDetail).toHaveBeenCalledWith("f1", { kind: "last_6_months" });
   });
 });

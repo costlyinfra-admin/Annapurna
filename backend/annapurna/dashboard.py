@@ -409,10 +409,21 @@ def heuristic_optimization(conn, feature_id: str, start: dt.date) -> dict:
 
 
 def feature_detail(
-    tenant_id: str, feature_id: str, period: Optional[dt.date] = None
+    tenant_id: str,
+    feature_id: str,
+    start: Optional[dt.date] = None,
+    end: Optional[dt.date] = None,
+    range_token: Optional[str] = None,
 ) -> Optional[dict]:
+    """One feature over a review period (default: the latest month with data).
+
+    Cost — build, inference, and the optimization anchor — is scoped to the same
+    inclusive month range the Overview uses, so the totals here reconcile with the
+    Overview's feature row. Engineering activity (PRs / commits / files) and the
+    evidence trail are deliberately ALL-TIME, and labelled as such in the UI.
+    """
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
-        start = _resolve_period(conn, period)
+        start, end = _resolve_range(conn, range_token, start, end)
 
         feature = conn.execute(
             "SELECT id, name, description, status, discovery_confidence FROM feature WHERE id = %s",
@@ -421,27 +432,30 @@ def feature_detail(
         if feature is None:
             return None
 
-        # Headlines: build is cumulative (one-time-ish); inference + users are the month's.
+        # Cost headlines are summed over the selected range (matching the Overview).
         build_total = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM build_cost WHERE feature_id = %s", (feature_id,)
+            "SELECT COALESCE(SUM(amount), 0) FROM build_cost "
+            "WHERE feature_id = %s AND period BETWEEN %s AND %s",
+            (feature_id, start, end),
         ).fetchone()[0]
-        inference_month = conn.execute(
+        inference_range = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) FROM inference_cost "
-            "WHERE feature_id = %s AND period = %s",
-            (feature_id, start),
+            f"WHERE feature_id = %s AND period BETWEEN %s AND %s AND {_ACTIVE_ENV}",  # noqa: S608
+            (feature_id, start, end),
         ).fetchone()[0]
+        # Active users is a point-in-time count -> the range's latest month.
         active_users = conn.execute(
             "SELECT active_users FROM feature_usage WHERE feature_id = %s AND period = %s",
-            (feature_id, start),
+            (feature_id, end),
         ).fetchone()
 
-        # Avg call latency (ms) from metered (hook) rows: sum / calls. None when
-        # the SDK hasn't reported latency for this feature/month.
+        # Avg call latency (ms) from metered (hook) rows over the range: sum / calls.
+        # None when the SDK hasn't reported latency for this feature/range.
         lat_row = conn.execute(
             "SELECT SUM(latency_ms_sum), SUM(request_count) FROM inference_cost "
-            "WHERE feature_id = %s AND period = %s AND source = 'hook' "
+            "WHERE feature_id = %s AND period BETWEEN %s AND %s AND source = 'hook' "
             "AND latency_ms_sum IS NOT NULL",
-            (feature_id, start),
+            (feature_id, start, end),
         ).fetchone()
         avg_latency_ms = (
             round(float(lat_row[0]) / float(lat_row[1]))
@@ -449,7 +463,8 @@ def feature_detail(
             else None
         )
 
-        # PRs / commits / files each developer authored for this feature (evidence trail).
+        # PRs / commits / files each developer authored for this feature. This is
+        # ALL-TIME engineering activity (not scoped to the cost range).
         pr_stats = {
             actor: {"prs": prs, "commits": commits, "files_changed": files}
             for actor, prs, commits, files in conn.execute(
@@ -466,6 +481,7 @@ def feature_detail(
             ).fetchall()
         }
 
+        # Per-developer build spend IS scoped to the range (reconciles with build_total).
         by_developer = [
             {
                 "developer_id": dev,
@@ -480,17 +496,19 @@ def feature_detail(
             for dev, tool, amount, conf in conn.execute(
                 """
                 SELECT developer_id, tool, SUM(amount), MIN(confidence)
-                FROM build_cost WHERE feature_id = %s
+                FROM build_cost WHERE feature_id = %s AND period BETWEEN %s AND %s
                 GROUP BY developer_id, tool ORDER BY SUM(amount) DESC
                 """,
-                (feature_id,),
+                (feature_id, start, end),
             ).fetchall()
         ]
         build_contributors = conn.execute(
-            "SELECT COUNT(DISTINCT developer_id) FROM build_cost WHERE feature_id = %s",
-            (feature_id,),
+            "SELECT COUNT(DISTINCT developer_id) FROM build_cost "
+            "WHERE feature_id = %s AND period BETWEEN %s AND %s",
+            (feature_id, start, end),
         ).fetchone()[0]
 
+        # Evidence trail: ALL-TIME signals behind the feature (not range-scoped).
         evidence = [
             {
                 "signal_type": st,
@@ -519,9 +537,9 @@ def feature_detail(
             }
         )
 
-        # Cost-optimization estimate (heuristic): derived from this month's
-        # inference usage — spend, model mix, and the input/output token split.
-        optimization = heuristic_optimization(conn, feature_id, start)
+        # Cost-optimization estimate (heuristic): anchored at the range's latest
+        # month, so it reflects the period being viewed.
+        optimization = heuristic_optimization(conn, feature_id, end)
 
     return {
         "feature_id": str(feature[0]),
@@ -529,14 +547,16 @@ def feature_detail(
         "description": feature[2],
         "status": feature[3],
         "discovery_confidence": feature[4],
-        "period": start.isoformat(),
+        "period": end.isoformat(),
+        "start": start.isoformat(),
+        "end": end.isoformat(),
         "headline": {
             "build_cost": float(build_total),
-            "inference_cost": float(inference_month),  # separate from build
+            "inference_cost": float(inference_range),  # separate from build
             "active_users": active_users[0] if active_users else None,
             "avg_latency_ms": avg_latency_ms,  # from metered calls; None if unknown
         },
-        "build_total": float(build_total),  # total AI build spend for this feature
+        "build_total": float(build_total),  # AI build spend for this feature in-range
         "build_contributors": build_contributors,
         "build_by_developer": by_developer,
         "evidence": evidence,
@@ -555,28 +575,30 @@ def _months_back(day: dt.date, n: int) -> dt.date:
     return dt.date(year, month, 1)
 
 
-_WINDOW_MONTHS = {"month": 1, "quarter": 3, "year": 12}
+def feature_inference(
+    tenant_id: str,
+    feature_id: str,
+    start: Optional[dt.date] = None,
+    end: Optional[dt.date] = None,
+    range_token: Optional[str] = None,
+) -> dict:
+    """Inference cost for a feature over the review period: per-model + monthly trend.
 
-
-def feature_inference(tenant_id: str, feature_id: str, window: str = "month") -> dict:
-    """Inference cost for a feature over a window: per-model breakdown + monthly trend.
-
-    ``window`` is month (the latest month), quarter (last 3 months), or year (12).
-    Per-model amounts sum to the windowed total (used for the % share + pie).
+    Scoped to the same month range as the rest of the detail page (and the
+    Overview), so per-model amounts sum to the in-range total (used for the % share
+    + pie), and the trend has one point per month in the range.
     """
-    months = _WINDOW_MONTHS.get(window, 1)
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
-        latest = _resolve_period(conn, None)
-        start = _months_back(latest, months - 1)
+        start, end = _resolve_range(conn, range_token, start, end)
 
         model_rows = conn.execute(
-            """
+            f"""
             SELECT model, SUM(amount), SUM(request_count)
             FROM inference_cost
-            WHERE feature_id = %s AND period BETWEEN %s AND %s
+            WHERE feature_id = %s AND period BETWEEN %s AND %s AND {_ACTIVE_ENV}
             GROUP BY model ORDER BY SUM(amount) DESC
-            """,
-            (feature_id, start, latest),
+            """,  # noqa: S608
+            (feature_id, start, end),
         ).fetchall()
         total = sum(float(amount) for _model, amount, _req in model_rows) or 0.0
         by_model = [
@@ -591,17 +613,23 @@ def feature_inference(tenant_id: str, feature_id: str, window: str = "month") ->
         trend = [
             {"period": p.isoformat(), "amount": float(amount)}
             for p, amount in conn.execute(
-                """
+                f"""
                 SELECT period, SUM(amount)
                 FROM inference_cost
-                WHERE feature_id = %s AND period BETWEEN %s AND %s
+                WHERE feature_id = %s AND period BETWEEN %s AND %s AND {_ACTIVE_ENV}
                 GROUP BY period ORDER BY period
-                """,
-                (feature_id, start, latest),
+                """,  # noqa: S608
+                (feature_id, start, end),
             ).fetchall()
         ]
 
-    return {"window": window, "total": total, "by_model": by_model, "trend": trend}
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "total": total,
+        "by_model": by_model,
+        "trend": trend,
+    }
 
 
 def spend_by_provider(

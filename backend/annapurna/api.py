@@ -974,9 +974,14 @@ def create_app() -> FastAPI:
         feature_id: str,
         user: CurrentUser,
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        range: Optional[str] = Query(default=None, pattern=_RANGE_RE),
+        start: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        end: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
-        resolved = _parse_period(period) if period else None
-        detail = dashboard.feature_detail(user["tenant_id"], feature_id, resolved)
+        # `period` kept for back-compat (single month); range / start+end match the Overview.
+        s = _parse_period(start) if start else (_parse_period(period) if period else None)
+        e = _parse_period(end) if end else None
+        detail = dashboard.feature_detail(user["tenant_id"], feature_id, s, e, range)
         if detail is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found")
         return detail
@@ -985,18 +990,26 @@ def create_app() -> FastAPI:
     def feature_inference(
         feature_id: str,
         user: CurrentUser,
-        window: str = Query(default="month", pattern="^(month|quarter|year)$"),
+        range: Optional[str] = Query(default=None, pattern=_RANGE_RE),
+        start: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        end: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
-        return dashboard.feature_inference(user["tenant_id"], feature_id, window)
+        s = _parse_period(start) if start else None
+        e = _parse_period(end) if end else None
+        return dashboard.feature_inference(user["tenant_id"], feature_id, s, e, range)
 
     @app.get("/api/features/{feature_id}/opportunities")
     def feature_opportunities(
         feature_id: str,
         user: CurrentUser,
         period: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        range: Optional[str] = Query(default=None, pattern=_RANGE_RE),
+        start: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        end: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     ) -> dict:
-        resolved = _parse_period(period) if period else None
-        result = optimize_measured.opportunities(user["tenant_id"], feature_id, resolved)
+        s = _parse_period(start) if start else (_parse_period(period) if period else None)
+        e = _parse_period(end) if end else None
+        result = optimize_measured.opportunities(user["tenant_id"], feature_id, s, e, range)
         if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found")
         return result

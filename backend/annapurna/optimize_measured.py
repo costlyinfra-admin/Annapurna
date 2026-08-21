@@ -526,20 +526,27 @@ def _actions(conn, feature_id, start, measured_by_lever: dict) -> list:
 
 
 def opportunities(
-    tenant_id: str, feature_id: str, period: Optional[dt.date] = None
+    tenant_id: str,
+    feature_id: str,
+    start: Optional[dt.date] = None,
+    end: Optional[dt.date] = None,
+    range_token: Optional[str] = None,
 ) -> Optional[dict]:
-    """Unified optimization opportunities for one feature/month (opt spec §18).
+    """Unified optimization opportunities for one feature (opt spec §18).
 
     One list, one shape. Each opportunity carries a `savings_type`
     (measured | modeled_ceiling | directional); the three totals are computed
     separately and never combined. Returns None if the feature doesn't exist.
+
+    Opportunities are per-month estimates, so a selected review range is honoured
+    by anchoring the analysis on the range's latest month.
     """
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
-        start = dashboard._resolve_period(conn, period)
+        _start, anchor = dashboard._resolve_range(conn, range_token, start, end)
         if conn.execute("SELECT 1 FROM feature WHERE id = %s", (feature_id,)).fetchone() is None:
             return None
-        result = _feature_opportunities(conn, feature_id, start)
-    return {"period": start.isoformat(), **result}
+        result = _feature_opportunities(conn, feature_id, anchor)
+    return {"period": anchor.isoformat(), **result}
 
 
 def _feature_opportunities(conn, feature_id: str, start: dt.date) -> dict:
