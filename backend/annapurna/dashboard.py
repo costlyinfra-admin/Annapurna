@@ -155,6 +155,15 @@ def dashboard(
                 (prev_start, prev_end),
             ).fetchone()[0]
         )
+        # The estimated (not-yet-billed) portion already included in inference_cost
+        # above — surfaced separately so the UI can label "incl ~$X estimated".
+        estimated_inference = float(
+            conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) FROM inference_cost "
+                f"WHERE period BETWEEN %s AND %s AND source = 'cost_api_est' AND {_ACTIVE_ENV}",  # noqa: S608
+                (start, end),
+            ).fetchone()[0]
+        )
         tok = conn.execute(
             "SELECT COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0) "
             f"FROM inference_cost WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}",  # noqa: S608
@@ -192,6 +201,8 @@ def dashboard(
     totals = {
         "build_cost": sum(r["build_cost"] for r in rows) + unattributed["build_cost"],
         "inference_cost": sum(r["inference_cost"] for r in rows) + unattributed["inference_cost"],
+        # Portion of inference_cost that is estimated (not yet billed), for labelling.
+        "estimated_inference": estimated_inference,
         "prev_build_cost": prev_build,
         "prev_inference_cost": prev_inference,
         "tokens_in": tokens_in,

@@ -283,17 +283,29 @@ class OpenAICostClient(_BaseCostClient):
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
         end = month_query_end(start)  # month-to-date, never into the future
-        resp = self._get(
-            "/v1/organization/costs",
-            params={
+        # Like Anthropic's, the Costs API returns daily buckets and paginates — page
+        # through so a long month is never truncated to the first page of days.
+        records: list[CostRecord] = []
+        page: Optional[str] = None
+        while True:
+            params: dict = {
                 "start_time": int(dt.datetime(start.year, start.month, start.day).timestamp()),
                 "end_time": int(dt.datetime(end.year, end.month, end.day).timestamp()),
                 "group_by[]": ["project_id", "line_item"],
                 "limit": 180,
-            },
-            headers={"Authorization": f"Bearer {self._key}"},
-        )
-        return aggregate(list(_parse_openai(resp.json(), start)))
+            }
+            if page:
+                params["page"] = page
+            data = self._get(
+                "/v1/organization/costs",
+                params,
+                headers={"Authorization": f"Bearer {self._key}"},
+            ).json()
+            records.extend(_parse_openai(data, start))
+            if data.get("has_more") and data.get("next_page"):
+                page = data["next_page"]
+                continue
+            return aggregate(records)
 
 
 class GoogleCostClient(_BaseCostClient):

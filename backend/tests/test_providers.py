@@ -210,6 +210,52 @@ def test_openai_parses_costs():
     assert records[0].amount == Decimal("1850.00")
 
 
+def test_openai_costs_paginate_the_full_month():
+    # Same class of bug as Anthropic: the Costs API paginates daily buckets, so a
+    # long month must be paged through rather than truncated to the first page.
+    pages = {
+        None: {
+            "data": [
+                {
+                    "results": [
+                        {
+                            "project_id": "proj_a",
+                            "line_item": "gpt-4o",
+                            "amount": {"value": "100.00", "currency": "USD"},
+                        }
+                    ]
+                }
+            ],
+            "has_more": True,
+            "next_page": "p2",
+        },
+        "p2": {
+            "data": [
+                {
+                    "results": [
+                        {
+                            "project_id": "proj_b",
+                            "line_item": "gpt-4o",
+                            "amount": {"value": "250.00", "currency": "USD"},
+                        }
+                    ]
+                }
+            ],
+            "has_more": False,
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=pages[request.url.params.get("page")])
+
+    client = OpenAICostClient(
+        "sk-openai-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    by_proj = {r.project: r.amount for r in client.fetch_costs(dt.date(2026, 5, 1))}
+    assert by_proj["proj_a"] == Decimal("100.00")
+    assert by_proj["proj_b"] == Decimal("250.00")  # page 2 not dropped
+
+
 def test_anthropic_amount_is_cents_converted_to_dollars():
     # Anthropic's cost_report `amount` is in the currency's lowest unit (cents) as a
     # decimal string. Per the Cost API contract, "123.45" USD represents $1.2345 and

@@ -37,6 +37,7 @@ const DATA = {
   totals: {
     build_cost: 211,
     inference_cost: 4960,
+    estimated_inference: 0,
     prev_build_cost: 180,
     prev_inference_cost: 5200,
     tokens_in: 1_200_000,
@@ -111,6 +112,15 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText(/1\.2M in · 300K out/)).toBeInTheDocument();
   });
 
+  it("labels the estimated (not-yet-billed) portion of inference cost", async () => {
+    vi.mocked(api.dashboard).mockResolvedValue({
+      ...DATA,
+      totals: { ...DATA.totals, inference_cost: 4960, estimated_inference: 89.42 },
+    });
+    renderDashboard();
+    expect(await screen.findByText(/incl\. ~\$89\.42 estimated/)).toBeInTheDocument();
+  });
+
   it("shows the setup checklist until features + build + inference all exist", async () => {
     // No features, no cost yet -> all three items pending.
     vi.mocked(api.dashboard).mockResolvedValue({
@@ -119,6 +129,7 @@ describe("Dashboard (Overview)", () => {
       totals: {
         build_cost: 0,
         inference_cost: 0,
+        estimated_inference: 0,
         prev_build_cost: 0,
         prev_inference_cost: 0,
         tokens_in: 0,

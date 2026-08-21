@@ -64,6 +64,7 @@ describe("App routing", () => {
       totals: {
         build_cost: 0,
         inference_cost: 0,
+        estimated_inference: 0,
         prev_build_cost: 0,
         prev_inference_cost: 0,
         tokens_in: 0,

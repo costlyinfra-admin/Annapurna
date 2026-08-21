@@ -115,6 +115,7 @@ def run_inference_backfill(
     errors: list[dict] = []
     first_error: Optional[Exception] = None
     total = 0.0
+    estimated = 0.0
     rows = 0
     for period in periods:
         try:
@@ -127,6 +128,7 @@ def run_inference_backfill(
             {"period": summary["period"], "total": summary["total"], "rows": summary.get("rows", 0)}
         )
         total += summary["total"]
+        estimated += summary.get("estimated", 0.0)
         rows += summary.get("rows", 0)
 
     if not by_month and first_error is not None:
@@ -136,7 +138,8 @@ def run_inference_backfill(
         "provider": provider,
         "months": months,
         "period": periods[-1].isoformat(),  # newest month (back-compat with single sync)
-        "total": total,
+        "total": total,  # authoritative billed dollars
+        "estimated": estimated,  # not-yet-billed estimate (current month only)
         "rows": rows,
         "by_month": by_month,
         "errors": errors,
@@ -273,11 +276,14 @@ def _insert_anthropic_row(
     api_key_name: Optional[str],
     environment: str,
     confidence: str,
+    source: str = "cost_api",
 ) -> None:
     """Persist one reconciled Anthropic cost row with explicit identity columns.
 
     NOTE: ``api_key_ref`` now holds the genuine ``api_key_id`` (not the workspace,
-    as the legacy fallback did); ``workspace_id`` has its own column.
+    as the legacy fallback did); ``workspace_id`` has its own column. ``source`` is
+    'cost_api' for authoritative billed rows and 'cost_api_est' for the estimated,
+    not-yet-billed rows of the current month.
     """
     conn.execute(
         """
@@ -287,7 +293,7 @@ def _insert_anthropic_row(
              workspace_id, workspace_name, api_key_id, api_key_name, environment,
              source, confidence)
         VALUES (%s, %s, 'anthropic', %s, %s, %s, 'USD', %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, 'cost_api', %s)
+                %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
@@ -305,9 +311,38 @@ def _insert_anthropic_row(
             row.api_key_id,
             api_key_name,
             environment,
+            source,
             confidence,
         ),
     )
+
+
+def _tokens(r) -> int:
+    return (r.tokens_in or 0) + (r.tokens_out or 0)
+
+
+def _estimate_unbilled(
+    cost_records, usage_records, billed_total: Decimal, start: dt.date
+) -> Decimal:
+    """Estimate not-yet-billed inference spend for the CURRENT month.
+
+    Anthropic's Cost Report lags usage by a day or two, so the most recent usage
+    carries no billed dollars yet. Scale the authoritative billed dollars by the
+    ratio of not-yet-billed tokens (Usage Report, through today) to billed tokens
+    (Cost Report). This uses Anthropic's OWN effective rate, so it needs no external
+    price list and stays right even for models we don't list-price.
+
+    Returns 0 for a past (fully-billed) month, or when the Cost Report carries no
+    token detail to calibrate against — an honest "no estimate" rather than a guess.
+    """
+    if start != month_start(dt.date.today()) or billed_total <= 0:
+        return Decimal("0")
+    billed_tokens = sum(_tokens(r) for r in cost_records)
+    usage_tokens = sum(_tokens(r) for r in usage_records)
+    if billed_tokens <= 0 or usage_tokens <= billed_tokens:
+        return Decimal("0")
+    ratio = Decimal(usage_tokens - billed_tokens) / Decimal(billed_tokens)
+    return (billed_total * ratio).quantize(Decimal("0.01"))
 
 
 def ingest_anthropic(
@@ -389,13 +424,14 @@ def ingest_anthropic(
     by_env: dict[str, Decimal] = {}
     attributed = Decimal("0")
     unattributed = Decimal("0")
+    estimated = _estimate_unbilled(cost_records, usage_records, billed_total, start)
     rows_written = 0
 
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         maps = _load_mappings(conn)
         conn.execute(
             "DELETE FROM inference_cost WHERE provider = 'anthropic' "
-            "AND period = %s AND source = 'cost_api'",
+            "AND period = %s AND source IN ('cost_api', 'cost_api_est')",
             (start,),
         )
         for ws_id, authoritative in billed_by_ws.items():
@@ -452,11 +488,42 @@ def ingest_anthropic(
                 unattributed += authoritative
                 rows_written += 1
 
+        # Estimated, not-yet-billed rows for the current month (source cost_api_est),
+        # allocated across usage exactly like the billed dollars so they attribute to
+        # features and carry their key's classification — but stay clearly separate
+        # from the authoritative bill.
+        if estimated > 0:
+            all_usage = [r for bucket in usage_by_ws.values() for r in bucket.values()]
+            for row, amount in zip(
+                all_usage, _allocate(estimated, [_usage_weight(r) for r in all_usage])
+            ):
+                if amount <= 0:
+                    continue
+                environment = class_map.get(
+                    ("api_key", row.api_key_id), resources.DEFAULT_CLASSIFICATION
+                )
+                feature_id, _conf = _attribute_detail(row.api_key_id, row.workspace_id, maps)
+                _insert_anthropic_row(
+                    conn,
+                    tenant_id,
+                    feature_id,
+                    row,
+                    amount,
+                    start,
+                    row.workspace_id,
+                    workspaces.get(row.workspace_id or ""),
+                    api_keys.get(row.api_key_id or "", {}).get("name"),
+                    environment,
+                    "low",
+                    source="cost_api_est",
+                )
+
     return {
         "provider": "anthropic",
         "period": start.isoformat(),
         "rows": rows_written,
         "total": float(billed_total),
+        "estimated": float(estimated),
         "attributed": float(attributed),
         "unattributed": float(unattributed),
         "by_environment": {k: float(v) for k, v in by_env.items()},

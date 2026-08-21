@@ -106,6 +106,99 @@ def test_anthropic_current_month_ingest_reconciles_with_cost_report(tenant_id, m
     assert view["by_provider"]["anthropic"] == 4200.0  # reconciles with the bill
 
 
+def test_anthropic_estimates_not_yet_billed_current_month(tenant_id, monkeypatch):
+    # Cost Report (billed) has 1,000 tokens for $10; Usage Report shows 1,500 tokens
+    # through today -> the extra 500 tokens are not yet billed. Estimate scales the
+    # bill by 500/1000 = $5.00, stored separately as source='cost_api_est'.
+    from annapurna.db import app_dsn, connect, tenant_tx
+
+    today = dt.date.today()
+
+    class _FakeAnthropic:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):
+            return [
+                CostRecord(
+                    "anthropic",
+                    period,
+                    Decimal("10.00"),
+                    project="ws",
+                    model="c",
+                    tokens_in=800,
+                    tokens_out=200,
+                )
+            ]
+
+        def fetch_usage(self, period):
+            return [
+                UsageRecord(
+                    workspace_id="ws",
+                    api_key_id="k",
+                    model="c",
+                    tokens_in=1200,
+                    tokens_out=300,
+                    request_count=10,
+                )
+            ]
+
+        def fetch_workspaces(self):
+            return {"ws": "Workspace"}
+
+        def fetch_api_keys(self):
+            return {"k": {"name": "key", "workspace_id": "ws"}}
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeAnthropic())
+    summary = inference.run_inference_ingest(tenant_id, "anthropic", today, "admin-key")
+
+    assert summary["total"] == 10.0  # authoritative billed, unchanged
+    assert summary["estimated"] == 5.0  # 10 * (1500-1000)/1000
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        billed, est = conn.execute(
+            "SELECT "
+            "COALESCE(SUM(amount) FILTER (WHERE source='cost_api'), 0), "
+            "COALESCE(SUM(amount) FILTER (WHERE source='cost_api_est'), 0) "
+            "FROM inference_cost WHERE provider='anthropic' AND period=%s",
+            (today.replace(day=1),),
+        ).fetchone()
+    assert float(billed) == 10.0  # the bill stays authoritative and separate
+    assert float(est) == 5.0  # estimate stored under its own source
+
+    # The billed-only summary (Cost Sources) excludes the estimate.
+    assert inference.inference_summary(tenant_id, today)["by_provider"]["anthropic"] == 10.0
+
+
+def test_anthropic_no_estimate_for_a_past_month(tenant_id, monkeypatch):
+    # A fully-elapsed month is entirely billed -> no estimate, even if usage > billed.
+    class _FakeAnthropic:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fetch_costs(self, period):
+            return [CostRecord("anthropic", period, Decimal("10.00"), project="ws", tokens_in=1000)]
+
+        def fetch_usage(self, period):
+            return [UsageRecord(workspace_id="ws", api_key_id="k", tokens_in=5000)]
+
+        def fetch_workspaces(self):
+            return {"ws": "Workspace"}
+
+        def fetch_api_keys(self):
+            return {"k": {"name": "key", "workspace_id": "ws"}}
+
+    monkeypatch.setattr(inference, "_make_cost_client", lambda provider, key: _FakeAnthropic())
+    summary = inference.run_inference_ingest(tenant_id, "anthropic", dt.date(2025, 1, 1), "key")
+    assert summary["estimated"] == 0.0
+
+
 def test_reingest_is_idempotent(tenant_id):
     _mapped_tenant(tenant_id)
     records = [_record("anthropic", 4200, api_key_ref="key:triage")]

@@ -101,7 +101,10 @@ export function CostSourcesPage() {
                     const r = await api.ingestInference(c.type, undefined, 12);
                     await refreshFeatures();
                     setDetailVersion((v) => v + 1);
-                    const base = `Pulled ${money(r.total)} of ${c.name} spend across the last 12 months.`;
+                    const est = r.estimated ?? 0;
+                    const estNote =
+                      est > 0 ? ` (incl. ~${money(est)} estimated, not yet billed)` : "";
+                    const base = `Pulled ${money(r.total)} of ${c.name} spend across the last 12 months${estNote}.`;
                     // Surface per-month failures instead of silently importing nothing.
                     const errs = r.errors ?? [];
                     if (errs.length === 0) return base;

@@ -147,6 +147,11 @@ export function Dashboard() {
           <div className="total-card">
             <span className="total-label">Inference cost</span>
             <span className="total-value">{money(data.totals.inference_cost)}</span>
+            {data.totals.estimated_inference > 0 && (
+              <span className="muted" title="Recent usage not yet on the provider's bill">
+                incl. ~{money(data.totals.estimated_inference)} estimated
+              </span>
+            )}
             <MonthDelta
               current={data.totals.inference_cost}
               prev={data.totals.prev_inference_cost}

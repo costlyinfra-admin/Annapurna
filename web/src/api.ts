@@ -291,6 +291,8 @@ export interface Dashboard {
   totals: {
     build_cost: number;
     inference_cost: number;
+    // Portion of inference_cost that is estimated (not yet billed), for labelling.
+    estimated_inference: number;
     prev_build_cost: number;
     prev_inference_cost: number;
     tokens_in: number;
@@ -704,6 +706,7 @@ export const api = {
   ingestInference: (provider: string, period?: string, months?: number) =>
     request<{
       total: number;
+      estimated?: number;
       months?: number;
       by_month?: { period: string; total: number; rows: number }[];
       errors?: { period: string; error: string }[];
