@@ -380,7 +380,7 @@ def test_unmapped_tenant_all_unattributed(tenant_id):
 # ---------------------------------------------------------------------------
 # Anthropic detailed path: workspace/API-key identity, environment, reconcile.
 # ---------------------------------------------------------------------------
-def _usage(ws, key, model, tin, tout, *, tier=None, cached=0, reqs=0):
+def _usage(ws, key, model, tin, tout, *, tier=None, cached=0, reqs=0, day=None):
     return UsageRecord(
         workspace_id=ws,
         api_key_id=key,
@@ -390,6 +390,7 @@ def _usage(ws, key, model, tin, tout, *, tier=None, cached=0, reqs=0):
         tokens_out=tout,
         cached_tokens_in=cached,
         request_count=reqs,
+        day=day,
     )
 
 
@@ -435,6 +436,42 @@ def test_anthropic_resources_default_unclassified_no_name_inference(tenant_id):
     # Detail is one flat table (no by_environment / by_workspace summaries).
     assert set(detail) == {"provider", "period", "all_time", "classifiable", "columns", "rows"}
     assert detail["columns"] == {"group": "Workspace", "name": "API key"}
+
+
+def test_classifying_a_key_restamps_existing_cost_rows(tenant_id):
+    # Reproduces the bug: after ingest stamps a key 'unclassified', classifying it
+    # production must re-stamp the persisted rows so the Overview trend shows the
+    # spend under Production immediately — not only after the next re-sync.
+    from annapurna import dashboard, resources
+    from annapurna.db import app_dsn, connect, tenant_tx
+
+    inference.ingest_anthropic(
+        tenant_id,
+        PERIOD,
+        [_cost("ws_mcs", 100)],
+        [_usage("ws_mcs", "k_a", "claude-sonnet-4-6", 1000, 0, day=PERIOD)],
+        _WORKSPACES,
+        _API_KEYS,
+    )
+
+    def _env(table):
+        with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+            return conn.execute(
+                f"SELECT DISTINCT environment FROM {table} WHERE api_key_id = 'k_a'"  # noqa: S608
+            ).fetchall()
+
+    assert _env("inference_cost") == [("unclassified",)]
+    assert _env("inference_cost_daily") == [("unclassified",)]
+
+    resources.set_classification(tenant_id, "anthropic", "api_key", "k_a", "production")
+
+    # Both the monthly and daily rows are now production...
+    assert _env("inference_cost") == [("production",)]
+    assert _env("inference_cost_daily") == [("production",)]
+    # ...so the Overview trend buckets the spend under Production, not Unclassified.
+    board = dashboard.spend_by_provider(tenant_id, range_token="this_month")
+    assert board["trend"][0]["production"] == 100.0
+    assert board["trend"][0]["unclassified"] == 0.0
 
 
 def test_resource_detail_lists_all_history_when_no_period(tenant_id):

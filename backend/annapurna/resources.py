@@ -142,6 +142,24 @@ def set_classification(
                 updated_by,
             ),
         )
+        # Re-stamp the environment on ALREADY-persisted cost rows for this resource,
+        # across every month — otherwise the classification only shows on the
+        # Cost Sources table (which reads config live) but the Overview trend keeps
+        # bucketing the spend by its stale ingest-time snapshot until the next sync.
+        # A key row is keyed by api_key_id; a workspace-only (no-key) row by
+        # workspace_id — matching how ingest stamped each.
+        if resource_type == "api_key":
+            where, ident = "api_key_id = %s", resource_id
+        elif resource_type == "workspace":
+            where, ident = "workspace_id = %s AND api_key_id IS NULL", resource_id
+        else:
+            where = None
+        if where is not None:
+            for table in ("inference_cost", "inference_cost_daily"):
+                conn.execute(
+                    f"UPDATE {table} SET environment = %s WHERE provider = %s AND {where}",  # noqa: S608
+                    (classification, provider, ident),
+                )
     return {
         "provider": provider,
         "resource_type": resource_type,
