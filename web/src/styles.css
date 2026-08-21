@@ -2314,6 +2314,72 @@ a.exec-value:hover {
   color: var(--muted);
 }
 
+/* Bar / Line toggle above the trend chart. */
+.trend-toggle {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.trend-toggle button {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--muted);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.trend-toggle button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Month caption under a daily trend (shows the actual month once). */
+.trend-span {
+  text-align: center;
+  font-size: 0.75rem;
+  margin: 0.4rem 0 0;
+}
+
+/* Total-spend line chart. */
+.trend-line-svg {
+  width: 100%;
+  height: 170px;
+  display: block;
+}
+
+.trend-line-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.trend-line-area {
+  fill: var(--accent);
+  opacity: 0.12;
+}
+
+.trend-line-dot {
+  fill: var(--accent);
+}
+
+.trend-line-tick {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.trend-line-peak {
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--ink-soft);
+}
+
 .trend-value {
   font-size: 0.68rem;
   font-weight: 600;

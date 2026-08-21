@@ -21,6 +21,12 @@ export function num(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+/** Whole-dollar amount, never cents — for compact axis/bar labels. `null` -> em dash. */
+export function wholeMoney(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return USD.format(value);
+}
+
 const COMPACT = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,

@@ -82,7 +82,10 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
                   <span className="chart-title">
                     {useDaily ? "Daily trend · by classification" : "Trend · by classification"}
                   </span>
-                  <ClassificationTrendChart trend={useDaily ? data.daily_trend : data.trend} />
+                  <ClassificationTrendChart
+                    trend={useDaily ? data.daily_trend : data.trend}
+                    granularity={useDaily ? "day" : "month"}
+                  />
                 </div>
                 <div className="inference-col">
                   <span className="chart-title">By provider · {money(data.total)} total</span>
