@@ -211,6 +211,15 @@ describe("Dashboard (Overview)", () => {
       build_trend: [{ period: "2026-05-01", amount: 270 }],
       customer_total: 900,
       by_customer: [{ customer_id: "acme", amount: 900, pct: 100, requests: 1200 }],
+      workspace_total: 1250,
+      by_workspace: [
+        {
+          workspace: "Triage WS",
+          amount: 1250,
+          pct: 100,
+          by_key: [{ api_key: "triage-key", amount: 1250, pct: 100 }],
+        },
+      ],
     });
     renderDashboard();
     // Features tab is the default view.
@@ -236,6 +245,10 @@ describe("Dashboard (Overview)", () => {
     // Build cost broken out by tool, with a friendly tool label.
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
+    // Provider resource identity: workspace -> API key breakdown.
+    expect(screen.getByText("Inference cost by workspace & API key")).toBeInTheDocument();
+    expect(screen.getByText("Triage WS")).toBeInTheDocument();
+    expect(screen.getByText("triage-key")).toBeInTheDocument();
     // Per-customer metered spend, shown only when the SDK tagged customers.
     expect(screen.getByText("Inference cost by customer")).toBeInTheDocument();
     expect(screen.getByText("acme")).toBeInTheDocument();
@@ -285,6 +298,8 @@ describe("Dashboard (Overview)", () => {
       build_trend: [{ period: "2026-05-01", amount: 270 }],
       customer_total: 0,
       by_customer: [],
+      workspace_total: 0,
+      by_workspace: [],
     });
     renderDashboard();
     await screen.findByText("Key insights");

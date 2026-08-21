@@ -131,6 +131,40 @@ def test_feature_detail_has_breakdowns_and_evidence(seeded):
         assert o["confidence"] in {"high", "med", "low"} and o["rationale"]
 
 
+def test_spend_by_provider_workspace_api_key_breakdown(seeded, app_env):
+    # Anthropic rows carry workspace/api_key identity; the By provider tab rolls it
+    # up into a workspace -> API key breakdown that reconciles to the inference total.
+    for ws_id, ws_name, key, amt in [
+        ("ws_triage", "Triage WS", "triage-key", 100),
+        ("ws_triage", "Triage WS", "triage-key-2", 40),
+        ("ws_shared", "Shared WS", "shared-key", 25),
+    ]:
+        app_env.execute(
+            """
+            INSERT INTO inference_cost
+                (tenant_id, provider, model, amount, currency, period,
+                 workspace_id, workspace_name, api_key_id, api_key_name, source, confidence)
+            VALUES (%s, 'anthropic', 'claude', %s, 'USD', %s, %s, %s, %s, %s, 'cost_api', 'high')
+            """,
+            (seeded, amt, PERIOD, ws_id, ws_name, key, key),
+        )
+    app_env.commit()
+
+    data = dashboard.spend_by_provider(seeded, range_token="this_month")
+    by_ws = {w["workspace"]: w for w in data["by_workspace"]}
+    assert by_ws["Triage WS"]["amount"] == 140.0
+    assert {k["api_key"]: k["amount"] for k in by_ws["Triage WS"]["by_key"]} == {
+        "triage-key": 100.0,
+        "triage-key-2": 40.0,
+    }
+    assert by_ws["Shared WS"]["amount"] == 25.0
+    assert data["workspace_total"] == 165.0
+    # Each workspace's keys reconcile to its subtotal, with per-workspace shares to 100.
+    for w in data["by_workspace"]:
+        assert round(sum(k["amount"] for k in w["by_key"]), 2) == round(w["amount"], 2)
+        assert abs(sum(k["pct"] for k in w["by_key"]) - 100.0) < 1e-6
+
+
 def test_feature_detail_reconciles_with_overview_over_range(seeded):
     # A feature's detail totals must equal its Overview row for the SAME range.
     board = dashboard.dashboard(seeded, range_token="last_3_months")

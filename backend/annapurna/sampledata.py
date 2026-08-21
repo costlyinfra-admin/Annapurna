@@ -130,14 +130,19 @@ def _add_inference_cost(
     source="cost_api",
     period=DEFAULT_PERIOD,
     cached_tokens_in=None,
+    workspace=None,
+    api_key=None,
 ):
+    # Optional provider-resource identity (Anthropic workspace + API key). Left NULL
+    # by default so the base fixture — and the tests pinned to it — are unchanged.
     conn.execute(
         """
         INSERT INTO inference_cost (tenant_id, feature_id, provider, model,
                                     api_key_ref, amount, period, tokens_in,
                                     tokens_out, request_count, cached_tokens_in,
+                                    workspace_id, workspace_name, api_key_id, api_key_name,
                                     source, confidence)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
@@ -151,6 +156,10 @@ def _add_inference_cost(
             tokens_out,
             requests,
             cached_tokens_in,
+            workspace,
+            workspace,
+            api_key,
+            api_key,
             source,
             confidence,
         ),
@@ -683,6 +692,31 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         _months((2024, 6), 23),
         "low",
     )  # ends Apr 2026 (base has May)
+
+    # Anthropic workspace + API-key identity for the latest month, so the Overview
+    # "By provider" tab can show its workspace/key breakdown (only Anthropic exposes
+    # this today). Attributed to base features and split across a couple of keys.
+    for feat, model, ws, key, amt in (
+        (base["triage"], "claude-sonnet-4-6", "threat-triage", "triage-prod", 1800.00),
+        (base["triage"], "claude-opus-4-8", "threat-triage", "triage-batch", 700.00),
+        (base["soc"], "claude-haiku-4-5", "soc-copilot", "soc-shared", 620.00),
+        (base["report"], "claude-sonnet-4-6", "reporting", "report-gen", 410.00),
+    ):
+        _add_inference_cost(
+            conn,
+            tenant_id,
+            feat,
+            "anthropic",
+            model,
+            f"key:{key}",
+            amt,
+            int(amt * 40),
+            int(amt * 10),
+            int(amt * 5),
+            "high",
+            workspace=ws,
+            api_key=key,
+        )
 
     # Build cost recurs too — backfill a monthly build series for each base
     # feature's main contributor (the latest month is already in the base data).

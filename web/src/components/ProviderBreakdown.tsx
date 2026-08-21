@@ -1,7 +1,8 @@
 /**
  * Overview "By provider" tab — tenant-wide spend by source over the Overview's
- * selected review period, in two never-blended sections (invariant 2): inference
- * (run) cost by provider, and build cost by coding tool. Each has a trend + bars.
+ * selected review period, in never-blended sections (invariant 2): inference (run)
+ * cost by provider, build cost by coding tool/developer, and — where the provider
+ * exposes it (today Anthropic) — inference by workspace & API key. Each has bars.
  */
 import { useEffect, useState } from "react";
 import { api, type ProviderSpend, type ReviewRange } from "../api";
@@ -22,6 +23,8 @@ const EMPTY: ProviderSpend = {
   build_trend: [],
   customer_total: 0,
   by_customer: [],
+  workspace_total: 0,
+  by_workspace: [],
 };
 
 export function ProviderBreakdown({ range }: { range: ReviewRange }) {
@@ -115,6 +118,29 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
               </div>
             )}
           </section>
+
+          {/* Provider resource identity (today: Anthropic workspaces + API keys). */}
+          {data.by_workspace.length > 0 && (
+            <section className="detail-section">
+              <h3 className="breakdown-subhead">Inference cost by workspace &amp; API key</h3>
+              <p className="section-sub muted">
+                Each provider workspace, broken down by the API key that spent —{" "}
+                {money(data.workspace_total)} total.
+              </p>
+              <SpendBars
+                rows={data.by_workspace.map((w) => ({
+                  label: w.workspace,
+                  amount: w.amount,
+                  pct: w.pct,
+                  models: w.by_key.map((k) => ({
+                    label: k.api_key,
+                    amount: k.amount,
+                    pct: k.pct,
+                  })),
+                }))}
+              />
+            </section>
+          )}
 
           {/* Only when the metering SDK has tagged customers (metadata.customer_id). */}
           {data.by_customer.length > 0 && (

@@ -846,6 +846,47 @@ def spend_by_provider(
             for cid, a, r in customer_rows
         ]
 
+        # ---- Inference: by workspace, each broken down by API key ----
+        # Provider-resource identity (today only Anthropic populates it): the same
+        # workspace/key detail the Cost Sources page classifies, rolled up over the
+        # review range so it reconciles with the inference total above. Rows without
+        # any workspace/key identity (other providers) are simply omitted here.
+        ws_rows = conn.execute(
+            f"""
+            SELECT COALESCE(workspace_name, workspace_id) AS ws,
+                   COALESCE(api_key_name, api_key_id) AS api_key,
+                   SUM(amount)
+            FROM inference_cost
+            WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
+              AND (workspace_id IS NOT NULL OR api_key_id IS NOT NULL)
+            GROUP BY ws, api_key ORDER BY SUM(amount) DESC
+            """,  # noqa: S608
+            (start, end),
+        ).fetchall()
+        ws_grouped: dict[str, dict] = {}
+        for ws, api_key, amount in ws_rows:
+            entry = ws_grouped.setdefault(ws or "—", {"amount": 0.0, "keys": []})
+            entry["amount"] += float(amount)
+            entry["keys"].append((api_key, float(amount)))
+        workspace_total = sum(e["amount"] for e in ws_grouped.values()) or 0.0
+        by_workspace = [
+            {
+                "workspace": ws,
+                "amount": e["amount"],
+                "pct": (e["amount"] / workspace_total * 100.0) if workspace_total else 0.0,
+                "by_key": [
+                    {
+                        "api_key": api_key or "—",
+                        "amount": amt,
+                        # Share of THIS workspace's spend (keys sum to ~100%).
+                        "pct": (amt / e["amount"] * 100.0) if e["amount"] else 0.0,
+                    }
+                    for api_key, amt in sorted(e["keys"], key=lambda k: -k[1])
+                ],
+            }
+            for ws, e in sorted(ws_grouped.items(), key=lambda kv: -kv[1]["amount"])
+        ]
+
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
@@ -858,4 +899,6 @@ def spend_by_provider(
         "build_trend": build_trend,
         "customer_total": customer_total,
         "by_customer": by_customer,
+        "workspace_total": workspace_total,
+        "by_workspace": by_workspace,
     }

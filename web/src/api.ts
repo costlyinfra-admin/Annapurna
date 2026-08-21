@@ -491,6 +491,13 @@ export interface ProviderSpend {
   build_trend: { period: string; amount: number }[];
   customer_total: number;
   by_customer: { customer_id: string; amount: number; pct: number; requests: number | null }[];
+  workspace_total: number;
+  by_workspace: {
+    workspace: string;
+    amount: number;
+    pct: number;
+    by_key: { api_key: string; amount: number; pct: number }[];
+  }[];
 }
 
 export interface SeatSource {
