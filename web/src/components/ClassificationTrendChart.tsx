@@ -136,7 +136,8 @@ export function ClassificationTrendChart({
   );
 }
 
-/** Total-spend line chart (SVG), self-contained so day labels stay aligned. */
+/** Total-spend line chart (SVG). Hovering along the line highlights the nearest
+ *  point and shows its amount. Self-contained so day labels stay aligned. */
 function LineTrend({
   trend,
   max,
@@ -146,11 +147,12 @@ function LineTrend({
   max: number;
   granularity: Granularity;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
   const step = 34;
   const pad = 18;
   const W = pad * 2 + Math.max(1, trend.length - 1) * step;
   const H = 170;
-  const top = 24; // headroom for the peak value label
+  const top = 24; // headroom for the value label
   const base = 140; // baseline; day ticks sit below
   const x = (i: number) => pad + i * step;
   const y = (v: number) => base - (v / max) * (base - top);
@@ -158,7 +160,14 @@ function LineTrend({
   const points = trend.map((t, i) => ({ px: x(i), py: y(t.total), t }));
   const line = points.map((p) => `${p.px},${p.py}`).join(" ");
   const area = `${pad},${base} ${line} ${x(trend.length - 1)},${base}`;
-  const peak = points.reduce((a, b) => (b.t.total > a.t.total ? b : a), points[0]);
+  const peakIdx = points.reduce((a, p, i) => (p.t.total > points[a].t.total ? i : a), 0);
+  const active = hover ?? peakIdx; // show the peak's value until the user hovers
+  const ap = points[active];
+
+  // Floating amount label, clamped so it never spills past the chart edges.
+  const labelW = 52;
+  const labelX = Math.min(Math.max(ap.px, pad + labelW / 2), W - pad - labelW / 2);
+  const labelY = Math.max(ap.py - 22, 2);
 
   return (
     <svg
@@ -167,22 +176,59 @@ function LineTrend({
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Total inference cost trend"
+      onMouseLeave={() => setHover(null)}
     >
       <polygon className="trend-line-area" points={area} />
       <polyline className="trend-line-path" points={line} fill="none" />
+
+      {/* Vertical guide (only while hovering) + a dot at the highlighted point
+          (the hovered day, or the peak when idle). */}
+      {hover !== null && (
+        <line className="trend-line-guide" x1={ap.px} y1={top - 6} x2={ap.px} y2={base} />
+      )}
+      <circle className="trend-line-dot" cx={ap.px} cy={ap.py} r={hover === null ? 3 : 5} />
+
       {points.map((p) => (
-        <g key={p.t.period}>
-          <circle className="trend-line-dot" cx={p.px} cy={p.py} r={3}>
-            <title>{tooltip(p.t, granularity)}</title>
-          </circle>
-          <text className="trend-line-tick" x={p.px} y={base + 16} textAnchor="middle">
-            {tick(p.t.period, granularity)}
-          </text>
-        </g>
+        <text
+          key={p.t.period}
+          className="trend-line-tick"
+          x={p.px}
+          y={base + 16}
+          textAnchor="middle"
+        >
+          {tick(p.t.period, granularity)}
+        </text>
       ))}
-      <text className="trend-line-peak" x={peak.px} y={peak.py - 8} textAnchor="middle">
-        {wholeMoney(peak.t.total)}
-      </text>
+
+      {/* The amount, shown for the highlighted (hovered, else peak) point. */}
+      <g transform={`translate(${labelX}, ${labelY})`}>
+        <rect
+          className="trend-line-label-bg"
+          x={-labelW / 2}
+          y={-13}
+          width={labelW}
+          height={17}
+          rx={4}
+        />
+        <text className="trend-line-label" x={0} y={0} textAnchor="middle">
+          {wholeMoney(ap.t.total)}
+        </text>
+      </g>
+
+      {/* Invisible per-point hit bands make the whole line easy to hover. */}
+      {points.map((p, i) => (
+        <rect
+          key={`hit-${p.t.period}`}
+          x={p.px - step / 2}
+          y={0}
+          width={step}
+          height={base}
+          fill="transparent"
+          onMouseEnter={() => setHover(i)}
+        >
+          <title>{tooltip(p.t, granularity)}</title>
+        </rect>
+      ))}
     </svg>
   );
 }

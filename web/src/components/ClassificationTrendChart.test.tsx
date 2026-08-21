@@ -60,4 +60,17 @@ describe("ClassificationTrendChart", () => {
     expect(screen.queryByLabelText("Classification legend")).not.toBeInTheDocument();
     expect(document.querySelector(".trend-line-path")).not.toBeNull();
   });
+
+  it("shows the point's amount as the cursor moves along the line", () => {
+    render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
+    fireEvent.click(screen.getByRole("button", { name: "Line" }));
+    // Idle: the peak's amount is labelled ($209, whole dollars).
+    expect(document.querySelector(".trend-line-label")?.textContent).toBe("$209");
+    // Hovering the second day's band shows that day's amount ($74, not $74.16).
+    const bands = document.querySelectorAll('.trend-line-svg rect[fill="transparent"]');
+    fireEvent.mouseEnter(bands[1]);
+    expect(document.querySelector(".trend-line-label")?.textContent).toBe("$74");
+    // A guide line appears while hovering.
+    expect(document.querySelector(".trend-line-guide")).not.toBeNull();
+  });
 });
