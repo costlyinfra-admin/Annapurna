@@ -128,6 +128,60 @@ def test_anthropic_parses_cost_report():
     assert by_ws["ws_shared"].model == "claude-haiku-4-5"
 
 
+def test_anthropic_cost_report_paginates_the_full_month():
+    # Reproduces the reported failure: the Cost Report returns DAILY buckets across
+    # multiple pages (default 7/page). Without an explicit limit + pagination, only
+    # the first page (early month) is read, so late-month workspaces like
+    # "automations" are dropped and the total is a fraction of the real bill.
+    pages = {
+        None: {
+            "data": [
+                {
+                    "results": [
+                        {
+                            "workspace_id": "marketing-aeo",
+                            "description": "claude",
+                            "amount": "767.00",  # cents -> $7.67 (all early month)
+                            "currency": "USD",
+                        }
+                    ]
+                }
+            ],
+            "has_more": True,
+            "next_page": "page2",
+        },
+        "page2": {
+            "data": [
+                {
+                    "results": [
+                        {
+                            "workspace_id": "automations",
+                            "description": "claude",
+                            "amount": "64747.00",  # cents -> $647.47 (surges late month)
+                            "currency": "USD",
+                        }
+                    ]
+                }
+            ],
+            "has_more": False,
+        },
+    }
+    seen_limits: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_limits.append(request.url.params.get("limit"))
+        return httpx.Response(200, json=pages[request.url.params.get("page")])
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    by_ws = {r.project: r.amount for r in client.fetch_costs(dt.date(2026, 8, 10))}
+    # BOTH the early- and late-month workspaces are captured (not just page 1).
+    assert by_ws["marketing-aeo"] == Decimal("7.67")
+    assert by_ws["automations"] == Decimal("647.47")
+    assert seen_limits == ["31", "31"]  # full-month buckets requested on every page
+
+
 def test_openai_parses_costs():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer sk-openai-admin"

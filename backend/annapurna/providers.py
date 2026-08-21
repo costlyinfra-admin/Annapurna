@@ -185,18 +185,30 @@ class AnthropicCostClient(_BaseCostClient):
     def fetch_costs(self, period: dt.date) -> list[CostRecord]:
         start = month_start(period)
         end = month_query_end(start)  # capped at tomorrow -> month-to-date, never future
-        resp = self._get(
-            "/v1/organizations/cost_report",
-            params={
+        # The Cost Report returns one DAILY bucket per page and defaults to just 7
+        # buckets — so without an explicit limit AND pagination it silently returns
+        # only the first week of the month, dropping every workspace whose spend
+        # lands later. Request the full month of buckets and page through, exactly
+        # like fetch_usage below.
+        records: list[CostRecord] = []
+        page: Optional[str] = None
+        while True:
+            params: dict = {
                 "starting_at": start.isoformat(),
                 "ending_at": end.isoformat(),
                 # cost_report only groups by workspace_id + description (NOT model);
                 # the description line-item carries the model/token-type label.
                 "group_by[]": ["workspace_id", "description"],
-            },
-            headers=self._headers(),
-        )
-        return aggregate(list(_parse_anthropic(resp.json(), start)))
+                "limit": 31,  # daily buckets in a month
+            }
+            if page:
+                params["page"] = page
+            data = self._get("/v1/organizations/cost_report", params, self._headers()).json()
+            records.extend(_parse_anthropic(data, start))
+            if data.get("has_more") and data.get("next_page"):
+                page = data["next_page"]
+                continue
+            return aggregate(records)
 
     def fetch_usage(self, period: dt.date) -> list[UsageRecord]:
         """Detailed token usage for the month, grouped by workspace/key/model/tier.
