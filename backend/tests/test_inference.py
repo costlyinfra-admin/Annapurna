@@ -433,8 +433,41 @@ def test_anthropic_resources_default_unclassified_no_name_inference(tenant_id):
     assert by_name["service-a-prod"]["group"] == "mcs-dev"
     assert by_name["experimental"]["classification"] == "unclassified"
     # Detail is one flat table (no by_environment / by_workspace summaries).
-    assert set(detail) == {"provider", "period", "classifiable", "columns", "rows"}
+    assert set(detail) == {"provider", "period", "all_time", "classifiable", "columns", "rows"}
     assert detail["columns"] == {"group": "Workspace", "name": "API key"}
+
+
+def test_resource_detail_lists_all_history_when_no_period(tenant_id):
+    # A key that only spent in an EARLIER month must still be classifiable (the
+    # Configure panel defaults to all-time), with cost totalled across months.
+    apr = dt.date(2026, 4, 1)
+    inference.ingest_anthropic(
+        tenant_id,
+        apr,
+        [_cost("ws_sos", 40)],
+        [_usage("ws_sos", "k_c", "claude-haiku-4-5", 100, 0)],
+        _WORKSPACES,
+        _API_KEYS,
+    )
+    inference.ingest_anthropic(
+        tenant_id,
+        PERIOD,
+        [_cost("ws_mcs", 100)],
+        [_usage("ws_mcs", "k_a", "claude-sonnet-4-6", 100, 0)],
+        _WORKSPACES,
+        _API_KEYS,
+    )
+
+    # Single-month (May) sees only May's key.
+    may_only = {r["name"] for r in inference.anthropic_resource_detail(tenant_id, PERIOD)["rows"]}
+    assert "service-a-prod" in may_only and "pentest-prod" not in may_only
+
+    # All-time (no period) lists BOTH months' keys, with cost summed across history.
+    detail = inference.anthropic_resource_detail(tenant_id)
+    assert detail["all_time"] is True
+    by_name = {r["name"]: r for r in detail["rows"]}
+    assert {"service-a-prod", "pentest-prod"} <= set(by_name)
+    assert by_name["pentest-prod"]["cost"] == 40.0  # the April-only key is classifiable
 
 
 def test_anthropic_manual_classification_persists_and_survives_resync(tenant_id):

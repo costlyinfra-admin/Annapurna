@@ -75,7 +75,11 @@ export function SourceDetail({ provider, refreshKey }: { provider: string; refre
         <h4>
           {cols.group} &amp; {cols.name}
         </h4>
-        <span className="muted source-detail-note">Classify each resource — you decide.</span>
+        <span className="muted source-detail-note">
+          {detail.all_time
+            ? "Every resource across your synced history — classify each one, you decide."
+            : "Classify each resource — you decide."}
+        </span>
       </div>
       <div className="source-detail-table-wrap">
         <table className="source-detail-table">
@@ -84,7 +88,7 @@ export function SourceDetail({ provider, refreshKey }: { provider: string; refre
               <th>{cols.group}</th>
               <th>{cols.name}</th>
               <th>Classification</th>
-              <th className="num">Cost</th>
+              <th className="num">{detail.all_time ? "Cost (all-time)" : "Cost"}</th>
             </tr>
           </thead>
           <tbody>

@@ -736,33 +736,44 @@ def ingest_anthropic(
 
 def anthropic_resource_detail(tenant_id: str, period: Optional[dt.date] = None) -> dict:
     """Anthropic's one detail table: each API key, its workspace, its current manual
-    classification, and its cost for the month.
+    classification, and its cost — so every resource can be classified.
 
-    Cost comes from persisted rows; the classification comes from the saved config
-    (``resource_classification``) so a just-made choice shows immediately, before the
-    next sync re-snapshots it onto the cost rows. ``period`` defaults to the latest
-    month with Anthropic data.
+    ``period=None`` (the Configure panel's default) lists EVERY workspace/API key
+    ever seen across the synced history, with its total cost — so a 12-month backfill
+    is fully classifiable, not just the current month. Passing a ``period`` scopes it
+    to that single month. Classification comes from the saved config
+    (``resource_classification``) so a just-made choice shows immediately.
     """
     class_map = resources.get_classifications(tenant_id, "anthropic")
+    all_time = period is None
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
-        if period is None:
-            latest = conn.execute(
-                "SELECT MAX(period) FROM inference_cost "
-                "WHERE provider = 'anthropic' AND source = 'cost_api'"
-            ).fetchone()[0]
-            start = latest or month_start(dt.date.today())
+        # Group by resource id (not name) and take the latest name, so a resource
+        # that spent across several months — or was renamed — appears exactly once.
+        if all_time:
+            rows = conn.execute(
+                """
+                SELECT workspace_id, MAX(workspace_name), api_key_id, MAX(api_key_name),
+                       SUM(amount)
+                FROM inference_cost
+                WHERE provider = 'anthropic' AND source = 'cost_api'
+                GROUP BY workspace_id, api_key_id
+                ORDER BY SUM(amount) DESC
+                """
+            ).fetchall()
+            start = None
         else:
             start = month_start(period)
-        rows = conn.execute(
-            """
-            SELECT workspace_id, workspace_name, api_key_id, api_key_name, SUM(amount)
-            FROM inference_cost
-            WHERE provider = 'anthropic' AND period = %s AND source = 'cost_api'
-            GROUP BY workspace_id, workspace_name, api_key_id, api_key_name
-            ORDER BY SUM(amount) DESC
-            """,
-            (start,),
-        ).fetchall()
+            rows = conn.execute(
+                """
+                SELECT workspace_id, MAX(workspace_name), api_key_id, MAX(api_key_name),
+                       SUM(amount)
+                FROM inference_cost
+                WHERE provider = 'anthropic' AND period = %s AND source = 'cost_api'
+                GROUP BY workspace_id, api_key_id
+                ORDER BY SUM(amount) DESC
+                """,
+                (start,),
+            ).fetchall()
 
     detail_rows: list[dict] = []
     for ws_id, ws_name, key_id, key_name, amount in rows:
@@ -784,7 +795,8 @@ def anthropic_resource_detail(tenant_id: str, period: Optional[dt.date] = None) 
 
     return {
         "provider": "anthropic",
-        "period": start.isoformat(),
+        "period": start.isoformat() if start else None,
+        "all_time": all_time,  # cost column is total across history when True
         "classifiable": True,
         "columns": {"group": "Workspace", "name": "API key"},
         "rows": detail_rows,

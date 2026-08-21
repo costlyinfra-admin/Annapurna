@@ -249,7 +249,9 @@ export interface SourceResourceRow {
 
 export interface SourceDetail {
   provider: string;
-  period?: string;
+  period?: string | null;
+  // When true, rows span all synced history and `cost` is the total across it.
+  all_time?: boolean;
   classifiable: boolean;
   columns?: { group: string; name: string };
   rows: SourceResourceRow[];
