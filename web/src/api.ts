@@ -500,7 +500,13 @@ export interface ProviderSpend {
   // Billed dollars split across token types (input / cache write / cache read /
   // output), weighted by each type's real rate. Sums to token_total.
   token_total: number;
-  by_token_type: { token_type: string; label: string; amount: number; pct: number }[];
+  by_token_type: {
+    token_type: string;
+    label: string;
+    amount: number;
+    pct: number;
+    tokens: number;
+  }[];
   workspace_total: number;
   by_workspace: {
     workspace: string;

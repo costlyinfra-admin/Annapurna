@@ -214,8 +214,8 @@ describe("Dashboard (Overview)", () => {
       by_customer: [{ customer_id: "acme", amount: 900, pct: 100, requests: 1200 }],
       token_total: 5450,
       by_token_type: [
-        { token_type: "output", label: "Output", amount: 3000, pct: 55.05 },
-        { token_type: "input", label: "Input", amount: 2450, pct: 44.95 },
+        { token_type: "output", label: "Output", amount: 3000, pct: 55.05, tokens: 300000 },
+        { token_type: "input", label: "Input", amount: 2450, pct: 44.95, tokens: 1200000 },
       ],
       workspace_total: 1250,
       by_workspace: [
@@ -250,10 +250,15 @@ describe("Dashboard (Overview)", () => {
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "this_month" }));
     expect(screen.getByText("openai")).toBeInTheDocument();
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
-    // Token-type split sits between the provider and workspace breakdowns.
+    // Token-type split sits between the provider and workspace breakdowns, and is
+    // labelled as a DERIVED split (providers don't bill per token type).
     expect(screen.getByText("Inference cost by token type")).toBeInTheDocument();
     expect(screen.getByText("Output")).toBeInTheDocument();
     expect(screen.getByText("Input")).toBeInTheDocument();
+    expect(screen.getByText("derived")).toBeInTheDocument();
+    // Provider-reported token counts show alongside the dollars.
+    expect(screen.getByText("· 300K tok")).toBeInTheDocument();
+    expect(screen.getByText("· 1.2M tok")).toBeInTheDocument();
     // Inference sub-tab also carries workspace/API-key and per-customer breakdowns.
     expect(screen.getByText("Inference cost by workspace & API key")).toBeInTheDocument();
     expect(screen.getByText("Triage WS")).toBeInTheDocument();

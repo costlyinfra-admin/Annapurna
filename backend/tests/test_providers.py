@@ -210,6 +210,77 @@ def test_openai_parses_costs():
     assert records[0].amount == Decimal("1850.00")
 
 
+def test_anthropic_usage_parses_cache_creation_by_ttl():
+    # Anthropic reports cache WRITES as a nested object keyed by cache TTL (they
+    # price differently: 5m at 1.25x input, 1h at 2x). A flat-field-only parser
+    # missed them entirely, so cache writes never showed up.
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "starting_at": "2026-08-04T00:00:00Z",
+                        "results": [
+                            {
+                                "workspace_id": "ws",
+                                "api_key_id": "k",
+                                "model": "claude-sonnet-4-6",
+                                "uncached_input_tokens": 1000,
+                                "cache_creation": {
+                                    "ephemeral_5m_input_tokens": 400,
+                                    "ephemeral_1h_input_tokens": 100,
+                                },
+                                "cache_read_input_tokens": 250,
+                                "output_tokens": 300,
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    (u,) = client.fetch_usage(dt.date(2026, 8, 1))
+    assert (u.cache_write_5m, u.cache_write_1h) == (400, 100)
+    assert u.cache_write_tokens == 500  # the total
+    # Total input = uncached + both cache writes + cache read.
+    assert u.tokens_in == 1000 + 400 + 100 + 250
+    assert u.cached_tokens_in == 250
+
+
+def test_anthropic_usage_accepts_a_flat_cache_creation_field():
+    # Simpler/older shape: one flat field, treated as the default 5-minute TTL.
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "results": [
+                            {
+                                "workspace_id": "ws",
+                                "cache_creation_input_tokens": 700,
+                                "cache_read_input_tokens": 0,
+                                "uncached_input_tokens": 300,
+                                "output_tokens": 50,
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+
+    client = AnthropicCostClient(
+        "sk-ant-admin", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    (u,) = client.fetch_usage(dt.date(2026, 8, 1))
+    assert (u.cache_write_5m, u.cache_write_1h) == (700, 0)
+    assert u.cache_write_tokens == 700
+
+
 def test_anthropic_cost_report_stamps_the_bucket_day():
     # Each daily bucket's date is captured, so cost can be persisted per day.
     def handler(request: httpx.Request) -> httpx.Response:

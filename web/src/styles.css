@@ -498,6 +498,14 @@ select {
   text-transform: capitalize;
 }
 
+/* Secondary context beside a bar's label (e.g. "1.2M tok") — kept as written. */
+.provider-bar-meta {
+  font-weight: 400;
+  text-transform: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .provider-bar-amt {
   color: var(--muted);
   white-space: nowrap;

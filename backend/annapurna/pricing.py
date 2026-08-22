@@ -141,11 +141,15 @@ CACHE_READ_MULT: dict[str, Decimal] = {
 BATCH_MULT = Decimal("0.50")
 
 
-# CACHE_WRITE_MULT is the fraction of the input rate charged to WRITE tokens into
-# the cache (cache creation) — a premium for Anthropic, no separate charge
-# elsewhere (billed as ordinary input, hence 1.0).
+# CACHE_WRITE_MULT is the multiple of the input rate charged to WRITE tokens into
+# the cache (cache creation). Anthropic prices writes by how long the entry lives:
+# a 5-minute TTL costs 1.25x input, a 1-hour TTL 2x. Providers without a separate
+# write charge bill it as ordinary input (1.0).
 CACHE_WRITE_MULT: dict[str, Decimal] = {
-    "anthropic": Decimal("1.25"),  # 5-minute cache writes cost 1.25x input
+    "anthropic": Decimal("1.25"),  # 5-minute TTL (the default)
+}
+CACHE_WRITE_1H_MULT: dict[str, Decimal] = {
+    "anthropic": Decimal("2.0"),  # 1-hour TTL
 }
 
 
@@ -156,9 +160,13 @@ def cache_read_mult(provider: Optional[str]) -> Optional[Decimal]:
     return CACHE_READ_MULT.get(provider)
 
 
-def cache_write_mult(provider: Optional[str]) -> Decimal:
-    """Cache-WRITE multiplier on the input rate (1.0 = billed as ordinary input)."""
-    return CACHE_WRITE_MULT.get(provider or "", Decimal("1"))
+def cache_write_mult(provider: Optional[str], ttl: str = "5m") -> Decimal:
+    """Cache-WRITE multiplier on the input rate, by cache TTL ("5m" or "1h").
+
+    1.0 means the provider bills writes as ordinary input.
+    """
+    table = CACHE_WRITE_1H_MULT if ttl == "1h" else CACHE_WRITE_MULT
+    return table.get(provider or "", Decimal("1"))
 
 
 def rate_in(model: str, provider: Optional[str] = None) -> Decimal:

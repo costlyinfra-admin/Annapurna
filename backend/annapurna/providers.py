@@ -50,7 +50,10 @@ class CostRecord:
     cached_tokens_in: Optional[int] = None
     # Input tokens written INTO the cache (cache creation) — billed at a premium.
     # Part of tokens_in, tracked separately for the by-token-type breakdown.
+    # Anthropic prices writes by TTL, so the 5m/1h split is kept when reported.
     cache_write_tokens: Optional[int] = None
+    cache_write_5m: Optional[int] = None
+    cache_write_1h: Optional[int] = None
 
 
 @dataclass
@@ -71,6 +74,8 @@ class UsageRecord:
     tokens_out: int = 0
     cached_tokens_in: int = 0
     cache_write_tokens: int = 0
+    cache_write_5m: int = 0
+    cache_write_1h: int = 0
     request_count: int = 0
     day: Optional[dt.date] = None  # the usage day (from the report's daily bucket)
 
@@ -87,6 +92,23 @@ def month_start(day: dt.date) -> dt.date:
 
 def next_month(start: dt.date) -> dt.date:
     return (start.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+
+
+def _cache_creation(item: dict) -> tuple[int, int]:
+    """(5-minute, 1-hour) cache-WRITE tokens from a usage/cost line item.
+
+    Anthropic reports cache creation as a nested object keyed by cache TTL
+    (``cache_creation.ephemeral_5m_input_tokens`` / ``...1h...``) because the two
+    are priced differently. Older/simpler shapes use a single flat
+    ``cache_creation_input_tokens``; that is treated as 5-minute (the default TTL).
+    """
+    cc = item.get("cache_creation")
+    if isinstance(cc, dict):
+        m5 = _int_or_none(cc.get("ephemeral_5m_input_tokens")) or 0
+        h1 = _int_or_none(cc.get("ephemeral_1h_input_tokens")) or 0
+        if m5 or h1:
+            return m5, h1
+    return (_int_or_none(item.get("cache_creation_input_tokens")) or 0, 0)
 
 
 def _bucket_day(bucket: dict, fallback: dt.date) -> dt.date:
@@ -147,6 +169,10 @@ def aggregate(records: list[CostRecord]) -> list[CostRecord]:
             agg.cached_tokens_in = (agg.cached_tokens_in or 0) + r.cached_tokens_in
         if r.cache_write_tokens is not None:
             agg.cache_write_tokens = (agg.cache_write_tokens or 0) + r.cache_write_tokens
+        if r.cache_write_5m is not None:
+            agg.cache_write_5m = (agg.cache_write_5m or 0) + r.cache_write_5m
+        if r.cache_write_1h is not None:
+            agg.cache_write_1h = (agg.cache_write_1h or 0) + r.cache_write_1h
     return list(buckets.values())
 
 
@@ -402,7 +428,8 @@ def _parse_anthropic(payload: dict, period: dt.date):
             # Cache/token fields when the report includes usage (parsed tolerantly;
             # None when absent). cache_read_input_tokens = input served from cache.
             cache_read = _int_or_none(item.get("cache_read_input_tokens"))
-            cache_write = _int_or_none(item.get("cache_creation_input_tokens"))
+            write_5m, write_1h = _cache_creation(item)
+            cache_write = (write_5m + write_1h) or None
             input_tokens = _int_or_none(item.get("input_tokens"))
             if input_tokens is None and cache_read is not None:
                 # Some reports split input; total = uncached + cache read (+ creation).
@@ -422,6 +449,8 @@ def _parse_anthropic(payload: dict, period: dt.date):
                 tokens_out=_int_or_none(item.get("output_tokens")),
                 cached_tokens_in=cache_read,
                 cache_write_tokens=cache_write,
+                cache_write_5m=write_5m or None,
+                cache_write_1h=write_1h or None,
             )
 
 
@@ -435,7 +464,8 @@ def _parse_anthropic_usage(payload: dict, period: dt.date):
             # Total input = uncached + cache-creation + cache-read; some payloads
             # instead give a single input_tokens. cache_read is tracked separately.
             cache_read = _int_or_none(item.get("cache_read_input_tokens")) or 0
-            cache_write = _int_or_none(item.get("cache_creation_input_tokens")) or 0
+            write_5m, write_1h = _cache_creation(item)
+            cache_write = write_5m + write_1h
             input_tokens = _int_or_none(item.get("input_tokens"))
             if input_tokens is None:
                 uncached = _int_or_none(item.get("uncached_input_tokens")) or 0
@@ -449,6 +479,8 @@ def _parse_anthropic_usage(payload: dict, period: dt.date):
                 tokens_out=_int_or_none(item.get("output_tokens")) or 0,
                 cached_tokens_in=cache_read,
                 cache_write_tokens=cache_write,
+                cache_write_5m=write_5m,
+                cache_write_1h=write_1h,
                 request_count=_int_or_none(item.get("request_count"))
                 or _int_or_none(item.get("num_requests"))
                 or 0,

@@ -23,6 +23,8 @@ from .providers import month_start, next_month
 #: Token types spend is split across, in display order.
 _TOKEN_TYPE_LABELS = {
     "input": "Input",
+    "cache_write_5m": "Cache write (5m)",
+    "cache_write_1h": "Cache write (1h)",
     "cache_write": "Cache write",
     "cache_read": "Cache read",
     "output": "Output",
@@ -31,7 +33,8 @@ _TOKEN_TYPE_LABELS = {
 
 
 def token_buckets_add(
-    buckets: dict,
+    dollars: dict,
+    tokens: dict,
     *,
     provider: str,
     model: Optional[str],
@@ -40,47 +43,62 @@ def token_buckets_add(
     tokens_out: int,
     cached: int,
     cache_write: int,
+    write_5m: int = 0,
+    write_1h: int = 0,
 ) -> None:
     """Split one (provider, model) group's billed dollars across its token types.
 
-    Weight each type by what it actually costs — the model's list rate times the
-    type's multiplier (cache writes at a premium, cache reads at a discount) — then
-    allocate the REAL dollars in those proportions, so the parts sum to the bill.
+    IMPORTANT — this split is DERIVED, not reported: providers bill per line item,
+    not per token type. We weight each type by what it should cost (the model's
+    list rate x the type's multiplier — cache writes at a premium that varies by
+    TTL, cache reads at a discount) and allocate the REAL billed dollars in those
+    proportions, so the parts always sum back to the bill. Token COUNTS, by
+    contrast, are reported by the provider and are exact.
+
     Unpriced models fall back to token counts; no token detail -> "unknown".
     """
     if amount <= 0:
         return
+    # Split the cache-write total into its TTL buckets when the provider reports
+    # them (they price differently); otherwise keep one undifferentiated bucket.
+    if write_5m or write_1h:
+        write_parts = {"cache_write_5m": write_5m, "cache_write_1h": write_1h}
+    else:
+        write_parts = {"cache_write": cache_write}
     # tokens_in is the TOTAL input; uncached is what's left after cache traffic.
     uncached = max(tokens_in - cached - cache_write, 0)
-    if uncached + cached + cache_write + tokens_out <= 0:
-        buckets["unknown"] += amount
+    counts = {"input": uncached, "cache_read": cached, "output": tokens_out, **write_parts}
+
+    if sum(counts.values()) <= 0:
+        dollars["unknown"] += amount
+        tokens["unknown"] = tokens.get("unknown", 0)
         return
 
     r_in = pricing.rate_in(model or "", provider)
     r_out = pricing.rate_out(model or "", provider)
     if r_in > 0 or r_out > 0:
         read_mult = pricing.cache_read_mult(provider) or Decimal("1")
-        write_mult = pricing.cache_write_mult(provider)
-        weights = {
-            "input": Decimal(uncached) * r_in,
-            "cache_write": Decimal(cache_write) * r_in * write_mult,
-            "cache_read": Decimal(cached) * r_in * read_mult,
-            "output": Decimal(tokens_out) * r_out,
+        rates = {
+            "input": r_in,
+            "cache_read": r_in * read_mult,
+            "output": r_out,
+            "cache_write": r_in * pricing.cache_write_mult(provider),
+            "cache_write_5m": r_in * pricing.cache_write_mult(provider, "5m"),
+            "cache_write_1h": r_in * pricing.cache_write_mult(provider, "1h"),
         }
+        weights = {k: Decimal(v) * rates[k] for k, v in counts.items()}
     else:  # unpriced model -> weight by raw token counts (documented fallback)
-        weights = {
-            "input": Decimal(uncached),
-            "cache_write": Decimal(cache_write),
-            "cache_read": Decimal(cached),
-            "output": Decimal(tokens_out),
-        }
+        weights = {k: Decimal(v) for k, v in counts.items()}
+
     total_w = sum(weights.values())
     if total_w <= 0:
-        buckets["unknown"] += amount
+        dollars["unknown"] += amount
         return
     for key, w in weights.items():
+        if counts[key] > 0:
+            tokens[key] = tokens.get(key, 0) + counts[key]
         if w > 0:
-            buckets[key] += amount * float(w / total_w)
+            dollars[key] += amount * float(w / total_w)
 
 
 _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
@@ -990,17 +1008,20 @@ def spend_by_provider(
             f"""
             SELECT provider, model,
                    SUM(amount), SUM(tokens_in), SUM(tokens_out),
-                   SUM(cached_tokens_in), SUM(cache_write_tokens)
+                   SUM(cached_tokens_in), SUM(cache_write_tokens),
+                   SUM(cache_write_5m_tokens), SUM(cache_write_1h_tokens)
             FROM inference_cost
             WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
             GROUP BY provider, model
             """,  # noqa: S608
             (start, end),
         ).fetchall()
-        token_buckets: dict[str, float] = defaultdict(float)
-        for prov, model, amount, t_in, t_out, t_cached, t_write in token_rows:
+        token_dollars: dict[str, float] = defaultdict(float)
+        token_counts: dict[str, int] = {}
+        for prov, model, amount, t_in, t_out, t_cached, t_write, t_5m, t_1h in token_rows:
             token_buckets_add(
-                token_buckets,
+                token_dollars,
+                token_counts,
                 provider=prov,
                 model=model,
                 amount=float(amount or 0),
@@ -1008,16 +1029,20 @@ def spend_by_provider(
                 tokens_out=int(t_out or 0),
                 cached=int(t_cached or 0),
                 cache_write=int(t_write or 0),
+                write_5m=int(t_5m or 0),
+                write_1h=int(t_1h or 0),
             )
-        token_total = sum(token_buckets.values()) or 0.0
+        token_total = sum(token_dollars.values()) or 0.0
         by_token_type = [
             {
                 "token_type": key,
                 "label": _TOKEN_TYPE_LABELS[key],
                 "amount": amt,
                 "pct": (amt / token_total * 100.0) if token_total else 0.0,
+                # Provider-reported and exact (unlike the derived dollar split).
+                "tokens": token_counts.get(key, 0),
             }
-            for key, amt in sorted(token_buckets.items(), key=lambda kv: -kv[1])
+            for key, amt in sorted(token_dollars.items(), key=lambda kv: -kv[1])
             if amt > 0
         ]
 

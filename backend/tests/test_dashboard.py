@@ -168,9 +168,10 @@ def test_spend_by_token_type_splits_billed_dollars(seeded, app_env):
         """
         INSERT INTO inference_cost
             (tenant_id, provider, model, amount, period, tokens_in, tokens_out,
-             cached_tokens_in, cache_write_tokens, source, confidence)
+             cached_tokens_in, cache_write_tokens, cache_write_5m_tokens,
+             cache_write_1h_tokens, source, confidence)
         VALUES (%s, 'anthropic', 'claude-sonnet-4-6', 100, %s,
-                1000000, 200000, 100000, 300000, 'cost_api', 'high')
+                1000000, 200000, 100000, 300000, 200000, 100000, 'cost_api', 'high')
         """,
         (seeded, dt.date(2026, 1, 1)),
     )
@@ -178,19 +179,27 @@ def test_spend_by_token_type_splits_billed_dollars(seeded, app_env):
 
     data = dashboard.spend_by_provider(seeded, start=dt.date(2026, 1, 1), end=dt.date(2026, 1, 1))
     by_type = {t["token_type"]: t for t in data["by_token_type"]}
-    assert set(by_type) == {"input", "cache_write", "cache_read", "output"}
-    # Weights: in 600k*3 = 1.8M, write 300k*3*1.25 = 1.125M, read 100k*3*0.1 = 30k,
-    # out 200k*15 = 3.0M  (units of $/Mtok x tokens) -> total 5.955M.
-    assert by_type["output"]["amount"] == pytest.approx(100 * 3.0 / 5.955, abs=0.01)
-    assert by_type["input"]["amount"] == pytest.approx(100 * 1.8 / 5.955, abs=0.01)
-    assert by_type["cache_write"]["amount"] == pytest.approx(100 * 1.125 / 5.955, abs=0.01)
-    assert by_type["cache_read"]["amount"] == pytest.approx(100 * 0.03 / 5.955, abs=0.01)
+    # Cache writes split by TTL, which price differently (5m 1.25x, 1h 2x input).
+    assert set(by_type) == {"input", "cache_write_5m", "cache_write_1h", "cache_read", "output"}
+    # Weights ($/Mtok x Mtok): in .6*3=1.8, w5m .2*3*1.25=0.75, w1h .1*3*2=0.6,
+    # read .1*3*0.1=0.03, out .2*15=3.0 -> total 6.18.
+    assert by_type["output"]["amount"] == pytest.approx(100 * 3.0 / 6.18, abs=0.01)
+    assert by_type["input"]["amount"] == pytest.approx(100 * 1.8 / 6.18, abs=0.01)
+    assert by_type["cache_write_5m"]["amount"] == pytest.approx(100 * 0.75 / 6.18, abs=0.01)
+    assert by_type["cache_write_1h"]["amount"] == pytest.approx(100 * 0.6 / 6.18, abs=0.01)
+    assert by_type["cache_read"]["amount"] == pytest.approx(100 * 0.03 / 6.18, abs=0.01)
+    # Token COUNTS come straight from the provider — exact, not derived.
+    assert by_type["input"]["tokens"] == 600_000  # 1M total input - cache traffic
+    assert by_type["cache_write_5m"]["tokens"] == 200_000
+    assert by_type["cache_write_1h"]["tokens"] == 100_000
+    assert by_type["cache_read"]["tokens"] == 100_000
+    assert by_type["output"]["tokens"] == 200_000
     # The split always reconciles with the billed dollars, and shares add to 100.
     assert data["token_total"] == pytest.approx(100.0, abs=0.01)
     assert sum(t["pct"] for t in data["by_token_type"]) == pytest.approx(100.0, abs=1e-6)
     # Output dominates -> it sorts first, and every row is labelled for the UI.
     assert data["by_token_type"][0]["token_type"] == "output"
-    assert by_type["cache_write"]["label"] == "Cache write"
+    assert by_type["cache_write_5m"]["label"] == "Cache write (5m)"
 
 
 def test_token_type_falls_back_to_unknown_without_token_detail(seeded, app_env):

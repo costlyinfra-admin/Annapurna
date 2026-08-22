@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, type ProviderSpend, type ReviewRange } from "../api";
-import { money, prettyTool } from "../format";
+import { compact, money, prettyTool } from "../format";
 import { ClassificationTrendChart } from "./ClassificationTrendChart";
 import { SpendBars } from "./SpendBars";
 import { TrendChart } from "./TrendChart";
@@ -140,14 +140,18 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
             <section className="detail-section">
               <h3 className="breakdown-subhead">Inference cost by token type</h3>
               <p className="section-sub muted">
-                Billed dollars split across input, cache writes, cache reads, and output — weighted
-                by each type&apos;s rate, so the parts sum to the {money(data.token_total)} bill.
+                Token counts are reported by the provider. The dollar split is{" "}
+                <strong>derived</strong>, not billed: providers charge per line item, not per token
+                type, so we weight each type by its published rate (cache writes cost more, and more
+                again at a 1-hour TTL; cache reads cost less) and apportion the real{" "}
+                {money(data.token_total)} bill — the parts always sum back to it.
               </p>
               <SpendBars
                 rows={data.by_token_type.map((t) => ({
                   label: t.label,
                   amount: t.amount,
                   pct: t.pct,
+                  meta: t.tokens > 0 ? `${compact(t.tokens)} tok` : undefined,
                 }))}
               />
             </section>

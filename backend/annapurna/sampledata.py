@@ -132,6 +132,8 @@ def _add_inference_cost(
     period=DEFAULT_PERIOD,
     cached_tokens_in=None,
     cache_write_tokens=None,
+    cache_write_5m=None,
+    cache_write_1h=None,
     workspace=None,
     api_key=None,
 ):
@@ -142,9 +144,10 @@ def _add_inference_cost(
         INSERT INTO inference_cost (tenant_id, feature_id, provider, model,
                                     api_key_ref, amount, period, tokens_in,
                                     tokens_out, request_count, cached_tokens_in,
-                                    cache_write_tokens, workspace_id, workspace_name,
+                                    cache_write_tokens, cache_write_5m_tokens,
+                                    cache_write_1h_tokens, workspace_id, workspace_name,
                                     api_key_id, api_key_name, source, confidence)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
@@ -159,6 +162,8 @@ def _add_inference_cost(
             requests,
             cached_tokens_in,
             cache_write_tokens,
+            cache_write_5m,
+            cache_write_1h,
             workspace,
             workspace,
             api_key,
@@ -383,6 +388,12 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         2_000_000,
         260_000,
         "high",
+        # Prompt-cached workload: some input is written into the cache (at both
+        # TTLs, which price differently) and much of it is later read back.
+        cached_tokens_in=6_000_000,
+        cache_write_tokens=2_500_000,
+        cache_write_5m=2_000_000,
+        cache_write_1h=500_000,
     )
     # Same feature, a second model — so the model breakdown/pie has >1 slice.
     _add_inference_cost(
