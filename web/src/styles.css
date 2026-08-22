@@ -2347,52 +2347,149 @@ a.exec-value:hover {
 }
 
 /* Total-spend line chart. */
-.trend-line-svg {
-  width: 100%;
-  height: 170px;
-  display: block;
+/* Line view: fixed viewBox aspect (height:auto) so overlays stay aligned. */
+.trend-line-wrap {
+  position: relative;
 }
 
+.trend-line-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+/* Light line + whisper-thin area: the data reads, the chrome recedes. */
 .trend-line-path {
   stroke: var(--accent);
-  stroke-width: 2;
+  stroke-width: 1.75;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .trend-line-area {
   fill: var(--accent);
-  opacity: 0.12;
+  opacity: 0.07;
 }
 
 .trend-line-dot {
   fill: var(--accent);
+  /* Geometry transitions keep the highlight gliding between points. */
+  transition:
+    cx 0.12s ease-out,
+    cy 0.12s ease-out,
+    r 0.12s ease-out;
 }
 
-.trend-line-tick {
-  font-size: 11px;
+.trend-line-tick,
+.trend-axis-label {
+  font-size: 13px;
   fill: var(--muted);
 }
 
-/* Hover highlight: guide line + floating amount label. */
-.trend-line-guide {
-  stroke: var(--line-strong);
+/* Dotted y-axis gridlines. */
+.trend-grid-line {
+  stroke: var(--line);
   stroke-width: 1;
-  stroke-dasharray: 3 3;
+  stroke-dasharray: 2 5;
 }
 
-.trend-line-label-bg {
-  fill: var(--accent);
+.trend-line-guide {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.5;
+  transition:
+    x1 0.12s ease-out,
+    x2 0.12s ease-out;
 }
 
 .trend-line-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
-  fill: #fff;
+  fill: var(--ink-soft);
 }
 
 .trend-line-svg rect[fill="transparent"] {
   cursor: crosshair;
+}
+
+/* Hover breakdown card — follows the highlighted point. */
+.trend-hover-card {
+  position: absolute;
+  top: 0;
+  transform: translateX(12px);
+  min-width: 190px;
+  padding: 0.55rem 0.7rem;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  z-index: 3;
+  transition: left 0.12s ease-out;
+}
+
+.trend-hover-card.flip {
+  transform: translateX(-100%) translateX(-12px);
+}
+
+.trend-hover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.trend-hover-date {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.trend-hover-total {
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-hover-sub {
+  display: block;
+  margin: 0.45rem 0 0.25rem;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.trend-hover-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.trend-hover-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+}
+
+.trend-hover-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-hover-amt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .trend-value {

@@ -168,16 +168,24 @@ def _add_inference_cost(
 
 
 def _add_inference_daily(
-    conn, tenant_id, feature_id, day, amount, environment, model="claude-sonnet-4-6"
+    conn,
+    tenant_id,
+    feature_id,
+    day,
+    amount,
+    environment,
+    model="claude-sonnet-4-6",
+    workspace=None,
 ):
     """One day-resolution inference row (inference_cost_daily) for the demo trend."""
     conn.execute(
         """
         INSERT INTO inference_cost_daily (tenant_id, feature_id, provider, model, amount,
-                                          day, environment, source, confidence)
-        VALUES (%s, %s, 'anthropic', %s, %s, %s, %s, 'cost_api', 'high')
+                                          day, workspace_id, workspace_name, environment,
+                                          source, confidence)
+        VALUES (%s, %s, 'anthropic', %s, %s, %s, %s, %s, %s, 'cost_api', 'high')
         """,
-        (tenant_id, feature_id, model, amount, day, environment),
+        (tenant_id, feature_id, model, amount, day, workspace, workspace, environment),
     )
 
 
@@ -742,7 +750,13 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         _day = DEFAULT_PERIOD.replace(day=_i + 1)
         _mult = _wave[_i % len(_wave)]
         _add_inference_daily(
-            conn, tenant_id, base["triage"], _day, round(180 * _mult, 2), "production"
+            conn,
+            tenant_id,
+            base["triage"],
+            _day,
+            round(180 * _mult, 2),
+            "production",
+            workspace="threat-triage",
         )
         _add_inference_daily(
             conn,
@@ -752,6 +766,7 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
             round(60 * _mult, 2),
             "development",
             "claude-haiku-4-5",
+            workspace="soc-copilot",
         )
 
     # Build cost recurs too — backfill a monthly build series for each base

@@ -465,6 +465,8 @@ export interface ClassificationTrendPoint {
   development: number;
   internal: number;
   unclassified: number;
+  // Where the period's spend came from (providers that expose workspace identity).
+  workspaces?: { workspace: string; amount: number }[];
 }
 
 export interface ProviderSpend {

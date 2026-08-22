@@ -159,6 +159,45 @@ def test_spend_by_provider_daily_trend(seeded, app_env):
         assert round(parts, 2) == round(p["total"], 2)
 
 
+def test_trend_points_carry_a_workspace_breakdown(seeded, app_env):
+    # Each trend point exposes where its spend came from, so the chart's hover can
+    # show a per-workspace split alongside the classification split.
+    day = dt.date(2026, 5, 6)
+    for ws, amt in [("Triage WS", 70), ("Shared WS", 30)]:
+        app_env.execute(
+            """
+            INSERT INTO inference_cost_daily
+                (tenant_id, provider, model, amount, day, workspace_id, workspace_name,
+                 environment, source, confidence)
+            VALUES (%s, 'anthropic', 'c', %s, %s, %s, %s, 'production', 'cost_api', 'high')
+            """,
+            (seeded, amt, day, ws, ws),
+        )
+        app_env.execute(
+            """
+            INSERT INTO inference_cost
+                (tenant_id, provider, model, amount, period, workspace_id, workspace_name,
+                 environment, source, confidence)
+            VALUES (%s, 'anthropic', 'c', %s, %s, %s, %s, 'production', 'cost_api', 'high')
+            """,
+            (seeded, amt, PERIOD, ws, ws),
+        )
+    app_env.commit()
+
+    data = dashboard.spend_by_provider(seeded, range_token="this_month")
+    point = next(p for p in data["daily_trend"] if p["period"] == day.isoformat())
+    assert {w["workspace"]: w["amount"] for w in point["workspaces"]} == {
+        "Triage WS": 70.0,
+        "Shared WS": 30.0,
+    }
+    # Workspace amounts reconcile with that point's total, largest first.
+    assert round(sum(w["amount"] for w in point["workspaces"]), 2) == round(point["total"], 2)
+    assert [w["workspace"] for w in point["workspaces"]] == ["Triage WS", "Shared WS"]
+    # The monthly trend carries the same split.
+    m = next(p for p in data["trend"] if p["period"] == PERIOD.isoformat())
+    assert {w["workspace"] for w in m["workspaces"]} == {"Triage WS", "Shared WS"}
+
+
 def test_spend_by_provider_workspace_api_key_breakdown(seeded, app_env):
     # Anthropic rows carry workspace/api_key identity; the By provider tab rolls it
     # up into a workspace -> API key breakdown that reconciles to the inference total.

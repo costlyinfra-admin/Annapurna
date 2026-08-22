@@ -775,7 +775,42 @@ def spend_by_provider(
             entry["total"] += amt
             bucket = env if env in _CLASSIFICATION_BUCKETS else "unclassified"
             entry[bucket] += amt
+
+        # Per-day workspace split, attached to each point so the chart's hover can
+        # show WHERE a day's spend came from alongside what kind it was.
+        for d, ws, amount in conn.execute(
+            f"""
+            SELECT day, COALESCE(workspace_name, workspace_id) AS ws, SUM(amount)
+            FROM inference_cost_daily
+            WHERE day >= %s AND day < %s AND {_ACTIVE_ENV}
+              AND (workspace_id IS NOT NULL OR workspace_name IS NOT NULL)
+            GROUP BY day, ws ORDER BY day, SUM(amount) DESC
+            """,  # noqa: S608
+            (start, next_month(end)),
+        ).fetchall():
+            entry = daily_by_day.get(d.isoformat())
+            if entry is not None:
+                entry.setdefault("workspaces", []).append(
+                    {"workspace": ws, "amount": float(amount)}
+                )
         daily_trend = sorted(daily_by_day.values(), key=lambda t: t["period"])
+
+        # Same workspace split for the MONTHLY trend points.
+        for p, ws, amount in conn.execute(
+            f"""
+            SELECT period, COALESCE(workspace_name, workspace_id) AS ws, SUM(amount)
+            FROM inference_cost
+            WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
+              AND (workspace_id IS NOT NULL OR workspace_name IS NOT NULL)
+            GROUP BY period, ws ORDER BY period, SUM(amount) DESC
+            """,  # noqa: S608
+            (start, end),
+        ).fetchall():
+            entry = trend_by_period.get(p.isoformat())
+            if entry is not None:
+                entry.setdefault("workspaces", []).append(
+                    {"workspace": ws, "amount": float(amount)}
+                )
 
         # ---- Build: by coding tool + trend (kept separate from inference) ----
         tool_rows = conn.execute(

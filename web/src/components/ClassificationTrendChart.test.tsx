@@ -26,6 +26,10 @@ const DAILY = [
     development: 90,
     internal: 0,
     unclassified: 119,
+    workspaces: [
+      { workspace: "automations", amount: 150 },
+      { workspace: "mcs-dev", amount: 59 },
+    ],
   },
 ];
 
@@ -61,16 +65,46 @@ describe("ClassificationTrendChart", () => {
     expect(document.querySelector(".trend-line-path")).not.toBeNull();
   });
 
-  it("shows the point's amount as the cursor moves along the line", () => {
+  it("shows a breakdown card as the cursor moves along the line", () => {
     render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
     fireEvent.click(screen.getByRole("button", { name: "Line" }));
-    // Idle: the peak's amount is labelled ($209, whole dollars).
+    // Idle: the peak's amount is labelled in-chart ($209, whole dollars).
     expect(document.querySelector(".trend-line-label")?.textContent).toBe("$209");
-    // Hovering the second day's band shows that day's amount ($74, not $74.16).
+
+    // Hovering a band opens the card for that point, with its date and total.
     const bands = document.querySelectorAll('.trend-line-svg rect[fill="transparent"]');
     fireEvent.mouseEnter(bands[1]);
-    expect(document.querySelector(".trend-line-label")?.textContent).toBe("$74");
-    // A guide line appears while hovering.
+    const card = document.querySelector(".trend-hover-card");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("Aug 2, 2026");
+    expect(card?.textContent).toContain("$74.16");
+    // A guide line tracks the highlighted point.
     expect(document.querySelector(".trend-line-guide")).not.toBeNull();
+  });
+
+  it("breaks the hovered point down by classification and workspace", () => {
+    render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
+    fireEvent.click(screen.getByRole("button", { name: "Line" }));
+    const bands = document.querySelectorAll('.trend-line-svg rect[fill="transparent"]');
+    fireEvent.mouseEnter(bands[2]); // the day with both buckets + workspaces
+
+    const card = document.querySelector(".trend-hover-card")!;
+    // Classification split (only non-zero buckets).
+    expect(card.textContent).toContain("Dev / Test");
+    expect(card.textContent).toContain("Unclassified");
+    expect(card.textContent).not.toContain("Internal");
+    // Workspace split for the same point.
+    expect(card.textContent).toContain("By workspace");
+    expect(card.textContent).toContain("automations");
+    expect(card.textContent).toContain("mcs-dev");
+  });
+
+  it("draws a dollar y-axis with gridlines", () => {
+    render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
+    fireEvent.click(screen.getByRole("button", { name: "Line" }));
+    // Dotted gridlines with whole-dollar axis labels, topped by a "nice" ceiling.
+    expect(document.querySelectorAll(".trend-grid-line").length).toBe(5);
+    const labels = [...document.querySelectorAll(".trend-axis-label")].map((e) => e.textContent);
+    expect(labels).toEqual(["$0", "$63", "$125", "$188", "$250"]); // ceiling above $209
   });
 });
