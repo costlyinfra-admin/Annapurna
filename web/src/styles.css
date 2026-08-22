@@ -1295,6 +1295,17 @@ a.pr-ref:hover {
   cursor: default;
 }
 
+/* Spins while a refresh is pulling from providers. */
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.icon-button.spinning svg {
+  animation: icon-spin 0.9s linear infinite;
+}
+
 /* Review-period selector. */
 .period-controls {
   display: flex;

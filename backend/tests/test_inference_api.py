@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 from annapurna import inference
 from annapurna.api import create_app
-from annapurna.providers import CostRecord
+from annapurna.providers import CostRecord, ProviderError
 from fastapi.testclient import TestClient
 
 PASSWORD = "correct horse battery"
@@ -222,3 +222,44 @@ def test_connect_map_ingest_summary(client):
     assert by_name["AI threat triage"]["confidence"] == "high"
     assert view["unattributed"] == 760.0  # shared key landed in Unattributed
     assert view["by_provider"]["anthropic"] == 4960.0  # matches the provider total
+
+
+class _FlakyProvider:
+    """Anthropic works; OpenAI's key is rejected — the refresh must report both."""
+
+    def __init__(self, provider):
+        self.provider = provider
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def fetch_costs(self, period):
+        if self.provider == "openai":
+            raise ProviderError("Provider rejected the admin key (401).", 401)
+        return [CostRecord("anthropic", dt.date.today(), Decimal("125.00"), api_key_ref="k")]
+
+
+def test_refresh_syncs_every_connected_inference_provider(client, monkeypatch):
+    monkeypatch.setattr(
+        inference, "_make_cost_client", lambda provider, key: _FlakyProvider(provider)
+    )
+    client.post("/api/connectors/anthropic/credential", json={"secret": "sk-ant-admin"})
+    client.post("/api/connectors/openai/credential", json={"secret": "sk-openai-admin"})
+
+    out = client.post("/api/inference/refresh").json()
+
+    # Both connected providers were attempted; the good one landed real dollars...
+    assert out["providers"] == 2
+    assert {s["provider"]: s["total"] for s in out["synced"]} == {"anthropic": 125.0}
+    assert out["total"] == 125.0
+    # ...and the broken one is reported, not swallowed.
+    assert [e["provider"] for e in out["errors"]] == ["openai"]
+    assert "401" in out["errors"][0]["error"]
+
+
+def test_refresh_with_nothing_connected_is_a_no_op(client):
+    out = client.post("/api/inference/refresh").json()
+    assert out == {"providers": 0, "synced": [], "errors": [], "total": 0.0}

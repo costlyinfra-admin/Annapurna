@@ -7,7 +7,10 @@ import { Dashboard } from "./Dashboard";
 
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { me: vi.fn(), dashboard: vi.fn(), providerSpend: vi.fn() } };
+  return {
+    ...actual,
+    api: { me: vi.fn(), dashboard: vi.fn(), providerSpend: vi.fn(), refreshInference: vi.fn() },
+  };
 });
 
 const TRIAGE = {
@@ -65,6 +68,12 @@ describe("Dashboard (Overview)", () => {
       org_name: "Transilience AI",
     });
     vi.mocked(api.dashboard).mockResolvedValue(DATA);
+    vi.mocked(api.refreshInference).mockResolvedValue({
+      providers: 1,
+      synced: [{ provider: "anthropic", total: 4960 }],
+      errors: [],
+      total: 4960,
+    });
   });
 
   it("shows build and inference as separate columns, plus the Unattributed row", async () => {
@@ -368,6 +377,22 @@ describe("Dashboard (Overview)", () => {
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledTimes(2));
   });
 
+  it("reports a provider that could not be refreshed", async () => {
+    vi.mocked(api.refreshInference).mockResolvedValue({
+      providers: 2,
+      synced: [{ provider: "anthropic", total: 100 }],
+      errors: [{ provider: "openai", error: "Provider rejected the admin key (401)." }],
+      total: 100,
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh data and alerts" }));
+    // The failure is surfaced, not swallowed behind unchanged numbers.
+    expect(
+      await screen.findByText(/Could not refresh openai \(Provider rejected/),
+    ).toBeInTheDocument();
+  });
+
   it("shows a short local timestamp for the last refresh", async () => {
     renderDashboard();
     await screen.findByText("Key insights");
@@ -384,7 +409,9 @@ describe("Dashboard (Overview)", () => {
     expect(api.dashboard).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh data and alerts" }));
-    // Re-fetches the dashboard and fires the alerts-refresh window event.
+    // Pulls fresh cost from connected providers, then re-reads the dashboard and
+    // fires the alerts-refresh window event.
+    await waitFor(() => expect(api.refreshInference).toHaveBeenCalled());
     await waitFor(() => expect(api.dashboard).toHaveBeenCalledTimes(2));
     expect(dispatch.mock.calls.some(([e]) => e.type === "annapurna:refresh-alerts")).toBe(true);
   });

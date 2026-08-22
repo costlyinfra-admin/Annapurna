@@ -65,6 +65,8 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -87,11 +89,29 @@ export function Dashboard() {
     };
   }, [range, refreshKey]);
 
-  // Refresh everything the Overview shows — its cost data and the alerts badge
-  // (owned by the app shell, signalled via a window event).
-  const refreshAll = () => {
-    setRefreshKey((k) => k + 1);
-    window.dispatchEvent(new Event(REFRESH_ALERTS_EVENT));
+  // Refresh = pull fresh cost from every connected inference provider (current
+  // month), then re-read everything the Overview shows plus the alerts badge
+  // (owned by the app shell, signalled via a window event). A provider that fails
+  // is reported rather than silently leaving stale numbers on screen.
+  const refreshAll = async () => {
+    setRefreshing(true);
+    setRefreshNote(null);
+    try {
+      const r = await api.refreshInference();
+      if (r.errors.length > 0) {
+        setRefreshNote(
+          `Could not refresh ${r.errors.map((e) => `${e.provider} (${e.error})`).join("; ")}`,
+        );
+      }
+    } catch (err) {
+      setRefreshNote(
+        err instanceof ApiError ? err.message : "Could not pull fresh cost from providers.",
+      );
+    } finally {
+      setRefreshing(false);
+      setRefreshKey((k) => k + 1); // re-read regardless, so alerts/stored cost update
+      window.dispatchEvent(new Event(REFRESH_ALERTS_EVENT));
+    }
   };
 
   const hasFeatures = !!data && data.features.length > 0;
@@ -110,11 +130,11 @@ export function Dashboard() {
           )}
           <button
             type="button"
-            className="icon-button"
+            className={refreshing ? "icon-button spinning" : "icon-button"}
             onClick={refreshAll}
-            disabled={data === null}
+            disabled={data === null || refreshing}
             aria-label="Refresh data and alerts"
-            title="Refresh data and alerts"
+            title="Pull fresh cost from connected providers, then reload"
           >
             <RefreshIcon />
           </button>
@@ -124,6 +144,12 @@ export function Dashboard() {
       {error && (
         <p className="error" role="alert">
           {error}
+        </p>
+      )}
+
+      {refreshNote && (
+        <p className="error" role="alert">
+          {refreshNote}
         </p>
       )}
 

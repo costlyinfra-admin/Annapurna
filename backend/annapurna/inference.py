@@ -196,9 +196,7 @@ def _insert_daily(
 ) -> None:
     """Persist one day-resolution inference-cost row (the additive daily table)."""
     conn.execute(
-        f"INSERT INTO inference_cost_daily ({_DAILY_COLS}) VALUES ("
-        + ", ".join(["%s"] * 22)
-        + ")",
+        f"INSERT INTO inference_cost_daily ({_DAILY_COLS}) VALUES (" + ", ".join(["%s"] * 22) + ")",
         (
             tenant_id,
             feature_id,
@@ -233,6 +231,45 @@ def _delete_daily(conn, provider: str, start: dt.date, source: str) -> None:
         "WHERE provider = %s AND day >= %s AND day < %s AND source = %s",
         (provider, start, next_month(start), source),
     )
+
+
+def sync_connected(tenant_id: str, period: Optional[dt.date] = None) -> dict:
+    """Ingest the CURRENT month for every connected inference provider.
+
+    Backs the Overview's refresh control: one call pulls fresh cost from each
+    provider the tenant has connected, rather than only re-reading what is already
+    stored. Deliberately single-month (fast); the 12-month backfill stays behind
+    "Sync now" on Cost sources and the nightly cron.
+
+    Resilient per provider — one bad credential never blocks the others; every
+    failure is returned so the UI can show it instead of silently doing nothing.
+    """
+    period = period or dt.date.today()  # the ingest path needs a concrete month
+    statuses = credentials.connector_statuses(tenant_id)
+    providers = [c["type"] for c in statuses if c["category"] == "inference" and c["connected"]]
+    synced: list[dict] = []
+    errors: list[dict] = []
+    total = 0.0
+    for provider in providers:
+        admin_key = credentials.get_secret(tenant_id, provider)
+        if not admin_key:  # credential vanished between listing and use
+            continue
+        try:
+            summary = run_inference_ingest(tenant_id, provider, period, admin_key)
+        except Exception as exc:  # noqa: BLE001 — report per provider, keep going
+            logging.getLogger("annapurna.ingest").warning(
+                "refresh sync failed for %s: %s", provider, exc
+            )
+            errors.append({"provider": provider, "error": str(exc)[:200]})
+            continue
+        synced.append({"provider": provider, "total": summary["total"]})
+        total += summary["total"]
+    return {
+        "providers": len(providers),
+        "synced": synced,
+        "errors": errors,
+        "total": total,
+    }
 
 
 def ingest_records(

@@ -841,6 +841,16 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return build.allocate_and_store(user["tenant_id"], spends, period)
 
+    @app.post("/api/inference/refresh")
+    def refresh_inference(user: CurrentUser) -> dict:
+        """Pull the CURRENT month from every connected inference provider.
+
+        Backs the Overview's refresh control, so it updates real cost instead of
+        only re-reading stored rows. Single-month for speed; per-provider failures
+        come back in `errors` rather than failing the whole refresh.
+        """
+        return inference.sync_connected(user["tenant_id"])
+
     @app.get("/api/build/summary")
     def build_summary(
         user: CurrentUser,

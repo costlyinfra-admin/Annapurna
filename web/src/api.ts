@@ -738,6 +738,15 @@ export const api = {
       body: JSON.stringify({ provider, period, months }),
     }),
 
+  /** Pull the current month from every connected inference provider. */
+  refreshInference: () =>
+    request<{
+      providers: number;
+      synced: { provider: string; total: number }[];
+      errors: { provider: string; error: string }[];
+      total: number;
+    }>("/inference/refresh", { method: "POST" }),
+
   sourceDetail: (provider: string, period?: string) =>
     request<SourceDetail>(`/cost-sources/${provider}/detail${period ? `?period=${period}` : ""}`),
 
