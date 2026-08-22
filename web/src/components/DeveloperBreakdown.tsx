@@ -11,7 +11,14 @@ import { money, prettyTool } from "../format";
 import { SpendBars } from "./SpendBars";
 import { TrendChart } from "./TrendChart";
 
-export function DeveloperBreakdown({ range }: { range: ReviewRange }) {
+export function DeveloperBreakdown({
+  range,
+  refreshKey = 0,
+}: {
+  range: ReviewRange;
+  /** Bumped by the Overview's refresh control to re-pull this breakdown. */
+  refreshKey?: number;
+}) {
   const [data, setData] = useState<ProviderSpend | null>(null);
 
   useEffect(() => {
@@ -24,7 +31,7 @@ export function DeveloperBreakdown({ range }: { range: ReviewRange }) {
     return () => {
       active = false;
     };
-  }, [range]);
+  }, [range, refreshKey]);
 
   return (
     <>

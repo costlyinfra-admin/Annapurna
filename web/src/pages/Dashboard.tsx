@@ -47,6 +47,16 @@ function fmtRange(startIso: string, endIso: string): string {
   return startIso === endIso ? fmt(startIso) : `${fmt(startIso)} – ${fmt(endIso)}`;
 }
 
+/** "Aug 22, 4:07 PM" — short, local, no seconds. */
+function shortStamp(d: Date): string {
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<OverviewTab>("features");
@@ -96,9 +106,7 @@ export function Dashboard() {
         <h1>Overview</h1>
         <div className="last-updated">
           {loadedAt && (
-            <span className="muted last-updated-text">
-              Last updated {loadedAt.toLocaleString()}
-            </span>
+            <span className="muted last-updated-text">Updated {shortStamp(loadedAt)}</span>
           )}
           <button
             type="button"
@@ -280,9 +288,9 @@ export function Dashboard() {
         </p>
       )}
 
-      {data && tab === "providers" && <ProviderBreakdown range={range} />}
+      {data && tab === "providers" && <ProviderBreakdown range={range} refreshKey={refreshKey} />}
 
-      {data && tab === "developers" && <DeveloperBreakdown range={range} />}
+      {data && tab === "developers" && <DeveloperBreakdown range={range} refreshKey={refreshKey} />}
     </div>
   );
 }

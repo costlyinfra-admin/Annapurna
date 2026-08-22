@@ -337,6 +337,46 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
   });
 
+  it("re-pulls the provider/developer breakdowns on refresh", async () => {
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      start: "2026-05-01",
+      end: "2026-05-01",
+      total: 0,
+      by_provider: [],
+      trend: [],
+      daily_trend: [],
+      build_total: 0,
+      build_by_tool: [],
+      build_by_developer: [],
+      build_trend: [],
+      customer_total: 0,
+      by_customer: [],
+      token_total: 0,
+      by_token_type: [],
+      workspace_total: 0,
+      by_workspace: [],
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+
+    // The inference/build breakdowns live on the By provider tab.
+    fireEvent.click(screen.getByRole("tab", { name: "By provider" }));
+    await waitFor(() => expect(api.providerSpend).toHaveBeenCalledTimes(1));
+
+    // Refresh must re-pull them too — not just the summary tiles.
+    fireEvent.click(screen.getByRole("button", { name: "Refresh data and alerts" }));
+    await waitFor(() => expect(api.providerSpend).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a short local timestamp for the last refresh", async () => {
+    renderDashboard();
+    await screen.findByText("Key insights");
+    // "Updated Aug 22, 4:07 PM" — no year, no seconds.
+    expect(
+      screen.getByText(/^Updated [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/),
+    ).toBeInTheDocument();
+  });
+
   it("refreshes data and signals an alerts refresh when the refresh button is clicked", async () => {
     const dispatch = vi.spyOn(window, "dispatchEvent");
     renderDashboard();

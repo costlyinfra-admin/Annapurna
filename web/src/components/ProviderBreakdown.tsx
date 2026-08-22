@@ -30,7 +30,14 @@ const EMPTY: ProviderSpend = {
   by_workspace: [],
 };
 
-export function ProviderBreakdown({ range }: { range: ReviewRange }) {
+export function ProviderBreakdown({
+  range,
+  refreshKey = 0,
+}: {
+  range: ReviewRange;
+  /** Bumped by the Overview's refresh control to re-pull this breakdown. */
+  refreshKey?: number;
+}) {
   const [data, setData] = useState<ProviderSpend | null>(null);
   const [sourceTab, setSourceTab] = useState<"inference" | "build">("inference");
 
@@ -44,7 +51,7 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
     return () => {
       active = false;
     };
-  }, [range]);
+  }, [range, refreshKey]);
 
   const nothing = data && data.by_provider.length === 0 && data.build_by_tool.length === 0;
   // Use the day-resolution trend for short ranges (a single month), the monthly
