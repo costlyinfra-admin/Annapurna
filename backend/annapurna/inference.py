@@ -162,7 +162,7 @@ def run_inference_backfill(
 
 _DAILY_COLS = (
     "tenant_id, feature_id, provider, model, api_key_ref, amount, currency, day, "
-    "tokens_in, tokens_out, request_count, cached_tokens_in, workspace_id, "
+    "tokens_in, tokens_out, request_count, cached_tokens_in, cache_write_tokens, workspace_id, "
     "workspace_name, api_key_id, api_key_name, environment, source, confidence"
 )
 
@@ -184,6 +184,7 @@ def _insert_daily(
     tokens_out=None,
     request_count=None,
     cached_tokens_in=None,
+    cache_write_tokens=None,
     workspace_id=None,
     workspace_name=None,
     api_key_id=None,
@@ -193,7 +194,7 @@ def _insert_daily(
     """Persist one day-resolution inference-cost row (the additive daily table)."""
     conn.execute(
         f"INSERT INTO inference_cost_daily ({_DAILY_COLS}) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             tenant_id,
             feature_id,
@@ -207,6 +208,7 @@ def _insert_daily(
             tokens_out,
             request_count,
             cached_tokens_in,
+            cache_write_tokens,
             workspace_id,
             workspace_name,
             api_key_id,
@@ -267,6 +269,7 @@ def ingest_records(
                 tokens_out=record.tokens_out,
                 request_count=record.request_count,
                 cached_tokens_in=record.cached_tokens_in,
+                cache_write_tokens=record.cache_write_tokens,
                 source="cost_api",
                 confidence=confidence,
             )
@@ -280,8 +283,8 @@ def ingest_records(
                 INSERT INTO inference_cost
                     (tenant_id, feature_id, provider, model, api_key_ref, amount, currency,
                      period, tokens_in, tokens_out, request_count, cached_tokens_in,
-                     source, confidence)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cost_api', %s)
+                     cache_write_tokens, source, confidence)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cost_api', %s)
                 """,
                 (
                     tenant_id,
@@ -296,6 +299,7 @@ def ingest_records(
                     record.tokens_out,
                     record.request_count,
                     record.cached_tokens_in,
+                    record.cache_write_tokens,
                     confidence,
                 ),
             )
@@ -401,9 +405,9 @@ def _insert_anthropic_row(
         INSERT INTO inference_cost
             (tenant_id, feature_id, provider, model, api_key_ref, amount, currency,
              period, tokens_in, tokens_out, request_count, cached_tokens_in,
-             workspace_id, workspace_name, api_key_id, api_key_name, environment,
-             source, confidence)
-        VALUES (%s, %s, 'anthropic', %s, %s, %s, 'USD', %s, %s, %s, %s, %s,
+             cache_write_tokens, workspace_id, workspace_name, api_key_id, api_key_name,
+             environment, source, confidence)
+        VALUES (%s, %s, 'anthropic', %s, %s, %s, 'USD', %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s)
         """,
         (
@@ -417,6 +421,7 @@ def _insert_anthropic_row(
             row.tokens_out or None,
             row.request_count or None,
             row.cached_tokens_in or None,
+            row.cache_write_tokens or None,
             workspace_id,
             workspace_name,
             row.api_key_id,
@@ -492,6 +497,7 @@ def _anthropic_daily_rows(cost_records, usage_records, class_map, maps, workspac
             agg.tokens_in += u.tokens_in
             agg.tokens_out += u.tokens_out
             agg.cached_tokens_in += u.cached_tokens_in
+            agg.cache_write_tokens += u.cache_write_tokens
             agg.request_count += u.request_count
 
     out: list[dict] = []
@@ -516,6 +522,7 @@ def _anthropic_daily_rows(cost_records, usage_records, class_map, maps, workspac
                             "tokens_out": row.tokens_out or None,
                             "request_count": row.request_count or None,
                             "cached_tokens_in": row.cached_tokens_in or None,
+                            "cache_write_tokens": row.cache_write_tokens or None,
                             "workspace_id": ws_id,
                             "workspace_name": workspaces.get(ws_id),
                             "api_key_id": row.api_key_id,
@@ -607,12 +614,14 @@ def ingest_anthropic(
                 tokens_in=u.tokens_in,
                 tokens_out=u.tokens_out,
                 cached_tokens_in=u.cached_tokens_in,
+                cache_write_tokens=u.cache_write_tokens,
                 request_count=u.request_count,
             )
         else:
             agg.tokens_in += u.tokens_in
             agg.tokens_out += u.tokens_out
             agg.cached_tokens_in += u.cached_tokens_in
+            agg.cache_write_tokens += u.cache_write_tokens
             agg.request_count += u.request_count
 
     by_env: dict[str, Decimal] = {}

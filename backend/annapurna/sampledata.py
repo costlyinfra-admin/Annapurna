@@ -131,6 +131,7 @@ def _add_inference_cost(
     source="cost_api",
     period=DEFAULT_PERIOD,
     cached_tokens_in=None,
+    cache_write_tokens=None,
     workspace=None,
     api_key=None,
 ):
@@ -141,9 +142,9 @@ def _add_inference_cost(
         INSERT INTO inference_cost (tenant_id, feature_id, provider, model,
                                     api_key_ref, amount, period, tokens_in,
                                     tokens_out, request_count, cached_tokens_in,
-                                    workspace_id, workspace_name, api_key_id, api_key_name,
-                                    source, confidence)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    cache_write_tokens, workspace_id, workspace_name,
+                                    api_key_id, api_key_name, source, confidence)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
@@ -157,6 +158,7 @@ def _add_inference_cost(
             tokens_out,
             requests,
             cached_tokens_in,
+            cache_write_tokens,
             workspace,
             workspace,
             api_key,
@@ -413,6 +415,7 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         60_000,
         "med",
         cached_tokens_in=720_000,
+        cache_write_tokens=240_000,
     )
     _add_inference_cost(
         conn,

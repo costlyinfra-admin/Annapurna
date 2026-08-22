@@ -141,11 +141,24 @@ CACHE_READ_MULT: dict[str, Decimal] = {
 BATCH_MULT = Decimal("0.50")
 
 
+# CACHE_WRITE_MULT is the fraction of the input rate charged to WRITE tokens into
+# the cache (cache creation) — a premium for Anthropic, no separate charge
+# elsewhere (billed as ordinary input, hence 1.0).
+CACHE_WRITE_MULT: dict[str, Decimal] = {
+    "anthropic": Decimal("1.25"),  # 5-minute cache writes cost 1.25x input
+}
+
+
 def cache_read_mult(provider: Optional[str]) -> Optional[Decimal]:
     """Cache-read discount multiplier for a provider, or None if it isn't priced."""
     if provider is None:
         return None
     return CACHE_READ_MULT.get(provider)
+
+
+def cache_write_mult(provider: Optional[str]) -> Decimal:
+    """Cache-WRITE multiplier on the input rate (1.0 = billed as ordinary input)."""
+    return CACHE_WRITE_MULT.get(provider or "", Decimal("1"))
 
 
 def rate_in(model: str, provider: Optional[str] = None) -> Decimal:
@@ -154,6 +167,14 @@ def rate_in(model: str, provider: Optional[str] = None) -> Decimal:
     if rates is None:
         return Decimal("0")
     return Decimal(rates[0]) / _MILLION
+
+
+def rate_out(model: str, provider: Optional[str] = None) -> Decimal:
+    """USD per single output token for (model, provider), or 0 if unpriced."""
+    rates = _rates(model, provider)
+    if rates is None:
+        return Decimal("0")
+    return Decimal(rates[1]) / _MILLION
 
 
 def _rates(model: str, provider: Optional[str]) -> Optional[tuple[str, str]]:

@@ -497,6 +497,10 @@ export interface ProviderSpend {
   build_trend: { period: string; amount: number }[];
   customer_total: number;
   by_customer: { customer_id: string; amount: number; pct: number; requests: number | null }[];
+  // Billed dollars split across token types (input / cache write / cache read /
+  // output), weighted by each type's real rate. Sums to token_total.
+  token_total: number;
+  by_token_type: { token_type: string; label: string; amount: number; pct: number }[];
   workspace_total: number;
   by_workspace: {
     workspace: string;

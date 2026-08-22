@@ -212,6 +212,11 @@ describe("Dashboard (Overview)", () => {
       build_trend: [{ period: "2026-05-01", amount: 270 }],
       customer_total: 900,
       by_customer: [{ customer_id: "acme", amount: 900, pct: 100, requests: 1200 }],
+      token_total: 5450,
+      by_token_type: [
+        { token_type: "output", label: "Output", amount: 3000, pct: 55.05 },
+        { token_type: "input", label: "Input", amount: 2450, pct: 44.95 },
+      ],
       workspace_total: 1250,
       by_workspace: [
         {
@@ -245,6 +250,10 @@ describe("Dashboard (Overview)", () => {
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "this_month" }));
     expect(screen.getByText("openai")).toBeInTheDocument();
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
+    // Token-type split sits between the provider and workspace breakdowns.
+    expect(screen.getByText("Inference cost by token type")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
+    expect(screen.getByText("Input")).toBeInTheDocument();
     // Inference sub-tab also carries workspace/API-key and per-customer breakdowns.
     expect(screen.getByText("Inference cost by workspace & API key")).toBeInTheDocument();
     expect(screen.getByText("Triage WS")).toBeInTheDocument();
@@ -305,6 +314,8 @@ describe("Dashboard (Overview)", () => {
       build_trend: [{ period: "2026-05-01", amount: 270 }],
       customer_total: 0,
       by_customer: [],
+      token_total: 0,
+      by_token_type: [],
       workspace_total: 0,
       by_workspace: [],
     });

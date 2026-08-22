@@ -2,7 +2,7 @@
  * Overview "By provider" tab — tenant-wide spend by source over the Overview's
  * selected review period. Inference (run) and build cost never blend (invariant 2),
  * so they live on two sub-tabs here: Inference cost (default — by provider, by
- * workspace/API key, by customer) and Build cost (by coding tool).
+ * token type, by workspace/API key, by customer) and Build cost (by coding tool).
  */
 import { useEffect, useState } from "react";
 import { api, type ProviderSpend, type ReviewRange } from "../api";
@@ -24,6 +24,8 @@ const EMPTY: ProviderSpend = {
   build_trend: [],
   customer_total: 0,
   by_customer: [],
+  token_total: 0,
+  by_token_type: [],
   workspace_total: 0,
   by_workspace: [],
 };
@@ -132,6 +134,24 @@ export function ProviderBreakdown({ range }: { range: ReviewRange }) {
               </div>
             )}
           </section>
+
+          {/* What KIND of tokens the spend went on. */}
+          {data.by_token_type.length > 0 && (
+            <section className="detail-section">
+              <h3 className="breakdown-subhead">Inference cost by token type</h3>
+              <p className="section-sub muted">
+                Billed dollars split across input, cache writes, cache reads, and output — weighted
+                by each type&apos;s rate, so the parts sum to the {money(data.token_total)} bill.
+              </p>
+              <SpendBars
+                rows={data.by_token_type.map((t) => ({
+                  label: t.label,
+                  amount: t.amount,
+                  pct: t.pct,
+                }))}
+              />
+            </section>
+          )}
 
           {/* Provider resource identity (today: Anthropic workspaces + API keys). */}
           {data.by_workspace.length > 0 && (

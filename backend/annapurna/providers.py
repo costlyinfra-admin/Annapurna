@@ -48,6 +48,9 @@ class CostRecord:
     # Input tokens served from the provider's prompt cache (opt spec §8). None when
     # the provider doesn't report it; used for connector-only cache utilization.
     cached_tokens_in: Optional[int] = None
+    # Input tokens written INTO the cache (cache creation) — billed at a premium.
+    # Part of tokens_in, tracked separately for the by-token-type breakdown.
+    cache_write_tokens: Optional[int] = None
 
 
 @dataclass
@@ -67,6 +70,7 @@ class UsageRecord:
     tokens_in: int = 0
     tokens_out: int = 0
     cached_tokens_in: int = 0
+    cache_write_tokens: int = 0
     request_count: int = 0
     day: Optional[dt.date] = None  # the usage day (from the report's daily bucket)
 
@@ -141,6 +145,8 @@ def aggregate(records: list[CostRecord]) -> list[CostRecord]:
         agg.request_count = (agg.request_count or 0) + (r.request_count or 0)
         if r.cached_tokens_in is not None:
             agg.cached_tokens_in = (agg.cached_tokens_in or 0) + r.cached_tokens_in
+        if r.cache_write_tokens is not None:
+            agg.cache_write_tokens = (agg.cache_write_tokens or 0) + r.cache_write_tokens
     return list(buckets.values())
 
 
@@ -396,12 +402,12 @@ def _parse_anthropic(payload: dict, period: dt.date):
             # Cache/token fields when the report includes usage (parsed tolerantly;
             # None when absent). cache_read_input_tokens = input served from cache.
             cache_read = _int_or_none(item.get("cache_read_input_tokens"))
+            cache_write = _int_or_none(item.get("cache_creation_input_tokens"))
             input_tokens = _int_or_none(item.get("input_tokens"))
             if input_tokens is None and cache_read is not None:
                 # Some reports split input; total = uncached + cache read (+ creation).
                 uncached = _int_or_none(item.get("uncached_input_tokens")) or 0
-                creation = _int_or_none(item.get("cache_creation_input_tokens")) or 0
-                input_tokens = uncached + creation + cache_read
+                input_tokens = uncached + (cache_write or 0) + cache_read
             yield CostRecord(
                 provider="anthropic",
                 period=day,
@@ -415,6 +421,7 @@ def _parse_anthropic(payload: dict, period: dt.date):
                 tokens_in=input_tokens,
                 tokens_out=_int_or_none(item.get("output_tokens")),
                 cached_tokens_in=cache_read,
+                cache_write_tokens=cache_write,
             )
 
 
@@ -428,11 +435,11 @@ def _parse_anthropic_usage(payload: dict, period: dt.date):
             # Total input = uncached + cache-creation + cache-read; some payloads
             # instead give a single input_tokens. cache_read is tracked separately.
             cache_read = _int_or_none(item.get("cache_read_input_tokens")) or 0
+            cache_write = _int_or_none(item.get("cache_creation_input_tokens")) or 0
             input_tokens = _int_or_none(item.get("input_tokens"))
             if input_tokens is None:
                 uncached = _int_or_none(item.get("uncached_input_tokens")) or 0
-                creation = _int_or_none(item.get("cache_creation_input_tokens")) or 0
-                input_tokens = uncached + creation + cache_read
+                input_tokens = uncached + cache_write + cache_read
             yield UsageRecord(
                 workspace_id=item.get("workspace_id"),
                 api_key_id=item.get("api_key_id"),
@@ -441,6 +448,7 @@ def _parse_anthropic_usage(payload: dict, period: dt.date):
                 tokens_in=input_tokens,
                 tokens_out=_int_or_none(item.get("output_tokens")) or 0,
                 cached_tokens_in=cache_read,
+                cache_write_tokens=cache_write,
                 request_count=_int_or_none(item.get("request_count"))
                 or _int_or_none(item.get("num_requests"))
                 or 0,

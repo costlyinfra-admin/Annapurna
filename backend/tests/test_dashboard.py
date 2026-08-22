@@ -159,6 +159,57 @@ def test_spend_by_provider_daily_trend(seeded, app_env):
         assert round(parts, 2) == round(p["total"], 2)
 
 
+def test_spend_by_token_type_splits_billed_dollars(seeded, app_env):
+    # One priced Anthropic row: 1M total input (600k uncached, 300k cache write,
+    # 100k cache read) + 200k output, billed $100. The split weights each type by
+    # its real rate (sonnet: $3/Mtok in, $15/Mtok out; write 1.25x in, read 0.10x in)
+    # and allocates the ACTUAL dollars, so the parts sum to the bill.
+    app_env.execute(
+        """
+        INSERT INTO inference_cost
+            (tenant_id, provider, model, amount, period, tokens_in, tokens_out,
+             cached_tokens_in, cache_write_tokens, source, confidence)
+        VALUES (%s, 'anthropic', 'claude-sonnet-4-6', 100, %s,
+                1000000, 200000, 100000, 300000, 'cost_api', 'high')
+        """,
+        (seeded, dt.date(2026, 1, 1)),
+    )
+    app_env.commit()
+
+    data = dashboard.spend_by_provider(seeded, start=dt.date(2026, 1, 1), end=dt.date(2026, 1, 1))
+    by_type = {t["token_type"]: t for t in data["by_token_type"]}
+    assert set(by_type) == {"input", "cache_write", "cache_read", "output"}
+    # Weights: in 600k*3 = 1.8M, write 300k*3*1.25 = 1.125M, read 100k*3*0.1 = 30k,
+    # out 200k*15 = 3.0M  (units of $/Mtok x tokens) -> total 5.955M.
+    assert by_type["output"]["amount"] == pytest.approx(100 * 3.0 / 5.955, abs=0.01)
+    assert by_type["input"]["amount"] == pytest.approx(100 * 1.8 / 5.955, abs=0.01)
+    assert by_type["cache_write"]["amount"] == pytest.approx(100 * 1.125 / 5.955, abs=0.01)
+    assert by_type["cache_read"]["amount"] == pytest.approx(100 * 0.03 / 5.955, abs=0.01)
+    # The split always reconciles with the billed dollars, and shares add to 100.
+    assert data["token_total"] == pytest.approx(100.0, abs=0.01)
+    assert sum(t["pct"] for t in data["by_token_type"]) == pytest.approx(100.0, abs=1e-6)
+    # Output dominates -> it sorts first, and every row is labelled for the UI.
+    assert data["by_token_type"][0]["token_type"] == "output"
+    assert by_type["cache_write"]["label"] == "Cache write"
+
+
+def test_token_type_falls_back_to_unknown_without_token_detail(seeded, app_env):
+    # A row with dollars but no token counts is reported as Unknown, never guessed.
+    app_env.execute(
+        """
+        INSERT INTO inference_cost (tenant_id, provider, model, amount, period,
+                                    source, confidence)
+        VALUES (%s, 'together', 'mystery-model', 50, %s, 'cost_api', 'low')
+        """,
+        (seeded, dt.date(2026, 1, 1)),
+    )
+    app_env.commit()
+
+    data = dashboard.spend_by_provider(seeded, start=dt.date(2026, 1, 1), end=dt.date(2026, 1, 1))
+    by_type = {t["token_type"]: t["amount"] for t in data["by_token_type"]}
+    assert by_type["unknown"] == pytest.approx(50.0, abs=0.01)
+
+
 def test_trend_points_carry_a_workspace_breakdown(seeded, app_env):
     # Each trend point exposes where its spend came from, so the chart's hover can
     # show a per-workspace split alongside the classification split.

@@ -11,12 +11,77 @@ cost only (build is one-time-ish); it is labelled directional, not ROI.
 from __future__ import annotations
 
 import datetime as dt
+from collections import defaultdict
+from decimal import Decimal
 from typing import Optional
 
-from . import optimize
+from . import optimize, pricing
 from .build import developer_label
 from .db import app_dsn, connect, tenant_tx
 from .providers import month_start, next_month
+
+#: Token types spend is split across, in display order.
+_TOKEN_TYPE_LABELS = {
+    "input": "Input",
+    "cache_write": "Cache write",
+    "cache_read": "Cache read",
+    "output": "Output",
+    "unknown": "Unknown",
+}
+
+
+def token_buckets_add(
+    buckets: dict,
+    *,
+    provider: str,
+    model: Optional[str],
+    amount: float,
+    tokens_in: int,
+    tokens_out: int,
+    cached: int,
+    cache_write: int,
+) -> None:
+    """Split one (provider, model) group's billed dollars across its token types.
+
+    Weight each type by what it actually costs — the model's list rate times the
+    type's multiplier (cache writes at a premium, cache reads at a discount) — then
+    allocate the REAL dollars in those proportions, so the parts sum to the bill.
+    Unpriced models fall back to token counts; no token detail -> "unknown".
+    """
+    if amount <= 0:
+        return
+    # tokens_in is the TOTAL input; uncached is what's left after cache traffic.
+    uncached = max(tokens_in - cached - cache_write, 0)
+    if uncached + cached + cache_write + tokens_out <= 0:
+        buckets["unknown"] += amount
+        return
+
+    r_in = pricing.rate_in(model or "", provider)
+    r_out = pricing.rate_out(model or "", provider)
+    if r_in > 0 or r_out > 0:
+        read_mult = pricing.cache_read_mult(provider) or Decimal("1")
+        write_mult = pricing.cache_write_mult(provider)
+        weights = {
+            "input": Decimal(uncached) * r_in,
+            "cache_write": Decimal(cache_write) * r_in * write_mult,
+            "cache_read": Decimal(cached) * r_in * read_mult,
+            "output": Decimal(tokens_out) * r_out,
+        }
+    else:  # unpriced model -> weight by raw token counts (documented fallback)
+        weights = {
+            "input": Decimal(uncached),
+            "cache_write": Decimal(cache_write),
+            "cache_read": Decimal(cached),
+            "output": Decimal(tokens_out),
+        }
+    total_w = sum(weights.values())
+    if total_w <= 0:
+        buckets["unknown"] += amount
+        return
+    for key, w in weights.items():
+        if w > 0:
+            buckets[key] += amount * float(w / total_w)
+
 
 _CONFIDENCE_RANK = {"high": 3, "med": 2, "low": 1}
 
@@ -914,6 +979,48 @@ def spend_by_provider(
             for cid, a, r in customer_rows
         ]
 
+        # ---- Inference: by TOKEN TYPE (input / cache write / cache read / output) ----
+        # Providers bill dollars per line item, not per token type, so we split each
+        # (provider, model) group's AUTHORITATIVE dollars across its token types by
+        # priced weight — list rates x the type's multiplier (cache writes cost a
+        # premium, cache reads a discount). The parts therefore always sum back to
+        # the billed total; unpriced models fall back to raw token counts, and rows
+        # with no token detail land in "Unknown" rather than being guessed.
+        token_rows = conn.execute(
+            f"""
+            SELECT provider, model,
+                   SUM(amount), SUM(tokens_in), SUM(tokens_out),
+                   SUM(cached_tokens_in), SUM(cache_write_tokens)
+            FROM inference_cost
+            WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
+            GROUP BY provider, model
+            """,  # noqa: S608
+            (start, end),
+        ).fetchall()
+        token_buckets: dict[str, float] = defaultdict(float)
+        for prov, model, amount, t_in, t_out, t_cached, t_write in token_rows:
+            token_buckets_add(
+                token_buckets,
+                provider=prov,
+                model=model,
+                amount=float(amount or 0),
+                tokens_in=int(t_in or 0),
+                tokens_out=int(t_out or 0),
+                cached=int(t_cached or 0),
+                cache_write=int(t_write or 0),
+            )
+        token_total = sum(token_buckets.values()) or 0.0
+        by_token_type = [
+            {
+                "token_type": key,
+                "label": _TOKEN_TYPE_LABELS[key],
+                "amount": amt,
+                "pct": (amt / token_total * 100.0) if token_total else 0.0,
+            }
+            for key, amt in sorted(token_buckets.items(), key=lambda kv: -kv[1])
+            if amt > 0
+        ]
+
         # ---- Inference: by workspace, each broken down by API key ----
         # Provider-resource identity (today only Anthropic populates it): the same
         # workspace/key detail the Cost Sources page classifies, rolled up over the
@@ -970,4 +1077,6 @@ def spend_by_provider(
         "by_customer": by_customer,
         "workspace_total": workspace_total,
         "by_workspace": by_workspace,
+        "token_total": token_total,
+        "by_token_type": by_token_type,
     }
