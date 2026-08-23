@@ -407,6 +407,32 @@ export interface FeatureOpportunities {
 
 /** Tenant-wide optimization Overview (opt spec §21). Measured, modeled and verified
  * savings are three distinct figures — never combined. */
+/** A recommendation derivable from billing data alone (no SDK telemetry). */
+export interface BillingOpportunity {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+  evidence: {
+    source: string;
+    period_start: string;
+    period_end: string;
+    observed_cost: number | null;
+    token_count: number | null;
+    resource_id: string | null;
+    calculation: string;
+  };
+  confidence: "high" | "medium";
+  impact: { kind: "spend_to_review" | "risk_reduction" | "visibility"; amount: number | null };
+  savings: {
+    kind: "measured" | "deterministic" | "not_quantified";
+    amount: number | null;
+    explanation: string;
+  };
+  limitations: string[];
+  action: { label: string; href: string };
+}
+
 export interface CopilotOverview {
   period: string;
   totals: { measured: number; modeled_ceiling: number; directional: number };
@@ -428,6 +454,10 @@ export interface CopilotOverview {
     count: number;
   }[];
   applied: (OptimizationAction & { feature_id: string; feature_name: string })[];
+  // Billing-only path: kept out of every total above.
+  has_sdk_telemetry: boolean;
+  has_billing_data: boolean;
+  billing_opportunities: BillingOpportunity[];
 }
 
 export interface FeatureInference {

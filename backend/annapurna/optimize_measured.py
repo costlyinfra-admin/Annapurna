@@ -20,7 +20,7 @@ import datetime as dt
 from decimal import Decimal
 from typing import Optional
 
-from . import dashboard, pricing
+from . import dashboard, optimize_billing, pricing
 from .db import app_dsn, connect, tenant_tx
 
 # Detection thresholds (opt spec §7). Kept deliberately conservative so a surfaced
@@ -645,6 +645,24 @@ def copilot_overview(tenant_id: str, period: Optional[dt.date] = None) -> dict:
                 if a["status"] == "verified" and a["realized_monthly"]:
                     verified_monthly += a["realized_monthly"]
 
+        # Billing-only recommendations (no SDK required). Kept in their OWN key and
+        # deliberately excluded from `totals` — they are spend to review, growth and
+        # governance signals, never measured or modelled savings.
+        sdk_present = bool(
+            conn.execute(
+                "SELECT 1 FROM usage_signal WHERE period = %s LIMIT 1", (start,)
+            ).fetchone()
+        )
+        billing_present = bool(
+            conn.execute(
+                """
+                SELECT 1 WHERE EXISTS (SELECT 1 FROM inference_cost WHERE period = %s)
+                            OR EXISTS (SELECT 1 FROM build_cost WHERE period = %s)
+                """,
+                (start, start),
+            ).fetchone()
+        )
+
         top = sorted(actionable, key=lambda o: o["priority_score"], reverse=True)[:8]
         by_feature.sort(key=lambda f: f["measured"] + f["modeled_ceiling"], reverse=True)
         by_lever = sorted(lever_map.values(), key=lambda e: e["monthly"], reverse=True)
@@ -660,6 +678,12 @@ def copilot_overview(tenant_id: str, period: Optional[dt.date] = None) -> dict:
         "by_feature": by_feature,
         "by_lever": by_lever,
         "applied": applied,
+        # --- Billing-only path (no SDK required) -------------------------------
+        # Separate from every total above: these are spend-to-review, visibility,
+        # concentration, growth and control gaps — never measured/modelled savings.
+        "has_sdk_telemetry": sdk_present,
+        "has_billing_data": billing_present,
+        "billing_opportunities": optimize_billing.billing_opportunities(tenant_id, start, start),
     }
 
 
