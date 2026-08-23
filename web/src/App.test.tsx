@@ -61,6 +61,9 @@ describe("App routing", () => {
       unattributed: { build_cost: 0, inference_cost: 0 },
       highlights: { most_expensive: null, optimization: null, highest_cost_per_user: null },
       insights: [],
+      data_updated_at: null,
+      inference_updated_at: null,
+      build_updated_at: null,
       totals: {
         build_cost: 0,
         inference_cost: 0,

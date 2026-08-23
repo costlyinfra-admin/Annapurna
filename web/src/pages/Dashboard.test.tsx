@@ -37,6 +37,10 @@ const DATA = {
     { kind: "concentration", text: "AI threat triage represents 54% of all AI spend." },
     { kind: "governance", text: "Unattributed spend represents 9.7% of total AI costs." },
   ],
+  // When cost was last INGESTED (not when the page loaded).
+  data_updated_at: "2026-08-20T16:07:00Z",
+  inference_updated_at: "2026-08-20T16:07:00Z",
+  build_updated_at: "2026-08-19T09:00:00Z",
   totals: {
     build_cost: 211,
     inference_cost: 4960,
@@ -393,13 +397,27 @@ describe("Dashboard (Overview)", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a short local timestamp for the last refresh", async () => {
+  it("stamps when cost was last ingested, not when the page loaded", async () => {
     renderDashboard();
     await screen.findByText("Key insights");
-    // "Updated Aug 22, 4:07 PM" — no year, no seconds.
-    expect(
-      screen.getByText(/^Updated [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/),
-    ).toBeInTheDocument();
+    // Short format, and driven by data_updated_at (Aug 20) — NOT today's date.
+    const stamp = screen.getByText(/^Updated [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/);
+    expect(stamp.textContent).toContain("Aug 20");
+    // The tooltip breaks freshness down per source.
+    expect(stamp.getAttribute("title")).toMatch(/Inference: Aug 20/);
+    expect(stamp.getAttribute("title")).toMatch(/Build: Aug 19/);
+  });
+
+  it("hides the stamp until cost has been ingested at least once", async () => {
+    vi.mocked(api.dashboard).mockResolvedValue({
+      ...DATA,
+      data_updated_at: null,
+      inference_updated_at: null,
+      build_updated_at: null,
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+    expect(screen.queryByText(/^Updated /)).not.toBeInTheDocument();
   });
 
   it("refreshes data and signals an alerts refresh when the refresh button is clicked", async () => {

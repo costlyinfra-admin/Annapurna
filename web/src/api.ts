@@ -290,6 +290,11 @@ export interface Dashboard {
   unattributed: { build_cost: number; inference_cost: number };
   highlights: DashboardHighlights;
   insights: Insight[];
+  // When cost data was last ingested (NOT when the page loaded). Null before any
+  // sync/import has run.
+  data_updated_at: string | null;
+  inference_updated_at: string | null;
+  build_updated_at: string | null;
   totals: {
     build_cost: number;
     inference_cost: number;

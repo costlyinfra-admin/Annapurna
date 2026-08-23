@@ -495,3 +495,37 @@ def test_classification_is_independent_of_feature_attribution(tenant_id):
     board = dashboard.dashboard(tenant_id, PERIOD)
     # Attribution dimension: no feature mapping -> Unattributed inference, unchanged.
     assert board["unattributed"]["inference_cost"] == pytest.approx(50.0, abs=0.01)
+
+
+def test_dashboard_reports_when_cost_was_last_ingested(seeded, app_env):
+    # The Overview's "Updated ..." stamp must reflect when cost data was WRITTEN,
+    # not when the page/request happened — otherwise every login looks fresh.
+    data = dashboard.dashboard(seeded, PERIOD)
+    assert data["inference_updated_at"] is not None
+    assert data["build_updated_at"] is not None
+    # The headline stamp is the newer of the two sources.
+    assert data["data_updated_at"] == max(data["inference_updated_at"], data["build_updated_at"])
+
+    # Ingesting again moves the stamp forward; a plain re-read does not.
+    before = data["data_updated_at"]
+    unchanged = dashboard.dashboard(seeded, PERIOD)["data_updated_at"]
+    assert unchanged == before  # re-reading is not "updating"
+
+    app_env.execute(
+        """
+        INSERT INTO inference_cost (tenant_id, provider, model, amount, period,
+                                    source, confidence)
+        VALUES (%s, 'anthropic', 'c', 5, %s, 'cost_api', 'high')
+        """,
+        (seeded, PERIOD),
+    )
+    app_env.commit()
+    assert dashboard.dashboard(seeded, PERIOD)["data_updated_at"] > before
+
+
+def test_dashboard_freshness_is_null_before_any_cost(tenant_id):
+    # A brand-new tenant has never synced: report null rather than "now".
+    data = dashboard.dashboard(tenant_id, PERIOD)
+    assert data["data_updated_at"] is None
+    assert data["inference_updated_at"] is None
+    assert data["build_updated_at"] is None

@@ -247,6 +247,17 @@ def dashboard(
                 (start, end),
             ).fetchone()[0]
         )
+        # When cost data was actually last written (an ingest replaces a period's
+        # rows, so created_at tracks the last successful sync/import). This is what
+        # the UI's "Updated ..." stamp reports — NOT when the page happened to load.
+        freshness = conn.execute(
+            """
+            SELECT (SELECT max(created_at) FROM inference_cost),
+                   (SELECT max(created_at) FROM build_cost)
+            """
+        ).fetchone()
+        inference_updated_at, build_updated_at = freshness if freshness else (None, None)
+
         tok = conn.execute(
             "SELECT COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0) "
             f"FROM inference_cost WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}",  # noqa: S608
@@ -301,6 +312,15 @@ def dashboard(
         "highlights": _highlights(rows),
         "insights": _insights(rows, unattributed, totals),
         "totals": totals,
+        # Data freshness: when inference / build cost were last ingested. The max
+        # of the two is what the Overview shows; both are exposed for detail.
+        "inference_updated_at": inference_updated_at.isoformat() if inference_updated_at else None,
+        "build_updated_at": build_updated_at.isoformat() if build_updated_at else None,
+        "data_updated_at": max(
+            [t for t in (inference_updated_at, build_updated_at) if t], default=None
+        ).isoformat()
+        if (inference_updated_at or build_updated_at)
+        else None,
     }
 
 

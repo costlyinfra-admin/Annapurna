@@ -57,6 +57,13 @@ function shortStamp(d: Date): string {
   });
 }
 
+/** Per-source detail for the freshness tooltip. */
+function freshnessDetail(inferenceAt: string | null, buildAt: string | null): string {
+  const one = (label: string, iso: string | null) =>
+    `${label}: ${iso ? shortStamp(new Date(iso)) : "never synced"}`;
+  return `When cost was last ingested — ${one("Inference", inferenceAt)} · ${one("Build", buildAt)}`;
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<OverviewTab>("features");
@@ -64,7 +71,6 @@ export function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
 
@@ -74,11 +80,7 @@ export function Dashboard() {
     setError(null);
     api
       .dashboard(range)
-      .then((d) => {
-        if (!active) return;
-        setData(d);
-        setLoadedAt(new Date());
-      })
+      .then((d) => active && setData(d))
       .catch(
         (err) =>
           active &&
@@ -125,8 +127,13 @@ export function Dashboard() {
       <div className="dash-head">
         <h1>Overview</h1>
         <div className="last-updated">
-          {loadedAt && (
-            <span className="muted last-updated-text">Updated {shortStamp(loadedAt)}</span>
+          {data?.data_updated_at && (
+            <span
+              className="muted last-updated-text"
+              title={freshnessDetail(data.inference_updated_at, data.build_updated_at)}
+            >
+              Updated {shortStamp(new Date(data.data_updated_at))}
+            </span>
           )}
           <button
             type="button"
