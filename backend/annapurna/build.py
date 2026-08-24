@@ -245,6 +245,63 @@ def allocate_and_store(tenant_id: str, spends: list[DeveloperSpend], period: dt.
     return summary
 
 
+#: Rows written by the PR-authorship allocator. Fine-tuning runs (source
+#: 'fine_tune') are attributed directly by the user and must never be re-derived.
+_ALLOCATED_SOURCE = "coding_tool+github"
+
+
+def reattribute(tenant_id: str) -> dict:
+    """Recompute feature attribution for allocator-written build cost.
+
+    Discovery regenerates proposals by deleting `status='proposed'` features, and
+    `build_cost.feature_id` is ON DELETE SET NULL — so spend that was attributed to
+    a proposed feature silently drops into the Unattributed bucket and STAYS there,
+    because build cost (unlike inference) is attributed only at import time.
+
+    This re-runs the same PR-authorship allocation over the rows already stored:
+    each (developer, tool, period) group's total is re-split across the features
+    that developer's PRs now map to. Idempotent — running it twice changes nothing —
+    and the per-group totals are preserved exactly, so the tenant's build total is
+    never altered, only where it lands.
+    """
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        dist = _developer_feature_distribution(conn)
+        groups = conn.execute(
+            """
+            SELECT developer_id, developer_name, github_handle, tool, period, SUM(amount)
+            FROM build_cost
+            WHERE source = %s
+            GROUP BY developer_id, developer_name, github_handle, tool, period
+            """,
+            (_ALLOCATED_SOURCE,),
+        ).fetchall()
+        if not groups:
+            return {"rows": 0, "attributed": 0.0, "unattributed": 0.0}
+
+        conn.execute("DELETE FROM build_cost WHERE source = %s", (_ALLOCATED_SOURCE,))
+        rows = 0
+        attributed = Decimal("0")
+        unattributed = Decimal("0")
+        for developer_id, name, handle, tool, period, total in groups:
+            spend = DeveloperSpend(developer_id, tool, Decimal(total), name=name, handle=handle)
+            feature_counts = dist.get(_attribution_key(spend), {})
+            if not feature_counts:
+                _insert_build_cost(conn, tenant_id, None, spend, spend.amount, "low", period)
+                unattributed += spend.amount
+                rows += 1
+                continue
+            confidence = "high" if len(feature_counts) == 1 else "med"
+            for feature_id, amount in _split_amount(spend.amount, feature_counts).items():
+                _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, period)
+                attributed += amount
+                rows += 1
+    return {
+        "rows": rows,
+        "attributed": float(attributed),
+        "unattributed": float(unattributed),
+    }
+
+
 def _insert_build_cost(conn, tenant_id, feature_id, spend, amount, confidence, period):
     conn.execute(
         """

@@ -228,3 +228,86 @@ def test_import_copilot_seats(discovered, monkeypatch):
     devs = {d["developer_id"]: d for d in summary["developers"]}
     assert devs["alice"]["amount"] == 39.0
     assert devs["bob"]["amount"] == 39.0
+
+
+# ---------------------------------------------------------------------------
+# Re-attribution after discovery regenerates proposals.
+# ---------------------------------------------------------------------------
+def _build_total_by_feature(tenant_id):
+    from annapurna.db import app_dsn, connect, tenant_tx
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        rows = conn.execute(
+            "SELECT feature_id, SUM(amount) FROM build_cost GROUP BY feature_id"
+        ).fetchall()
+    return {(str(f) if f else None): float(a) for f, a in rows}
+
+
+def test_rediscovery_no_longer_zeroes_build_cost(discovered, monkeypatch):
+    """The reported bug: 'analyze last 90 days' reset every feature's build cost.
+
+    Discovery deletes proposed features; build_cost.feature_id is ON DELETE SET
+    NULL, so the spend silently fell into Unattributed. Re-running discovery must
+    now re-attribute it against the regenerated proposals instead.
+    """
+    build.allocate_and_store(
+        discovered,
+        [DeveloperSpend("alice", "cursor", Decimal("100"))],  # alice: 2 PRs, one feature
+        PERIOD,
+    )
+    before = _build_total_by_feature(discovered)
+    assert None not in before  # fully attributed to a feature
+    assert sum(before.values()) == 100.0
+
+    discovery.run_discovery(discovered, "acme", "tok")  # re-runs, deleting proposals
+
+    after = _build_total_by_feature(discovered)
+    # The money did not vanish, and did not land in the Unattributed bucket.
+    assert sum(after.values()) == 100.0
+    assert after.get(None) is None
+    # It is attributed to a feature again (a NEW id — proposals were regenerated).
+    assert len(after) == 1
+
+
+def test_reattribute_is_idempotent_and_total_preserving(discovered):
+    build.allocate_and_store(
+        discovered,
+        [
+            DeveloperSpend("carol", "claude_code", Decimal("80")),  # spans 2 features
+            DeveloperSpend("dave", "cursor", Decimal("30")),  # no PRs -> Unattributed
+        ],
+        PERIOD,
+    )
+    first = build.reattribute(discovered)
+    snapshot = _build_total_by_feature(discovered)
+    second = build.reattribute(discovered)
+
+    assert _build_total_by_feature(discovered) == snapshot  # running twice changes nothing
+    assert first == second
+    assert round(first["attributed"] + first["unattributed"], 2) == 110.0
+    assert first["unattributed"] == 30.0  # dave still has no attributable PRs
+
+
+def test_reattribute_leaves_directly_attributed_fine_tuning_alone(discovered):
+    """Fine-tuning runs are attributed by the USER — never re-derived from PRs."""
+    features = build.build_summary(discovered, PERIOD)  # noqa: F841 - ensures schema is live
+    from annapurna.db import app_dsn, connect, tenant_tx
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id=discovered):
+        feature_id = conn.execute(
+            "SELECT id FROM feature WHERE status = 'proposed' LIMIT 1"
+        ).fetchone()[0]
+    build.record_training_cost(discovered, str(feature_id), 500, "Llama tuning", PERIOD)
+
+    build.reattribute(discovered)
+
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id=discovered):
+        row = conn.execute(
+            "SELECT feature_id, amount FROM build_cost WHERE source = 'fine_tune'"
+        ).fetchone()
+    assert str(row[0]) == str(feature_id)  # still on the feature the user chose
+    assert float(row[1]) == 500.0
+
+
+def test_reattribute_with_no_allocated_rows_is_a_no_op(tenant_id):
+    assert build.reattribute(tenant_id) == {"rows": 0, "attributed": 0.0, "unattributed": 0.0}

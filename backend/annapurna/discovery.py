@@ -21,6 +21,7 @@ from typing import Callable, Optional
 
 import httpx
 
+from . import build
 from .db import app_dsn, connect, tenant_tx
 from .github import GitHubClient, PullRequest
 
@@ -486,6 +487,12 @@ def run_discovery(
     pr_by_ref = {pr.ref: pr for pr in prs}
     _persist_proposals(tenant_id, proposals, pr_by_ref)
     _save_scope(tenant_id, owner, selected)
+    # Regenerating proposals deletes the old ones, and build_cost.feature_id is
+    # ON DELETE SET NULL — so previously-attributed build spend would silently fall
+    # into Unattributed and stay there. Re-run the PR-authorship allocation over the
+    # stored rows against the NEW proposals. Totals are preserved; only attribution
+    # moves. (Inference needs no equivalent: every sync re-attributes it.)
+    reattributed = build.reattribute(tenant_id)
 
     per_repo: Counter = Counter(p.repo for p in prs)
     return {
@@ -496,6 +503,7 @@ def run_discovery(
         "prs_by_repo": dict(per_repo),
         "repos_scanned": len(accessible),  # repos accessible to the token
         "proposals": len(proposals),
+        "build_cost_reattributed": reattributed,
     }
 
 
