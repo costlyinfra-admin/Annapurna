@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, ApiError, type BillingOpportunity, type CopilotOverview } from "../api";
+import { api, ApiError, type CopilotOverview } from "../api";
 import { ConfidenceBadge } from "../components/badges";
 import { money } from "../format";
 
@@ -82,41 +82,15 @@ export function CopilotPage() {
             />
           </div>
 
-          {data.billing_opportunities.length > 0 && (
-            <section className="detail-section">
-              <div className="section-head">
-                <div>
-                  <h2>What you can optimize from billing data</h2>
-                  <span className="section-sub muted">
-                    These recommendations use provider billing and resource metadata. They do not
-                    infer prompt, model, caching, quality, user, or feature-level optimizations.
-                  </span>
-                </div>
-              </div>
-              <ul className="billing-opps">
-                {data.billing_opportunities.map((o) => (
-                  <BillingCard key={o.id} opp={o} />
-                ))}
-              </ul>
-              {!data.has_sdk_telemetry && (
-                <p className="muted billing-sdk-note">
-                  Request-, user- and feature-level optimizations (duplicate calls, cacheable
-                  prefixes, model right-sizing) need request telemetry.{" "}
-                  <Link to="/install-sdk" className="link">
-                    Install the SDK
-                  </Link>{" "}
-                  to unlock them.
-                </p>
-              )}
-            </section>
-          )}
-
           <section className="detail-section">
             <div className="section-head">
               <h2>Top recommendations</h2>
-              <span className="section-sub muted">Ranked by savings × confidence × effort.</span>
+              <span className="section-sub muted">
+                Measured savings first, then what billing data alone can show. Billing findings
+                don&apos;t infer prompt, model, caching, quality, user or feature conclusions.
+              </span>
             </div>
-            {data.top_recommendations.length === 0 ? (
+            {data.top_recommendations.length === 0 && data.billing_opportunities.length === 0 ? (
               <p className="muted">
                 {data.has_billing_data
                   ? "No measured opportunities yet — these need request telemetry from the SDK."
@@ -131,9 +105,11 @@ export function CopilotPage() {
                     <th className="num">Savings</th>
                     <th>Confidence</th>
                     <th>Effort</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
+                  {/* Measured/modelled opportunities: real, quantified savings. */}
                   {data.top_recommendations.map((o) => (
                     <tr key={`${o.feature_id}-${o.lever}`}>
                       <td title={o.evidence}>{o.title}</td>
@@ -152,10 +128,52 @@ export function CopilotPage() {
                         <ConfidenceBadge level={o.confidence} />
                       </td>
                       <td>{EFFORT_LABELS[o.engineering_effort] ?? o.engineering_effort}</td>
+                      <td>
+                        <Link to={`/features/${o.feature_id}`} className="row-action">
+                          Review
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                  {/* Billing-only findings: observed spend, never counted as savings. */}
+                  {data.billing_opportunities.map((o) => (
+                    // The calculation stays available on hover — auditable, not crowding.
+                    <tr key={o.id} title={o.evidence.calculation}>
+                      <td>
+                        <span className={`billing-tag billing-tag-${o.type}`}>
+                          {BILLING_LABELS[o.type] ?? "Finding"}
+                        </span>{" "}
+                        {o.title}
+                      </td>
+                      <td className="muted">
+                        {o.evidence.observed_cost != null
+                          ? `${money(o.evidence.observed_cost)} observed`
+                          : "—"}
+                      </td>
+                      <td className="num muted">Not quantified</td>
+                      <td>
+                        <ConfidenceBadge level={o.confidence === "medium" ? "med" : "high"} />
+                      </td>
+                      <td className="muted">—</td>
+                      <td>
+                        <Link to={o.action.href} className="row-action">
+                          {o.action.label}
+                        </Link>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            )}
+            {!data.has_sdk_telemetry && data.billing_opportunities.length > 0 && (
+              <p className="muted billing-sdk-note">
+                Request-, user- and feature-level optimizations (duplicate calls, cacheable
+                prefixes, model right-sizing) need request telemetry.{" "}
+                <Link to="/install-sdk" className="link">
+                  Install the SDK
+                </Link>{" "}
+                to unlock them.
+              </p>
             )}
           </section>
 
@@ -274,62 +292,6 @@ export function CopilotPage() {
         </>
       ) : null}
     </div>
-  );
-}
-
-/** One billing-only finding, with its full evidence trail on display. */
-function BillingCard({ opp }: { opp: BillingOpportunity }) {
-  const ev = opp.evidence;
-  return (
-    <li className="billing-opp">
-      <div className="billing-opp-head">
-        <span className={`billing-tag billing-tag-${opp.type}`}>
-          {BILLING_LABELS[opp.type] ?? "Finding"}
-        </span>
-        <strong className="billing-opp-title">{opp.title}</strong>
-        {ev.observed_cost != null && (
-          <span className="billing-opp-amt">{money(ev.observed_cost)}</span>
-        )}
-      </div>
-      <p className="billing-opp-desc">{opp.description}</p>
-
-      <dl className="billing-evidence">
-        <div>
-          <dt>Savings</dt>
-          <dd>
-            {opp.savings.kind === "not_quantified"
-              ? "Not quantified"
-              : `${money(opp.savings.amount)} (${opp.savings.kind})`}
-            <span className="muted"> — {opp.savings.explanation}</span>
-          </dd>
-        </div>
-        <div>
-          <dt>Evidence</dt>
-          <dd>
-            {ev.source} · {ev.period_start} → {ev.period_end}
-          </dd>
-        </div>
-        <div>
-          <dt>Calculation</dt>
-          <dd className="mono">{ev.calculation}</dd>
-        </div>
-        <div>
-          <dt>Confidence</dt>
-          <dd>
-            <ConfidenceBadge level={opp.confidence === "medium" ? "med" : "high"} />
-            {opp.limitations.map((l) => (
-              <span key={l} className="muted billing-limitation">
-                {l}
-              </span>
-            ))}
-          </dd>
-        </div>
-      </dl>
-
-      <Link to={opp.action.href} className="link">
-        {opp.action.label} →
-      </Link>
-    </li>
   );
 }
 

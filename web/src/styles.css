@@ -3217,47 +3217,14 @@ a.exec-value:hover {
   font-size: 0.85rem;
 }
 
-/* ---------- Billing-only optimization findings (no SDK required) ---------- */
-.billing-opps {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.billing-opp {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  padding: 0.85rem 1rem;
-}
-
-.billing-opp-head {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-}
-
-.billing-opp-title {
-  font-size: 0.95rem;
-}
-
-.billing-opp-amt {
-  margin-left: auto;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Label the KIND of finding — deliberately never the word "savings". */
+/* ---------- Billing-only findings inside Top recommendations ---------- */
+/* A small chip naming the KIND of finding — deliberately never "savings". */
 .billing-tag {
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 0.15rem 0.5rem;
+  padding: 0.1rem 0.4rem;
   border-radius: var(--radius-pill);
   background: var(--bg);
   color: var(--muted);
@@ -3275,50 +3242,22 @@ a.exec-value:hover {
   color: var(--error);
 }
 
-.billing-opp-desc {
-  margin: 0.45rem 0 0.6rem;
-  font-size: 0.86rem;
+/* Compact call-to-action in the last table column. */
+.row-action {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
   color: var(--ink-soft);
-}
-
-/* The evidence trail: every number traceable to stored data. */
-.billing-evidence {
-  display: grid;
-  gap: 0.35rem 1.25rem;
-  margin: 0 0 0.65rem;
   font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.billing-evidence div {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.billing-evidence dt {
-  flex: 0 0 5.5rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  font-size: 0.66rem;
-  letter-spacing: 0.03em;
-  padding-top: 0.15rem;
-}
-
-.billing-evidence dd {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.billing-evidence .mono {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
-.billing-limitation::before {
-  content: "· ";
+.row-action:hover {
+  background: var(--bg);
+  text-decoration: none;
 }
 
 .billing-sdk-note {

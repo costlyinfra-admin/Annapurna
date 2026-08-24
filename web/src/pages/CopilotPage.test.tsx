@@ -160,35 +160,54 @@ const NO_SDK: CopilotOverview = {
 describe("CopilotPage — billing-only path (no SDK)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("shows evidence-backed billing findings instead of a blank page", async () => {
+  it("lists billing findings inside Top recommendations, not a separate section", async () => {
     vi.mocked(api.copilotOverview).mockResolvedValue(NO_SDK);
     renderPage();
 
-    expect(await screen.findByText("What you can optimize from billing data")).toBeInTheDocument();
-    // The scope disclaimer is explicit about what these do NOT infer.
-    expect(
-      screen.getByText(/do not infer prompt, model, caching, quality, user, or feature-level/i),
-    ).toBeInTheDocument();
-    // The finding, its label, and its observed amount.
+    expect(await screen.findByText("Top recommendations")).toBeInTheDocument();
+    // The crowded card section is gone.
+    expect(screen.queryByText("What you can optimize from billing data")).not.toBeInTheDocument();
+    // The finding sits in the table: chip, title, observed amount, and a CTA.
     expect(screen.getByText("Spend to review")).toBeInTheDocument();
     expect(screen.getByText("Classify prod-key")).toBeInTheDocument();
-    expect(screen.getByText("$4,200")).toBeInTheDocument();
-    // Reviewable spend is NEVER presented as savings.
-    expect(screen.getByText(/Not quantified/)).toBeInTheDocument();
-    // Full evidence trail: source, period and calculation are all on screen.
-    expect(screen.getByText(/provider billing \(cost API\)/)).toBeInTheDocument();
-    expect(screen.getByText(/SUM\(inference_cost.amount\)/)).toBeInTheDocument();
-    // And a real action.
-    expect(screen.getByRole("link", { name: /Review classification/ })).toHaveAttribute(
+    expect(screen.getByText("$4,200 observed")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review classification" })).toHaveAttribute(
       "href",
       "/cost-sources",
     );
   });
 
+  it("never presents reviewable spend as savings", async () => {
+    vi.mocked(api.copilotOverview).mockResolvedValue(NO_SDK);
+    renderPage();
+    await screen.findByText("Top recommendations");
+    // The savings cell reads "Not quantified" — the observed amount is labelled
+    // "observed", never rendered as a $/mo saving.
+    expect(screen.getByText("Not quantified")).toBeInTheDocument();
+    expect(screen.queryByText("$4,200/mo")).not.toBeInTheDocument();
+    // The scope disclaimer survives the redesign.
+    expect(
+      screen.getByText(/don't infer prompt, model, caching, quality, user or feature/i),
+    ).toBeInTheDocument();
+  });
+
+  it("drops evidence, calculation and limitations from the visible table", async () => {
+    vi.mocked(api.copilotOverview).mockResolvedValue(NO_SDK);
+    renderPage();
+    await screen.findByText("Top recommendations");
+    // None of the card's dense evidence block is rendered as text any more...
+    expect(screen.queryByText(/SUM\(inference_cost.amount\)/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Shows where spend is unlabelled/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/provider billing \(cost API\)/)).not.toBeInTheDocument();
+    // ...but the calculation stays auditable on hover.
+    const row = screen.getByText("Classify prod-key").closest("tr");
+    expect(row).toHaveAttribute("title", expect.stringContaining("SUM(inference_cost.amount)"));
+  });
+
   it("invites the SDK without implying the page is broken", async () => {
     vi.mocked(api.copilotOverview).mockResolvedValue(NO_SDK);
     renderPage();
-    await screen.findByText("What you can optimize from billing data");
+    await screen.findByText("Top recommendations");
     expect(
       screen.getByText(/Request-, user- and feature-level optimizations/i),
     ).toBeInTheDocument();
@@ -206,14 +225,12 @@ describe("CopilotPage — billing-only path (no SDK)", () => {
     });
     renderPage();
     await screen.findByText("Top recommendations");
-    // No billing section is invented out of nothing.
-    expect(screen.queryByText("What you can optimize from billing data")).not.toBeInTheDocument();
     expect(
       screen.getByText("No measured opportunities yet across your features."),
     ).toBeInTheDocument();
   });
 
-  it("keeps SDK recommendations in their own section when both exist", async () => {
+  it("shows measured savings above billing findings in one table", async () => {
     vi.mocked(api.copilotOverview).mockResolvedValue({
       ...OVERVIEW,
       has_sdk_telemetry: true,
@@ -221,11 +238,21 @@ describe("CopilotPage — billing-only path (no SDK)", () => {
       billing_opportunities: [SPEND_TO_REVIEW],
     });
     renderPage();
-    // Billing findings and measured recommendations coexist, separately.
-    expect(await screen.findByText("What you can optimize from billing data")).toBeInTheDocument();
-    expect(screen.getByText("Top recommendations")).toBeInTheDocument();
-    expect(screen.getByText("Cheaper provider")).toBeInTheDocument();
-    // With telemetry present, we don't nag about installing the SDK.
+    await screen.findByText("Top recommendations");
+
+    // Scope to the Top recommendations table (the page has several tables).
+    const findingRow = screen.getByText("Classify prod-key").closest("tr")!;
+    const body = findingRow.closest("tbody")!;
+    const text = [...body.querySelectorAll("tr")].map((r) => r.textContent ?? "");
+    // Both live in ONE table, with every measured/modelled row ranked ABOVE the
+    // billing finding (quantified savings first, spend-to-review after).
+    expect(text).toHaveLength(OVERVIEW.top_recommendations.length + 1);
+    expect(text.findIndex((t) => t.includes("Classify prod-key"))).toBe(
+      OVERVIEW.top_recommendations.length,
+    );
+    // Each row carries its own action.
+    expect(screen.getAllByRole("link", { name: "Review" }).length).toBeGreaterThan(0);
+    // With telemetry present we don't nag about the SDK.
     expect(screen.queryByRole("link", { name: "Install the SDK" })).not.toBeInTheDocument();
   });
 });
