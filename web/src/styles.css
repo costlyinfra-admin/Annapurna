@@ -2270,8 +2270,18 @@ a.exec-value:hover {
   transition: opacity 0.12s;
 }
 
+.trend-bar {
+  transition: opacity 0.12s ease-out;
+}
+
+/* Hovering one bar dims the rest, mirroring the line view's highlight. */
+.trend-line-wrap:hover .trend-bar {
+  opacity: 0.45;
+}
+
+.trend-bar-wrap.active .trend-bar,
 .trend-bar-wrap:hover .trend-bar {
-  opacity: 0.82;
+  opacity: 1;
 }
 
 /* Stacked classification bar: segments fill the bar bottom-to-top. */
@@ -2512,7 +2522,9 @@ a.exec-value:hover {
 }
 
 .trend-value {
-  font-size: 0.68rem;
+  /* Small enough that daily (30+) bars don't collide; the hover card carries the
+     precise figure, so this is a glance value, not the source of truth. */
+  font-size: 0.58rem;
   font-weight: 600;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;

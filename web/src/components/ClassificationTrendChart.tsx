@@ -48,15 +48,6 @@ function spanCaption(trend: ClassificationTrendPoint[]): string {
   return `${MONTHS[fm]} – ${MONTHS[lm]} ${year}`;
 }
 
-function tooltip(t: ClassificationTrendPoint, g: Granularity): string {
-  const lines = [g === "day" ? t.period : monthLabel(t.period)];
-  for (const b of BUCKETS) {
-    if (t[b.key] > 0) lines.push(`${b.label} — ${money(t[b.key])}`);
-  }
-  lines.push(`Total — ${money(t.total)}`);
-  return lines.join("\n");
-}
-
 export function ClassificationTrendChart({
   trend,
   granularity = "month",
@@ -90,32 +81,7 @@ export function ClassificationTrendChart({
       </div>
 
       {mode === "bar" ? (
-        <div className="trend-chart">
-          {trend.map((t) => (
-            <div className="trend-bar-wrap" key={t.period} title={tooltip(t, granularity)}>
-              <span className="trend-value">{wholeMoney(t.total)}</span>
-              <div
-                className="trend-bar trend-bar-stacked"
-                style={{ height: `${Math.max(3, (t.total / max) * 100)}%` }}
-              >
-                {/* Top-to-bottom in DOM = Unclassified … Production, so Production
-                    sits at the bottom of the stack. */}
-                {[...BUCKETS]
-                  .reverse()
-                  .map((b) =>
-                    t[b.key] > 0 ? (
-                      <div
-                        key={b.key}
-                        className={`trend-seg trend-seg-${b.key}`}
-                        style={{ height: `${(t[b.key] / t.total) * 100}%` }}
-                      />
-                    ) : null,
-                  )}
-              </div>
-              <span className="trend-label">{tick(t.period, granularity)}</span>
-            </div>
-          ))}
-        </div>
+        <BarTrend trend={trend} max={max} granularity={granularity} />
       ) : (
         <LineTrend trend={trend} max={max} granularity={granularity} />
       )}
@@ -131,6 +97,70 @@ export function ClassificationTrendChart({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** Above this many bars, per-bar value labels collide — so only the peak and the
+ *  hovered bar are labelled, and the exact figure comes from the hover card. */
+const DENSE_BAR_COUNT = 14;
+
+/** Stacked classification bars. Hovering highlights a bar and opens the same
+ *  breakdown card the line view uses. */
+function BarTrend({
+  trend,
+  max,
+  granularity,
+}: {
+  trend: ClassificationTrendPoint[];
+  max: number;
+  granularity: Granularity;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const peakIdx = trend.reduce((a, t, i) => (t.total > trend[a].total ? i : a), 0);
+  const dense = trend.length > DENSE_BAR_COUNT;
+
+  return (
+    <div className="trend-line-wrap" onMouseLeave={() => setHover(null)}>
+      <div className="trend-chart">
+        {trend.map((t, i) => (
+          <div
+            className={i === hover ? "trend-bar-wrap active" : "trend-bar-wrap"}
+            key={t.period}
+            onMouseEnter={() => setHover(i)}
+          >
+            {(!dense || i === peakIdx || i === hover) && (
+              <span className="trend-value">{wholeMoney(t.total)}</span>
+            )}
+            <div
+              className="trend-bar trend-bar-stacked"
+              style={{ height: `${Math.max(3, (t.total / max) * 100)}%` }}
+            >
+              {/* Top-to-bottom in DOM = Unclassified … Production, so Production
+                  sits at the bottom of the stack. */}
+              {[...BUCKETS]
+                .reverse()
+                .map((b) =>
+                  t[b.key] > 0 ? (
+                    <div
+                      key={b.key}
+                      className={`trend-seg trend-seg-${b.key}`}
+                      style={{ height: `${(t[b.key] / t.total) * 100}%` }}
+                    />
+                  ) : null,
+                )}
+            </div>
+            <span className="trend-label">{tick(t.period, granularity)}</span>
+          </div>
+        ))}
+      </div>
+      {hover !== null && (
+        <HoverCard
+          point={trend[hover]}
+          pct={((hover + 0.5) / trend.length) * 100}
+          granularity={granularity}
+        />
       )}
     </div>
   );
@@ -267,7 +297,9 @@ function LineTrend({
         ))}
       </svg>
 
-      {hover !== null && <HoverCard point={ap.t} px={ap.px} granularity={granularity} />}
+      {hover !== null && (
+        <HoverCard point={ap.t} pct={(ap.px / VB_W) * 100} granularity={granularity} />
+      )}
     </div>
   );
 }
@@ -275,14 +307,14 @@ function LineTrend({
 /** Breakdown card that follows the highlighted point. */
 function HoverCard({
   point,
-  px,
+  pct,
   granularity,
 }: {
   point: ClassificationTrendPoint;
-  px: number;
+  /** Horizontal position of the highlighted point, as a % of the chart width. */
+  pct: number;
   granularity: Granularity;
 }) {
-  const pct = (px / VB_W) * 100;
   const flip = pct > 60; // near the right edge -> open leftwards
   const workspaces = (point.workspaces ?? []).slice(0, 4);
   const rest = (point.workspaces ?? []).slice(4);

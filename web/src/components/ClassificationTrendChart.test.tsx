@@ -99,6 +99,52 @@ describe("ClassificationTrendChart", () => {
     expect(card.textContent).toContain("mcs-dev");
   });
 
+  it("opens the same breakdown card when hovering a bar", () => {
+    render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
+    // Bar mode is the default — no card until the cursor lands on a bar.
+    expect(document.querySelector(".trend-hover-card")).toBeNull();
+
+    const bars = document.querySelectorAll(".trend-bar-wrap");
+    fireEvent.mouseEnter(bars[2]);
+    const card = document.querySelector(".trend-hover-card")!;
+    expect(card.textContent).toContain("Aug 3, 2026");
+    expect(card.textContent).toContain("$209");
+    // Same breakdown the line view shows: classification + workspace.
+    expect(card.textContent).toContain("Dev / Test");
+    expect(card.textContent).toContain("By workspace");
+    expect(card.textContent).toContain("automations");
+    // The hovered bar is marked so the others can dim.
+    expect(bars[2].className).toContain("active");
+  });
+
+  it("thins bar labels when daily bars would collide", () => {
+    // 31 daily points: labelling every bar overlaps, so only the peak is labelled
+    // until the cursor picks one out.
+    const many = Array.from({ length: 31 }, (_, i) => ({
+      period: `2026-08-${String(i + 1).padStart(2, "0")}`,
+      total: i === 20 ? 900 : 100,
+      production: 0,
+      development: i === 20 ? 900 : 100,
+      internal: 0,
+      unclassified: 0,
+    }));
+    render(<ClassificationTrendChart trend={many} granularity="day" />);
+
+    const labels = [...document.querySelectorAll(".trend-value")].map((e) => e.textContent);
+    expect(labels).toEqual(["$900"]); // the peak only
+    // Hovering another bar labels it too, without restoring the rest.
+    fireEvent.mouseEnter(document.querySelectorAll(".trend-bar-wrap")[0]);
+    expect([...document.querySelectorAll(".trend-value")].map((e) => e.textContent)).toEqual([
+      "$100",
+      "$900",
+    ]);
+  });
+
+  it("labels every bar when there is room", () => {
+    render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
+    expect(document.querySelectorAll(".trend-value")).toHaveLength(DAILY.length);
+  });
+
   it("draws a dollar y-axis with gridlines", () => {
     render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
     fireEvent.click(screen.getByRole("button", { name: "Line" }));
