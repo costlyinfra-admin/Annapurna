@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 
 from annapurna import discovery, features
@@ -186,3 +187,86 @@ def test_rerun_replaces_proposals_but_keeps_confirmed(tenant_id, monkeypatch):
     proposed = features.list_features(tenant_id, status="proposed")
     assert len(confirmed) >= 2  # earlier confirmations survive
     assert len(proposed) == 1  # regenerated from the smaller re-run
+
+
+def test_rerun_keeps_proposed_feature_ids_stable(tenant_id, monkeypatch):
+    """Re-running discovery must REUSE proposed features, not recreate them.
+
+    Ids used to churn on every run, so bookmarked /features/<id> links broke,
+    feature-scoped alerts detached, and cost rows were orphaned (feature_id is
+    ON DELETE SET NULL). Matching by branch pattern / name keeps them stable.
+    """
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(MCS_PRS))
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
+    first = {f["name"]: f["id"] for f in features.list_features(tenant_id, status="proposed")}
+    assert first
+
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")  # identical re-run
+    second = {f["name"]: f["id"] for f in features.list_features(tenant_id, status="proposed")}
+
+    assert second == first  # same features, SAME ids
+
+
+def test_rerun_updates_in_place_without_duplicating_signals(tenant_id, monkeypatch):
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(MCS_PRS))
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
+    before = features.list_features(tenant_id, status="proposed")
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
+    after = features.list_features(tenant_id, status="proposed")
+
+    # Same count, and each feature's signals are regenerated — never doubled up.
+    assert len(after) == len(before)
+    by_name = {f["name"]: f for f in after}
+    for f in before:
+        assert len(by_name[f["name"]]["signals"]) == len(f["signals"])
+
+
+def test_rerun_drops_proposals_that_left_the_window(tenant_id, monkeypatch):
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(MCS_PRS))
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
+    kept_id = {f["name"]: f["id"] for f in features.list_features(tenant_id, status="proposed")}
+
+    # A narrower window yields only the first PR's cluster.
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub([MCS_PRS[0]]))
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
+    proposed = features.list_features(tenant_id, status="proposed")
+
+    assert len(proposed) == 1  # the vanished proposals are gone
+    # ...and the surviving one kept its original id rather than being recreated.
+    survivor = proposed[0]
+    assert survivor["id"] == kept_id[survivor["name"]]
+
+
+def test_rerun_keeps_build_cost_attached_to_the_same_feature(tenant_id, monkeypatch):
+    """The end-to-end payoff: attributed build cost survives a re-analysis intact."""
+    from decimal import Decimal
+
+    from annapurna import build
+    from annapurna.build import DeveloperSpend
+    from annapurna.db import app_dsn, connect, tenant_tx
+
+    monkeypatch.setattr(discovery, "_make_github_client", lambda token: _FakeGitHub(MCS_PRS))
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")
+
+    author = MCS_PRS[0].author
+    build.allocate_and_store(
+        tenant_id, [DeveloperSpend(author, "cursor", Decimal("120"))], dt.date(2026, 5, 1)
+    )
+
+    def attribution():
+        with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+            return {
+                (str(f) if f else None): float(a)
+                for f, a in conn.execute(
+                    "SELECT feature_id, SUM(amount) FROM build_cost GROUP BY feature_id"
+                ).fetchall()
+            }
+
+    before = attribution()
+    assert None not in before  # every dollar attributed to a feature
+    assert round(sum(before.values()), 2) == 120.0
+
+    discovery.run_discovery(tenant_id, "transilienceai", "tok")  # the action that broke it
+
+    after = attribution()
+    assert after == before  # same feature ids, same dollars — nothing orphaned

@@ -531,22 +531,84 @@ def _save_scope(tenant_id: str, owner: str, repos: list[str]) -> None:
         )
 
 
+def _match_existing(conn) -> tuple[dict, dict, set]:
+    """Index the tenant's existing PROPOSED features so a re-run can reuse them.
+
+    Returns (by_branch_pattern, by_lowercased_name, all_ids). The branch pattern is
+    the more stable identity — cluster names can drift slightly between runs while
+    the branch convention stays put — so callers try it first.
+    """
+    rows = conn.execute(
+        """
+        SELECT f.id, f.name,
+               (SELECT fs.external_ref FROM feature_signal fs
+                WHERE fs.feature_id = f.id AND fs.signal_type = 'branch' LIMIT 1)
+        FROM feature f
+        WHERE f.status = 'proposed'
+        """
+    ).fetchall()
+    by_branch: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    ids: set = set()
+    for fid, name, branch in rows:
+        ids.add(fid)
+        if branch:
+            by_branch.setdefault(branch, fid)
+        if name:
+            by_name.setdefault(name.strip().lower(), fid)
+    return by_branch, by_name, ids
+
+
 def _persist_proposals(
     tenant_id: str, proposals: list[Proposal], pr_by_ref: Optional[dict] = None
 ) -> None:
+    """Persist regenerated proposals, REUSING existing proposed features' ids.
+
+    A re-run used to delete every proposed feature and insert fresh rows, so ids
+    churned on each analysis: bookmarked /features/<id> links broke, feature-scoped
+    alerts detached, and cost rows were orphaned (build_cost.feature_id is
+    ON DELETE SET NULL). Instead we match each new proposal to an existing feature
+    — by branch pattern, else by name — and update it in place. Only proposals that
+    truly disappeared from the analysis window are deleted. Confirmed features are
+    never touched, as before.
+    """
     pr_by_ref = pr_by_ref or {}
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
-        # Re-running discovery regenerates proposals; confirmed features are kept.
-        conn.execute("DELETE FROM feature WHERE status = 'proposed'")
+        by_branch, by_name, stale = _match_existing(conn)
         for prop in proposals:
-            feature_id = conn.execute(
-                """
-                INSERT INTO feature (tenant_id, name, description, status, discovery_confidence)
-                VALUES (%s, %s, %s, 'proposed', %s)
-                RETURNING id
-                """,
-                (tenant_id, prop.name, prop.description, prop.confidence),
-            ).fetchone()[0]
+            key_branch = prop.branch_pattern
+            key_name = prop.name.strip().lower()
+            # Branch pattern is the stabler identity; fall back to the name. Only
+            # claim a feature once, so two proposals never collapse onto one row.
+            feature_id = None
+            if key_branch and by_branch.get(key_branch) in stale:
+                feature_id = by_branch[key_branch]
+            elif by_name.get(key_name) in stale:
+                feature_id = by_name[key_name]
+
+            if feature_id is not None:
+                stale.discard(feature_id)  # reused, so not deleted below
+                conn.execute(
+                    """
+                    UPDATE feature
+                    SET name = %s, description = %s, discovery_confidence = %s
+                    WHERE id = %s
+                    """,
+                    (prop.name, prop.description, prop.confidence, feature_id),
+                )
+                # Signals are regenerated wholesale — the PR set may have changed.
+                conn.execute("DELETE FROM feature_signal WHERE feature_id = %s", (feature_id,))
+            else:
+                feature_id = conn.execute(
+                    """
+                    INSERT INTO feature
+                        (tenant_id, name, description, status, discovery_confidence)
+                    VALUES (%s, %s, %s, 'proposed', %s)
+                    RETURNING id
+                    """,
+                    (tenant_id, prop.name, prop.description, prop.confidence),
+                ).fetchone()[0]
+
             if prop.branch_pattern:
                 _add_signal(
                     conn, tenant_id, feature_id, "branch", prop.branch_pattern, prop.confidence
@@ -569,6 +631,10 @@ def _persist_proposals(
                     branch=getattr(pr, "branch", None),
                     url=getattr(pr, "url", None),
                 )
+
+        # Proposals that no longer appear in the analysis window are dropped.
+        if stale:
+            conn.execute("DELETE FROM feature WHERE id = ANY(%s)", (list(stale),))
 
 
 def _add_signal(
