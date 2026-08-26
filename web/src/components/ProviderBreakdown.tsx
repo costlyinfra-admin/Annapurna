@@ -177,10 +177,12 @@ export function ProviderBreakdown({
                   label: w.workspace,
                   amount: w.amount,
                   pct: w.pct,
+                  meta: w.tokens > 0 ? `${compact(w.tokens)} tok` : undefined,
                   models: w.by_key.map((k) => ({
                     label: k.api_key,
                     amount: k.amount,
                     pct: k.pct,
+                    meta: k.tokens > 0 ? `${compact(k.tokens)} tok` : undefined,
                   })),
                 }))}
               />

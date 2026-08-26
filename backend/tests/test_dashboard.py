@@ -261,19 +261,21 @@ def test_trend_points_carry_a_workspace_breakdown(seeded, app_env):
 def test_spend_by_provider_workspace_api_key_breakdown(seeded, app_env):
     # Anthropic rows carry workspace/api_key identity; the By provider tab rolls it
     # up into a workspace -> API key breakdown that reconciles to the inference total.
-    for ws_id, ws_name, key, amt in [
-        ("ws_triage", "Triage WS", "triage-key", 100),
-        ("ws_triage", "Triage WS", "triage-key-2", 40),
-        ("ws_shared", "Shared WS", "shared-key", 25),
+    for ws_id, ws_name, key, amt, t_in, t_out in [
+        ("ws_triage", "Triage WS", "triage-key", 100, 900, 100),
+        ("ws_triage", "Triage WS", "triage-key-2", 40, 400, 50),
+        ("ws_shared", "Shared WS", "shared-key", 25, 200, 20),
     ]:
         app_env.execute(
             """
             INSERT INTO inference_cost
                 (tenant_id, provider, model, amount, currency, period,
-                 workspace_id, workspace_name, api_key_id, api_key_name, source, confidence)
-            VALUES (%s, 'anthropic', 'claude', %s, 'USD', %s, %s, %s, %s, %s, 'cost_api', 'high')
+                 workspace_id, workspace_name, api_key_id, api_key_name,
+                 tokens_in, tokens_out, source, confidence)
+            VALUES (%s, 'anthropic', 'claude', %s, 'USD', %s, %s, %s, %s, %s,
+                    %s, %s, 'cost_api', 'high')
             """,
-            (seeded, amt, PERIOD, ws_id, ws_name, key, key),
+            (seeded, amt, PERIOD, ws_id, ws_name, key, key, t_in, t_out),
         )
     app_env.commit()
 
@@ -286,6 +288,13 @@ def test_spend_by_provider_workspace_api_key_breakdown(seeded, app_env):
     }
     assert by_ws["Shared WS"]["amount"] == 25.0
     assert data["workspace_total"] == 165.0
+    # Provider-reported token counts (input + output) ride alongside the dollars.
+    assert by_ws["Triage WS"]["tokens"] == 1450
+    assert {k["api_key"]: k["tokens"] for k in by_ws["Triage WS"]["by_key"]} == {
+        "triage-key": 1000,
+        "triage-key-2": 450,
+    }
+    assert by_ws["Shared WS"]["tokens"] == 220
     # Each workspace's keys reconcile to its subtotal, with per-workspace shares to 100.
     for w in data["by_workspace"]:
         assert round(sum(k["amount"] for k in w["by_key"]), 2) == round(w["amount"], 2)

@@ -6,7 +6,7 @@
  */
 import { money } from "../format";
 
-type SubBar = { label: string; amount: number; pct: number };
+type SubBar = { label: string; amount: number; pct: number; meta?: string };
 export type Bar = {
   label: string;
   amount: number;
@@ -37,7 +37,10 @@ export function SpendBars({ rows }: { rows: Bar[] }) {
             <ul className="model-subrows">
               {r.models.map((m) => (
                 <li key={m.label} className="model-subrow">
-                  <span className="model-subrow-name">{m.label}</span>
+                  <span className="model-subrow-name">
+                    {m.label}
+                    {m.meta && <span className="provider-bar-meta"> · {m.meta}</span>}
+                  </span>
                   <span className="model-subrow-amt">
                     {money(m.amount)} · {m.pct.toFixed(0)}%
                   </span>

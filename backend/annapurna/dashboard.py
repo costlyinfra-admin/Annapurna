@@ -1075,7 +1075,8 @@ def spend_by_provider(
             f"""
             SELECT COALESCE(workspace_name, workspace_id) AS ws,
                    COALESCE(api_key_name, api_key_id) AS api_key,
-                   SUM(amount)
+                   SUM(amount),
+                   SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0))
             FROM inference_cost
             WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV}
               AND (workspace_id IS NOT NULL OR api_key_id IS NOT NULL)
@@ -1084,24 +1085,28 @@ def spend_by_provider(
             (start, end),
         ).fetchall()
         ws_grouped: dict[str, dict] = {}
-        for ws, api_key, amount in ws_rows:
-            entry = ws_grouped.setdefault(ws or "—", {"amount": 0.0, "keys": []})
+        for ws, api_key, amount, tokens in ws_rows:
+            entry = ws_grouped.setdefault(ws or "—", {"amount": 0.0, "tokens": 0, "keys": []})
             entry["amount"] += float(amount)
-            entry["keys"].append((api_key, float(amount)))
+            entry["tokens"] += int(tokens or 0)
+            entry["keys"].append((api_key, float(amount), int(tokens or 0)))
         workspace_total = sum(e["amount"] for e in ws_grouped.values()) or 0.0
         by_workspace = [
             {
                 "workspace": ws,
                 "amount": e["amount"],
                 "pct": (e["amount"] / workspace_total * 100.0) if workspace_total else 0.0,
+                # Provider-reported token counts (input + output), exact.
+                "tokens": e["tokens"],
                 "by_key": [
                     {
                         "api_key": api_key or "—",
                         "amount": amt,
                         # Share of THIS workspace's spend (keys sum to ~100%).
                         "pct": (amt / e["amount"] * 100.0) if e["amount"] else 0.0,
+                        "tokens": tok,
                     }
-                    for api_key, amt in sorted(e["keys"], key=lambda k: -k[1])
+                    for api_key, amt, tok in sorted(e["keys"], key=lambda k: -k[1])
                 ],
             }
             for ws, e in sorted(ws_grouped.items(), key=lambda kv: -kv[1]["amount"])

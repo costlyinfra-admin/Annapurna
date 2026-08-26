@@ -547,7 +547,9 @@ export interface ProviderSpend {
     workspace: string;
     amount: number;
     pct: number;
-    by_key: { api_key: string; amount: number; pct: number }[];
+    // Provider-reported token counts (input + output), exact.
+    tokens: number;
+    by_key: { api_key: string; amount: number; pct: number; tokens: number }[];
   }[];
 }
 

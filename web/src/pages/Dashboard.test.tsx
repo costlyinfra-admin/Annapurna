@@ -236,7 +236,8 @@ describe("Dashboard (Overview)", () => {
           workspace: "Triage WS",
           amount: 1250,
           pct: 100,
-          by_key: [{ api_key: "triage-key", amount: 1250, pct: 100 }],
+          tokens: 1500000,
+          by_key: [{ api_key: "triage-key", amount: 1250, pct: 100, tokens: 1500000 }],
         },
       ],
     });
@@ -276,6 +277,8 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText("Inference cost by workspace & API key")).toBeInTheDocument();
     expect(screen.getByText("Triage WS")).toBeInTheDocument();
     expect(screen.getByText("triage-key")).toBeInTheDocument();
+    // ...with the provider-reported token count next to each workspace/key amount.
+    expect(screen.getAllByText("· 1.5M tok")).toHaveLength(2);
     expect(screen.getByText("Inference cost by customer")).toBeInTheDocument();
     expect(screen.getByText("acme")).toBeInTheDocument();
 
