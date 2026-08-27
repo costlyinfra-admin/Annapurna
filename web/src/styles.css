@@ -1407,11 +1407,23 @@ a.pr-ref:hover {
   background: var(--accent);
 }
 
-.insight--governance::before {
+/* Dot colour carries the tone: red for an anomaly, amber for something to look
+   at, green when the news is good, accent for plain context. */
+.insight--spike::before {
+  background: var(--error);
+}
+
+.insight--governance::before,
+.insight--coverage::before,
+.insight--pace::before,
+.insight--trend::before,
+.insight--waste::before {
   background: var(--warn);
 }
 
-.insight--efficiency::before {
+.insight--efficiency::before,
+.insight--pace-down::before,
+.insight--trend-down::before {
   background: var(--good);
 }
 

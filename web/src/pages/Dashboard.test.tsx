@@ -34,8 +34,12 @@ const DATA = {
   unattributed: { build_cost: 30, inference_cost: 760 },
   highlights: { most_expensive: TRIAGE, optimization: null, highest_cost_per_user: TRIAGE },
   insights: [
-    { kind: "concentration", text: "AI threat triage represents 54% of all AI spend." },
-    { kind: "governance", text: "Unattributed spend represents 9.7% of total AI costs." },
+    {
+      kind: "spike",
+      text: "May 9 was the costliest day at $300 — 15x the $20.00 median day this period.",
+    },
+    { kind: "concentration", text: "AI threat triage represents 54% of all AI spend ($4,381)." },
+    { kind: "governance", text: "Unattributed spend represents 9.7% of total AI costs ($790)." },
   ],
   // When cost was last INGESTED (not when the page loaded).
   data_updated_at: "2026-08-20T16:07:00Z",
@@ -109,8 +113,10 @@ describe("Dashboard (Overview)", () => {
     renderDashboard();
     expect(await screen.findByText("Key insights")).toBeInTheDocument();
     expect(
-      screen.getByText("AI threat triage represents 54% of all AI spend."),
+      screen.getByText("AI threat triage represents 54% of all AI spend ($4,381)."),
     ).toBeInTheDocument();
+    // The kind drives the bullet's tone (anomalies read red, context reads accent).
+    expect(screen.getByText(/costliest day at \$300/).className).toContain("insight--spike");
   });
 
   it("shows month-over-month deltas and a token split", async () => {

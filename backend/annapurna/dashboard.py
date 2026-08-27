@@ -11,6 +11,7 @@ cost only (build is one-time-ish); it is labelled directional, not ROI.
 from __future__ import annotations
 
 import datetime as dt
+import statistics
 from collections import defaultdict
 from decimal import Decimal
 from typing import Optional
@@ -265,6 +266,10 @@ def dashboard(
         ).fetchone()
         tokens_in, tokens_out = int(tok[0]), int(tok[1])
 
+        # Extra aggregates the Key insights narrative reads (anomaly, pace,
+        # environment split, key concentration, cache coverage).
+        facts = _insight_facts(conn, start, end)
+
     rows = []
     for fid, name, _status, _disc in features:
         fid = str(fid)
@@ -310,7 +315,7 @@ def dashboard(
         "features": rows,
         "unattributed": unattributed,
         "highlights": _highlights(rows),
-        "insights": _insights(rows, unattributed, totals),
+        "insights": _insights(rows, unattributed, totals, facts, end),
         "totals": totals,
         # Data freshness: when inference / build cost were last ingested. The max
         # of the two is what the Overview shows; both are exposed for detail.
@@ -334,68 +339,308 @@ def _fmt_ratio(r: float) -> str:
     return f"{r:.1f}".rstrip("0").rstrip(".") + "x"
 
 
-def _insights(rows: list, unattributed: dict, totals: dict) -> list:
+def _insight_facts(conn, start: dt.date, end: dt.date) -> dict:
+    """Extra aggregates the Key insights narrative needs (same tx, one pass each).
+
+    Everything here is a plain SUM over stored rows — the insights layer does no
+    modelling of its own, so every sentence stays traceable to the numbers.
+    """
+    env = {
+        (e or "unclassified"): float(a)
+        for e, a in conn.execute(
+            "SELECT COALESCE(environment, 'unclassified'), SUM(amount) FROM inference_cost "
+            f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} GROUP BY 1",  # noqa: S608
+            (start, end),
+        ).fetchall()
+    }
+    # Day-resolution connector spend (hook/self-host stay monthly), used for the
+    # anomaly and pace rules. `end` is a first-of-month, so scan to the month after.
+    daily = [
+        (d, float(a))
+        for d, a in conn.execute(
+            "SELECT day, SUM(amount) FROM inference_cost_daily "
+            f"WHERE day >= %s AND day < %s AND {_ACTIVE_ENV} "  # noqa: S608
+            "GROUP BY day ORDER BY day",
+            (start, next_month(end)),
+        ).fetchall()
+    ]
+    # The calendar month before the range's last one, from the SAME table so the
+    # pace comparison is like-for-like (and independent of how long the range is).
+    prev_month_daily = float(
+        conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM inference_cost_daily "
+            f"WHERE day >= %s AND day < %s AND {_ACTIVE_ENV}",  # noqa: S608
+            (_months_back(end, 1), end),
+        ).fetchone()[0]
+    )
+    top_key = conn.execute(
+        "SELECT COALESCE(api_key_name, api_key_id), SUM(amount) FROM inference_cost "
+        f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} "  # noqa: S608
+        "AND (api_key_name IS NOT NULL OR api_key_id IS NOT NULL) "
+        "GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
+        (start, end),
+    ).fetchone()
+    # Input-token cache coverage, plus the provider that spent the most (its
+    # published cache-read discount is the one worth quoting).
+    cache_rows = conn.execute(
+        "SELECT provider, COALESCE(SUM(tokens_in), 0), COALESCE(SUM(cached_tokens_in), 0), "
+        f"SUM(amount) FROM inference_cost WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} "  # noqa: S608, E501
+        "GROUP BY provider",
+        (start, end),
+    ).fetchall()
+    lead = max(cache_rows, key=lambda r: float(r[3] or 0), default=None)
+    return {
+        "months": _month_count(start, end),
+        "env": env,
+        "daily": daily,
+        "prev_month_daily": prev_month_daily,
+        "top_key": (top_key[0], float(top_key[1])) if top_key and top_key[1] else None,
+        "tokens_in": sum(int(r[1]) for r in cache_rows),
+        "cached_tokens_in": sum(int(r[2]) for r in cache_rows),
+        "lead_provider": lead[0] if lead else None,
+    }
+
+
+#: Materiality gates for the Key insights narrative. An insight has to clear BOTH
+#: a relative and an absolute bar — a 90% swing on $4 is noise, not news.
+_SPIKE_RATIO = 2.0  # costliest day vs the median day
+_SPIKE_MIN_ABS = 25.0
+_TREND_MIN_PCT = 15.0
+_TREND_MIN_ABS = 50.0
+_PACE_MIN_PCT = 10.0
+_PACE_MIN_ABS = 50.0
+_PACE_MIN_DAYS = 5  # too few days in and the projection is guesswork
+_NONPROD_MIN_PCT = 15.0
+_NONPROD_MIN_ABS = 25.0
+_UNCLASSIFIED_MIN_PCT = 20.0
+_KEY_CONCENTRATION_PCT = 40.0
+_FEATURE_CONCENTRATION_PCT = 30.0
+_UNATTRIBUTED_MIN_PCT = 5.0
+_EFFICIENCY_MIN_RATIO = 2.0
+_CACHE_LOW_PCT = 15.0
+_CACHE_MIN_TOKENS = 5_000_000
+#: The card stays readable at about five lines; candidates are ranked, not dropped
+#: at random, so the most urgent ones survive the cut.
+_MAX_INSIGHTS = 5
+
+_ENV_LABELS = {"development": "Development", "internal": "Internal"}
+
+
+def _fmt_money(amount: float) -> str:
+    """$4,381 above $100 (cents are noise there), $27.40 below it."""
+    return f"${amount:,.0f}" if abs(amount) >= 100 else f"${amount:,.2f}"
+
+
+def _fmt_day(day: dt.date) -> str:
+    return day.strftime("%b %-d")
+
+
+def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt.date) -> list:
     """Auto-generated, plain-language executive insights (deterministic).
 
     Every sentence is derived directly from the dashboard numbers — no model,
     no black box. Each insight names the feature(s) and basis behind it.
+
+    Candidates are collected with a rank and the top few are returned, so the
+    card leads with anomalies and cost-cutting angles rather than with whatever
+    rule happened to be written first. Observed spend is never called savings.
     """
-    insights: list = []
     total_ai = totals["build_cost"] + totals["inference_cost"]
     if total_ai <= 0:
-        return insights
+        return []
+    inference_total = totals["inference_cost"]
+    candidates: list[tuple[int, dict]] = []
 
-    # 1. Concentration — the single largest slice of all AI spend.
+    def add(rank: int, kind: str, text: str) -> None:
+        candidates.append((rank, {"kind": kind, "text": text}))
+
+    # 1. Anomaly — one day far above the period's typical day.
+    daily = [(d, a) for d, a in facts["daily"] if a > 0]
+    if len(daily) >= 7:
+        peak_day, peak = max(daily, key=lambda p: p[1])
+        mid = statistics.median(a for _, a in daily)
+        if mid > 0 and peak / mid >= _SPIKE_RATIO and peak - mid >= _SPIKE_MIN_ABS:
+            add(
+                1,
+                "spike",
+                f"{_fmt_day(peak_day)} was the costliest day at {_fmt_money(peak)} — "
+                f"{_fmt_ratio(peak / mid)} the {_fmt_money(mid)} median day this period.",
+            )
+
+    # 2a. Pace — the current calendar month is still running, so a period-over-period
+    #     comparison would pit a partial month against a full one. Project instead,
+    #     from the same daily table on both sides, and label it a projection.
+    today = dt.date.today()
+    current_month = end == month_start(today)
+    month_daily = [(d, a) for d, a in daily if d >= end]
+    if current_month and month_daily:
+        through, _ = month_daily[-1]
+        covered = through.day
+        mtd = sum(a for _, a in month_daily)
+        days_in_month = (next_month(end) - end).days
+        if covered >= _PACE_MIN_DAYS and mtd > 0:
+            projected = mtd / covered * days_in_month
+            prev = facts["prev_month_daily"]
+            text = (
+                f"{end.strftime('%B')} is at {_fmt_money(mtd)} through {_fmt_day(through)} — "
+                f"on pace for about {_fmt_money(projected)} by month end"
+            )
+            delta = projected - prev
+            if (
+                prev > 0
+                and abs(delta) >= _PACE_MIN_ABS
+                and abs(delta) / prev * 100 >= _PACE_MIN_PCT
+            ):
+                direction = "above" if delta > 0 else "below"
+                prev_label = _months_back(end, 1).strftime("%B")
+                add(
+                    2,
+                    "pace" if delta > 0 else "pace-down",
+                    f"{text}, {_fmt_pct(abs(delta) / prev * 100)} {direction} "
+                    f"{prev_label}'s {_fmt_money(prev)}.",
+                )
+            else:
+                add(2, "pace", f"{text}.")
+
+    # 2b. Trend — for a closed window, compare like with like against the one before.
+    prev_ai = totals["prev_build_cost"] + totals["prev_inference_cost"]
+    if not current_month and prev_ai > 0:
+        delta = total_ai - prev_ai
+        pct = abs(delta) / prev_ai * 100
+        if abs(delta) >= _TREND_MIN_ABS and pct >= _TREND_MIN_PCT:
+            months = facts["months"]
+            window = "month" if months == 1 else f"{months} months"
+            d_run = totals["inference_cost"] - totals["prev_inference_cost"]
+            d_build = totals["build_cost"] - totals["prev_build_cost"]
+            driver = ""
+            if abs(d_run) >= abs(delta) * 0.6:
+                driver = ", mostly inference (run) cost"
+            elif abs(d_build) >= abs(delta) * 0.6:
+                driver = ", mostly build cost"
+            add(
+                2,
+                "trend" if delta > 0 else "trend-down",
+                f"AI spend is {'up' if delta > 0 else 'down'} {_fmt_pct(pct)} "
+                f"({_fmt_money(abs(delta))}) vs the previous {window}{driver}.",
+            )
+
+    # 3. Non-production spend — the clearest cost-cutting angle billing data supports.
+    #    Named as spend under review, never as savings: only the customer knows
+    #    whether a development key is still needed.
+    nonprod = {k: v for k, v in facts["env"].items() if k in _ENV_LABELS and v > 0}
+    nonprod_total = sum(nonprod.values())
+    if inference_total > 0 and nonprod_total >= _NONPROD_MIN_ABS:
+        share = nonprod_total / inference_total * 100
+        if share >= _NONPROD_MIN_PCT:
+            if len(nonprod) == 1:
+                label = _ENV_LABELS[next(iter(nonprod))]
+                add(
+                    3,
+                    "waste",
+                    f"{label} keys are {_fmt_pct(share)} of inference spend — "
+                    f"{_fmt_money(nonprod_total)} this period.",
+                )
+            else:
+                add(
+                    3,
+                    "waste",
+                    f"Non-production keys are {_fmt_pct(share)} of inference spend — "
+                    f"{_fmt_money(nonprod_total)} on development and internal work "
+                    f"this period.",
+                )
+
+    # 4. Blast radius — a single key carrying most of the bill.
+    if facts["top_key"] and inference_total > 0:
+        key, amount = facts["top_key"]
+        share = amount / inference_total * 100
+        if share >= _KEY_CONCENTRATION_PCT:
+            add(
+                4,
+                "resource",
+                f"One API key ({key}) drives {_fmt_pct(share)} of inference spend "
+                f"({_fmt_money(amount)}).",
+            )
+
+    # 5. Concentration — the single largest slice of all AI spend, when it dominates.
     combos = [(r, r["build_cost"] + r["inference_cost"]) for r in rows]
     top = max(combos, key=lambda c: c[1], default=None)
-    if top and top[1] > 0:
-        insights.append(
-            {
-                "kind": "concentration",
-                "text": f"{top[0]['name']} represents "
-                f"{_fmt_pct(top[1] / total_ai * 100)} of all AI spend.",
-            }
+    if top and top[1] > 0 and top[1] / total_ai * 100 >= _FEATURE_CONCENTRATION_PCT:
+        add(
+            5,
+            "concentration",
+            f"{top[0]['name']} represents {_fmt_pct(top[1] / total_ai * 100)} "
+            f"of all AI spend ({_fmt_money(top[1])}).",
         )
 
-    # 2. Efficiency — widest gap in cost per active user between two features.
+    # 6. Governance — how much spend isn't mapped to a feature yet (invariant 4).
+    unatt = unattributed["build_cost"] + unattributed["inference_cost"]
+    if unatt > 0 and unatt / total_ai * 100 >= _UNATTRIBUTED_MIN_PCT:
+        add(
+            6,
+            "governance",
+            f"Unattributed spend represents {_fmt_pct(unatt / total_ai * 100)} "
+            f"of total AI costs ({_fmt_money(unatt)}).",
+        )
+
+    # 7. Coverage — unclassified keys make every environment split above partial.
+    unclassified = facts["env"].get("unclassified", 0.0)
+    if inference_total > 0 and unclassified > 0:
+        share = unclassified / inference_total * 100
+        if share >= _UNCLASSIFIED_MIN_PCT:
+            add(
+                7,
+                "coverage",
+                f"{_fmt_pct(share)} of inference spend ({_fmt_money(unclassified)}) is on "
+                f"keys with no environment set, so the production split is incomplete.",
+            )
+
+    # 8. Cache coverage — an observation about what was billed, not advice: whether
+    #    this workload CAN cache more needs request-level evidence we don't have.
+    tokens_in = facts["tokens_in"]
+    if tokens_in >= _CACHE_MIN_TOKENS:
+        share = facts["cached_tokens_in"] / tokens_in * 100
+        if share < _CACHE_LOW_PCT:
+            mult = pricing.cache_read_mult(facts["lead_provider"])
+            rate = (
+                f"; cached input bills at {_fmt_pct(float(mult) * 100)} of the standard rate"
+                if mult
+                else ""
+            )
+            seen = (
+                "No input tokens were served from cache this period"
+                if facts["cached_tokens_in"] == 0
+                else f"Cache reads were {_fmt_pct(share)} of input tokens this period"
+            )
+            add(8, "cache", f"{seen}{rate}.")
+
+    # 9. Efficiency — widest gap in cost per active user between two features.
     cpu = [r for r in rows if r["cost_per_user"]]
     if len(cpu) >= 2:
         high = max(cpu, key=lambda r: r["cost_per_user"])
         low = min(cpu, key=lambda r: r["cost_per_user"])
         ratio = high["cost_per_user"] / low["cost_per_user"]
-        if ratio >= 1.5:
-            insights.append(
-                {
-                    "kind": "efficiency",
-                    "text": f"{high['name']} costs {_fmt_ratio(ratio)} more per user "
-                    f"than {low['name']}.",
-                }
+        if ratio >= _EFFICIENCY_MIN_RATIO:
+            add(
+                9,
+                "efficiency",
+                f"{high['name']} costs {_fmt_ratio(ratio)} more per user than "
+                f"{low['name']} ({_fmt_money(high['cost_per_user'])} vs "
+                f"{_fmt_money(low['cost_per_user'])} per active user).",
             )
 
-    # 3. Governance — how much spend isn't mapped to a feature yet.
-    unatt = unattributed["build_cost"] + unattributed["inference_cost"]
-    if unatt > 0:
-        insights.append(
-            {
-                "kind": "governance",
-                "text": f"Unattributed spend represents "
-                f"{_fmt_pct(unatt / total_ai * 100)} of total AI costs.",
-            }
-        )
-
-    # 4. Build-vs-run split (kept separate per invariant 2, shown as shares).
+    # 10. Build-vs-run split (kept separate per invariant 2, shown as shares).
     if totals["build_cost"] > 0 and totals["inference_cost"] > 0:
         run = totals["inference_cost"] / total_ai * 100
-        build = totals["build_cost"] / total_ai * 100
-        insights.append(
-            {
-                "kind": "split",
-                "text": f"Running these features is {_fmt_pct(run)} of AI spend; "
-                f"building them is {_fmt_pct(build)}.",
-            }
+        built = totals["build_cost"] / total_ai * 100
+        add(
+            10,
+            "split",
+            f"Running these features is {_fmt_pct(run)} of AI spend; "
+            f"building them is {_fmt_pct(built)}.",
         )
 
-    return insights
+    candidates.sort(key=lambda c: c[0])
+    return [ins for _, ins in candidates[:_MAX_INSIGHTS]]
 
 
 def _highlights(rows: list) -> dict:

@@ -6,7 +6,7 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
-from annapurna import dashboard, inference, resources
+from annapurna import dashboard, inference, providers, resources
 from annapurna.providers import CostRecord, UsageRecord
 from annapurna.sampledata import insert_sample_data
 
@@ -18,6 +18,30 @@ def seeded(tenant_id, app_env):
     insert_sample_data(app_env, tenant_id)
     app_env.commit()
     return tenant_id
+
+
+def _daily(app_env, tenant_id: str, day: dt.date, amount: float) -> None:
+    """One day of connector-billed inference spend (the daily detail table)."""
+    app_env.execute(
+        """
+        INSERT INTO inference_cost_daily
+            (tenant_id, provider, model, amount, day, source, confidence)
+        VALUES (%s, 'anthropic', 'c', %s, %s, 'cost_api', 'high')
+        """,
+        (tenant_id, amount, day),
+    )
+
+
+def _monthly(app_env, tenant_id: str, period: dt.date, amount: float) -> None:
+    """The monthly inference_cost row an ingest writes alongside the daily rows."""
+    app_env.execute(
+        """
+        INSERT INTO inference_cost
+            (tenant_id, provider, model, amount, period, source, confidence)
+        VALUES (%s, 'anthropic', 'c', %s, %s, 'cost_api', 'high')
+        """,
+        (tenant_id, amount, period),
+    )
 
 
 def test_dashboard_keeps_build_and_inference_separate(seeded):
@@ -79,14 +103,117 @@ def test_dashboard_executive_highlights(seeded):
 
 
 def test_dashboard_generates_executive_insights(seeded):
-    texts = [i["text"] for i in dashboard.dashboard(seeded, PERIOD)["insights"]]
+    insights = dashboard.dashboard(seeded, PERIOD)["insights"]
+    texts = [i["text"] for i in insights]
 
     # Concentration: triage (4200 + 181) is 54% of all AI spend (8131.75).
-    assert "AI threat triage represents 54% of all AI spend." in texts
-    # Efficiency: report cost/user (15.42) is ~2x triage's (7.78), the widest gap.
-    assert "Report generator costs 2x more per user than AI threat triage." in texts
+    assert "AI threat triage represents 54% of all AI spend ($4,381)." in texts
     # Governance: unattributed (790) is 9.7% of total AI costs.
-    assert "Unattributed spend represents 9.7% of total AI costs." in texts
+    assert "Unattributed spend represents 9.7% of total AI costs ($790)." in texts
+    # Trend: May's 8131.75 against April's 4499.75 in the base fixture.
+    assert (
+        "AI spend is up 81% ($3,632) vs the previous month, mostly inference (run) cost." in texts
+    )
+    # The card stays readable: ranked candidates, capped.
+    assert len(insights) <= 5
+
+
+def test_insights_flag_an_unusually_expensive_day(seeded, app_env):
+    # Eight ordinary $20 days and one $300 day: the outlier is called out against
+    # the MEDIAN day, so a single spike can't hide inside a monthly average.
+    for day in range(1, 9):
+        _daily(app_env, seeded, dt.date(2026, 5, day), 20)
+    _daily(app_env, seeded, dt.date(2026, 5, 9), 300)
+    app_env.commit()
+
+    insights = dashboard.dashboard(seeded, PERIOD)["insights"]
+    assert insights[0]["kind"] == "spike"  # anomalies lead the card
+    assert insights[0]["text"] == (
+        "May 9 was the costliest day at $300 — 15x the $20.00 median day this period."
+    )
+
+
+def test_insights_stay_quiet_when_every_day_looks_alike(seeded, app_env):
+    # Same total, spread evenly: nothing anomalous, so no spike insight.
+    for day in range(1, 10):
+        _daily(app_env, seeded, dt.date(2026, 5, day), 51)
+    app_env.commit()
+
+    kinds = {i["kind"] for i in dashboard.dashboard(seeded, PERIOD)["insights"]}
+    assert "spike" not in kinds
+
+
+def test_insights_project_the_current_month_pace(seeded, app_env):
+    # The running month is partial, so comparing it to a full prior month would
+    # understate it. Project from the days so far instead, and say so.
+    today = dt.date.today()
+    this_month = providers.month_start(today)
+    last_month = providers.month_start(this_month - dt.timedelta(days=1))
+    days_in_month = (providers.next_month(this_month) - this_month).days
+
+    # A flat $10/day makes the projection exactly $10 x days-in-month, whenever
+    # this test happens to run (at least the 5 days the rule requires).
+    covered = min(10, max(today.day, 5))
+    for day in range(1, covered + 1):
+        _daily(app_env, seeded, this_month.replace(day=day), 10)
+    _daily(app_env, seeded, last_month.replace(day=1), 100)  # prior month: $100
+    # An ingest writes the monthly authority row in the same transaction as the
+    # daily detail, so the fixture does too.
+    _monthly(app_env, seeded, this_month, 10 * covered)
+    _monthly(app_env, seeded, last_month, 100)
+    app_env.commit()
+
+    insights = dashboard.dashboard(seeded, start=this_month)["insights"]
+    pace = next(i for i in insights if i["kind"].startswith("pace"))
+    assert pace["kind"] == "pace"  # projected well above last month
+    assert f"on pace for about ${10 * days_in_month:,}" in pace["text"]
+    assert f"{this_month.strftime('%B')} is at ${10 * covered}" in pace["text"]
+    assert f"above {last_month.strftime('%B')}'s $100" in pace["text"]
+
+    # ...and the closed-window trend insight stays out of the way while it does.
+    assert not any(i["kind"].startswith("trend") for i in insights)
+
+
+def test_insights_size_non_production_spend(seeded, app_env):
+    # Development/internal keys are the clearest cost-cutting angle billing data
+    # supports — reported as spend under review, never as savings.
+    for env, amt in [("development", 2000), ("internal", 500)]:
+        app_env.execute(
+            """
+            INSERT INTO inference_cost
+                (tenant_id, provider, model, amount, period, environment, source, confidence)
+            VALUES (%s, 'anthropic', 'c', %s, %s, %s, 'cost_api', 'high')
+            """,
+            (seeded, amt, PERIOD, env),
+        )
+    app_env.commit()
+
+    texts = [i["text"] for i in dashboard.dashboard(seeded, PERIOD)["insights"]]
+    waste = next(t for t in texts if t.startswith("Non-production keys"))
+    # 2500 of 10290 inference dollars.
+    assert waste == (
+        "Non-production keys are 24% of inference spend — $2,500 on development "
+        "and internal work this period."
+    )
+    assert "savings" not in waste
+
+
+def test_insights_flag_a_single_dominant_api_key(seeded, app_env):
+    # Blast radius / negotiating position: one key carrying most of the bill.
+    app_env.execute(
+        """
+        INSERT INTO inference_cost
+            (tenant_id, provider, model, amount, period, api_key_name, source, confidence)
+        VALUES (%s, 'anthropic', 'c', 20000, %s, 'triage-prod', 'cost_api', 'high')
+        """,
+        (seeded, PERIOD),
+    )
+    app_env.commit()
+
+    texts = [i["text"] for i in dashboard.dashboard(seeded, PERIOD)["insights"]]
+    assert any(
+        t.startswith("One API key (triage-prod) drives 72% of inference spend") for t in texts
+    )
 
 
 def test_feature_detail_has_breakdowns_and_evidence(seeded):
