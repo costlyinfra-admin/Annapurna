@@ -27,6 +27,19 @@ export function wholeMoney(value: number | null | undefined): string {
   return USD.format(value);
 }
 
+const USD_UNIT = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 4,
+});
+
+/** Per-unit price (cost per request, per call). Sub-cent values keep their
+ *  precision — $0.0042 rather than the $0.00 `money` would round it to. */
+export function unitMoney(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return Math.abs(value) < 0.01 ? USD_UNIT.format(value) : money(value);
+}
+
 const COMPACT = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,

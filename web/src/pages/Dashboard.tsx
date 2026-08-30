@@ -16,13 +16,14 @@ import {
   type ReviewRange,
 } from "../api";
 import { ConfidenceBadge, WorthBadge } from "../components/badges";
+import { CustomerBreakdown } from "../components/CustomerBreakdown";
 import { DeveloperBreakdown } from "../components/DeveloperBreakdown";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import { PeriodSelector } from "../components/PeriodSelector";
 import { ProviderBreakdown } from "../components/ProviderBreakdown";
 import { compact, money, num } from "../format";
 
-type OverviewTab = "features" | "providers" | "developers";
+type OverviewTab = "features" | "providers" | "developers" | "customers";
 
 /** Notify the app shell (which owns the alerts badge) to re-poll alert state. */
 export const REFRESH_ALERTS_EVENT = "annapurna:refresh-alerts";
@@ -229,7 +230,7 @@ export function Dashboard() {
             className={tab === "features" ? "tab active" : "tab"}
             onClick={() => setTab("features")}
           >
-            By feature
+            By Feature
           </button>
           <button
             type="button"
@@ -238,7 +239,7 @@ export function Dashboard() {
             className={tab === "providers" ? "tab active" : "tab"}
             onClick={() => setTab("providers")}
           >
-            By provider
+            By Provider
           </button>
           <button
             type="button"
@@ -247,7 +248,16 @@ export function Dashboard() {
             className={tab === "developers" ? "tab active" : "tab"}
             onClick={() => setTab("developers")}
           >
-            By developer
+            By Developer
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "customers"}
+            className={tab === "customers" ? "tab active" : "tab"}
+            onClick={() => setTab("customers")}
+          >
+            By Customer
           </button>
         </div>
       )}
@@ -324,6 +334,8 @@ export function Dashboard() {
       {data && tab === "providers" && <ProviderBreakdown range={range} refreshKey={refreshKey} />}
 
       {data && tab === "developers" && <DeveloperBreakdown range={range} refreshKey={refreshKey} />}
+
+      {data && tab === "customers" && <CustomerBreakdown range={range} refreshKey={refreshKey} />}
     </div>
   );
 }

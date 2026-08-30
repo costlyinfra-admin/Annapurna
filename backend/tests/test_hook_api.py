@@ -87,6 +87,14 @@ def test_hook_ingest_captures_latency_and_customer(client):
     by_customer = {c["customer_id"]: c["amount"] for c in prov["by_customer"]}
     assert by_customer == {"Acme": 6.0, "Globex": 3.0}
 
+    # ...and the Overview's By Customer tab reads the same metered rows, with the
+    # per-call unit cost the SDK makes possible (Acme: $6 over 2 calls).
+    cust = client.get("/api/dashboard/customers?start=2026-06&end=2026-06").json()
+    acme = next(c for c in cust["customers"] if c["customer_id"] == "Acme")
+    assert acme["requests"] == 2
+    assert acme["cost_per_request"] == 3.0
+    assert cust["coverage_pct"] == 100.0  # every metered call here is tagged
+
 
 def test_hook_ingest_persists_optimization_signal(client, admin_conninfo):
     # Regression: the API event model must NOT strip the optional `signal` block
@@ -178,7 +186,10 @@ def test_copilot_overview_aggregates_across_features(client):
     assert body["totals"]["measured"] == 12.0
     assert "modeled_ceiling" in body["totals"] and "directional" in body["totals"]
     # Top recommendations are ranked and tagged with their feature.
-    assert body["top_recommendations"][0]["feature_name"] in {"AI threat triage", "Report generator"}  # noqa: E501
+    assert body["top_recommendations"][0]["feature_name"] in {
+        "AI threat triage",
+        "Report generator",
+    }  # noqa: E501
     # by-lever rollup: duplicate_calls across the two features.
     dup = next(x for x in body["by_lever"] if x["lever"] == "duplicate_calls")
     assert dup["count"] == 2 and dup["monthly"] == 12.0

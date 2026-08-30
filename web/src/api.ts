@@ -504,6 +504,30 @@ export interface ClassificationTrendPoint {
   workspaces?: { workspace: string; amount: number }[];
 }
 
+/** Overview "By Customer" tab — SDK-metered spend, a subset of the real bill. */
+export interface CustomerSpend {
+  start: string;
+  end: string;
+  months: number;
+  /** Metered (customer-tagged) inference spend in the window. */
+  total: number;
+  customers: {
+    customer_id: string;
+    amount: number;
+    pct: number;
+    requests: number | null;
+    cost_per_request: number | null;
+    /** Spend in the equal-length window before. null = new this window. */
+    prev_amount: number | null;
+    delta_pct: number | null;
+    months_active: number;
+  }[];
+  trend: { period: string; amount: number }[];
+  /** The whole inference bill for the window, so `total` reads as a subset. */
+  inference_total: number;
+  coverage_pct: number;
+}
+
 export interface ProviderSpend {
   start: string;
   end: string;
@@ -756,6 +780,9 @@ export const api = {
 
   providerSpend: (range?: ReviewRange) =>
     request<ProviderSpend>(`/dashboard/providers${rangeQuery(range)}`),
+
+  customerSpend: (range?: ReviewRange) =>
+    request<CustomerSpend>(`/dashboard/customers${rangeQuery(range)}`),
 
   setUsage: (id: string, activeUsers: number, period?: string) =>
     request<Feature>(`/features/${id}/usage`, {

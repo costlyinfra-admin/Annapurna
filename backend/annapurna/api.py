@@ -1128,6 +1128,17 @@ def create_app() -> FastAPI:
         e = _parse_period(end) if end else None
         return dashboard.spend_by_provider(user["tenant_id"], s, e, range)
 
+    @app.get("/api/dashboard/customers")
+    def dashboard_customers(
+        user: CurrentUser,
+        range: Optional[str] = Query(default=None, pattern=_RANGE_RE),
+        start: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        end: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        s = _parse_period(start) if start else None
+        e = _parse_period(end) if end else None
+        return dashboard.spend_by_customer(user["tenant_id"], s, e, range)
+
     @app.put("/api/features/{feature_id}/usage")
     def set_feature_usage(feature_id: str, body: UsageRequest, user: CurrentUser) -> dict:
         period = _parse_period(body.period) if body.period else None

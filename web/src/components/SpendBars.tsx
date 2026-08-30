@@ -16,13 +16,21 @@ export type Bar = {
   meta?: string;
 };
 
-export function SpendBars({ rows }: { rows: Bar[] }) {
+export function SpendBars({
+  rows,
+  verbatim = false,
+}: {
+  rows: Bar[];
+  /** Labels are identifiers the customer chose (a customer id, not a provider
+   *  name), so render them exactly as sent rather than title-casing them. */
+  verbatim?: boolean;
+}) {
   return (
     <ul className="provider-bars">
       {rows.map((r) => (
         <li key={r.label} className="provider-bar-row">
           <div className="provider-bar-head">
-            <span className="provider-bar-name">
+            <span className={verbatim ? "provider-bar-name verbatim" : "provider-bar-name"}>
               {r.label}
               {r.meta && <span className="provider-bar-meta"> · {r.meta}</span>}
             </span>

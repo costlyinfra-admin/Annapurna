@@ -345,14 +345,35 @@ def _insight_facts(conn, start: dt.date, end: dt.date) -> dict:
     Everything here is a plain SUM over stored rows — the insights layer does no
     modelling of its own, so every sentence stays traceable to the numbers.
     """
+    # Where a provider has BOTH connector and hook rows they describe the same
+    # spend, and _inference_rollup reconciles them so the bill is never counted
+    # twice. These breakdowns must use the same basis or a share could exceed
+    # 100%: keep the connector rows (they carry the workspace / API-key / env
+    # identity) and drop that provider's hook rows. A hook-only provider — self
+    # hosted, or metered before its connector was added — keeps its rows.
+    connector_providers = [
+        p
+        for p, has_connector in conn.execute(
+            "SELECT provider, bool_or(source <> 'hook') FROM inference_cost "
+            f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} GROUP BY provider",  # noqa: S608
+            (start, end),
+        ).fetchall()
+        if has_connector
+    ]
+    reconciled = "AND NOT (source = 'hook' AND provider = ANY(%s))"
+    args = (start, end, connector_providers)
+
     env = {
         (e or "unclassified"): float(a)
         for e, a in conn.execute(
             "SELECT COALESCE(environment, 'unclassified'), SUM(amount) FROM inference_cost "
-            f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} GROUP BY 1",  # noqa: S608
-            (start, end),
+            f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} {reconciled} GROUP BY 1",  # noqa: S608, E501
+            args,
         ).fetchall()
     }
+    # The denominator for every share below: the same rows the buckets came from,
+    # so the parts can never add up to more than the whole.
+    resource_basis = sum(env.values())
     # Day-resolution connector spend (hook/self-host stay monthly), used for the
     # anomaly and pace rules. `end` is a first-of-month, so scan to the month after.
     daily = [
@@ -375,10 +396,10 @@ def _insight_facts(conn, start: dt.date, end: dt.date) -> dict:
     )
     top_key = conn.execute(
         "SELECT COALESCE(api_key_name, api_key_id), SUM(amount) FROM inference_cost "
-        f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} "  # noqa: S608
+        f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} {reconciled} "  # noqa: S608
         "AND (api_key_name IS NOT NULL OR api_key_id IS NOT NULL) "
         "GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
-        (start, end),
+        args,
     ).fetchone()
     # Input-token cache coverage, plus the provider that spent the most (its
     # published cache-read discount is the one worth quoting).
@@ -392,6 +413,7 @@ def _insight_facts(conn, start: dt.date, end: dt.date) -> dict:
     return {
         "months": _month_count(start, end),
         "env": env,
+        "resource_basis": resource_basis,
         "daily": daily,
         "prev_month_daily": prev_month_daily,
         "top_key": (top_key[0], float(top_key[1])) if top_key and top_key[1] else None,
@@ -448,7 +470,6 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
     total_ai = totals["build_cost"] + totals["inference_cost"]
     if total_ai <= 0:
         return []
-    inference_total = totals["inference_cost"]
     candidates: list[tuple[int, dict]] = []
 
     def add(rank: int, kind: str, text: str) -> None:
@@ -527,10 +548,14 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
     # 3. Non-production spend — the clearest cost-cutting angle billing data supports.
     #    Named as spend under review, never as savings: only the customer knows
     #    whether a development key is still needed.
+    # Shares below use the reconciled basis these buckets were summed from, not
+    # the headline inference total — the two differ when a provider is metered by
+    # both hook and connector, and a share over 100% would be nonsense.
+    basis = facts["resource_basis"]
     nonprod = {k: v for k, v in facts["env"].items() if k in _ENV_LABELS and v > 0}
     nonprod_total = sum(nonprod.values())
-    if inference_total > 0 and nonprod_total >= _NONPROD_MIN_ABS:
-        share = nonprod_total / inference_total * 100
+    if basis > 0 and nonprod_total >= _NONPROD_MIN_ABS:
+        share = nonprod_total / basis * 100
         if share >= _NONPROD_MIN_PCT:
             if len(nonprod) == 1:
                 label = _ENV_LABELS[next(iter(nonprod))]
@@ -550,9 +575,9 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
                 )
 
     # 4. Blast radius — a single key carrying most of the bill.
-    if facts["top_key"] and inference_total > 0:
+    if facts["top_key"] and basis > 0:
         key, amount = facts["top_key"]
-        share = amount / inference_total * 100
+        share = amount / basis * 100
         if share >= _KEY_CONCENTRATION_PCT:
             add(
                 4,
@@ -584,8 +609,8 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
 
     # 7. Coverage — unclassified keys make every environment split above partial.
     unclassified = facts["env"].get("unclassified", 0.0)
-    if inference_total > 0 and unclassified > 0:
-        share = unclassified / inference_total * 100
+    if basis > 0 and unclassified > 0:
+        share = unclassified / basis * 100
         if share >= _UNCLASSIFIED_MIN_PCT:
             add(
                 7,
@@ -995,6 +1020,94 @@ def feature_inference(
         "total": total,
         "by_model": by_model,
         "trend": trend,
+    }
+
+
+def spend_by_customer(
+    tenant_id: str,
+    start: Optional[dt.date] = None,
+    end: Optional[dt.date] = None,
+    range_token: Optional[str] = None,
+) -> dict:
+    """Who the inference spend was consumed BY, over a month range.
+
+    Provider bills say what was spent, never on whose behalf — this view exists
+    only because the metering SDK tags calls with `metadata.customer_id`, and it
+    is populated from `customer_cost` (hook events) alone. It is therefore a
+    SUBSET of the authoritative inference bill, not a second version of it: the
+    coverage figure says how much of the bill carries a customer tag, so a reader
+    can never mistake the part for the whole.
+
+    Build cost has no customer (it is what the team spent making the feature),
+    so it does not appear here — invariant 2 again.
+    """
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        start, end = _resolve_range(conn, range_token, start, end)
+        n = _month_count(start, end)
+        prev_end = _months_back(start, 1)
+        prev_start = _months_back(prev_end, n - 1)
+
+        rows = conn.execute(
+            """
+            SELECT customer_id, SUM(amount), SUM(request_count), COUNT(DISTINCT period)
+            FROM customer_cost
+            WHERE period BETWEEN %s AND %s
+            GROUP BY customer_id ORDER BY SUM(amount) DESC
+            """,
+            (start, end),
+        ).fetchall()
+        # Same customers over the preceding equal-length window, for the delta.
+        prev = {
+            cid: float(a)
+            for cid, a in conn.execute(
+                "SELECT customer_id, SUM(amount) FROM customer_cost "
+                "WHERE period BETWEEN %s AND %s GROUP BY customer_id",
+                (prev_start, prev_end),
+            ).fetchall()
+        }
+        trend_rows = conn.execute(
+            "SELECT period, SUM(amount) FROM customer_cost "
+            "WHERE period BETWEEN %s AND %s GROUP BY period ORDER BY period",
+            (start, end),
+        ).fetchall()
+        # The whole inference bill for the same window — the denominator that
+        # keeps "metered" honest about being a subset. Read through the same
+        # reconciliation the Overview uses, so this ties to the headline number:
+        # a hook row and its connector row are the same dollar, counted once.
+        feats, unattributed = _inference_rollup(conn, start, end)
+        inference_total = sum(f["amount"] for f in feats.values()) + unattributed
+
+    total = sum(float(a) for _c, a, _r, _m in rows) or 0.0
+    customers = []
+    for cid, amount, requests, months_active in rows:
+        amount = float(amount)
+        requests = int(requests) if requests is not None else 0
+        was = prev.get(cid)
+        customers.append(
+            {
+                "customer_id": cid,
+                "amount": amount,
+                "pct": (amount / total * 100.0) if total else 0.0,
+                "requests": requests or None,
+                # Unit economics: what one metered call from this customer costs.
+                "cost_per_request": (amount / requests) if requests else None,
+                # Spend over the equal-length window before this one. None means
+                # the customer is new to this window — not a 0% change.
+                "prev_amount": was,
+                "delta_pct": ((amount - was) / was * 100.0) if was else None,
+                "months_active": int(months_active),
+            }
+        )
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "months": n,
+        "total": total,
+        "customers": customers,
+        "trend": [{"period": p.isoformat(), "amount": float(a)} for p, a in trend_rows],
+        # Metered spend as a share of the real inference bill for this window.
+        "inference_total": inference_total,
+        "coverage_pct": (total / inference_total * 100.0) if inference_total else 0.0,
     }
 
 

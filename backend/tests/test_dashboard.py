@@ -665,3 +665,131 @@ def test_dashboard_freshness_is_null_before_any_cost(tenant_id):
     assert data["data_updated_at"] is None
     assert data["inference_updated_at"] is None
     assert data["build_updated_at"] is None
+
+
+def _customer(app_env, tenant_id: str, cid: str, period: dt.date, amount, requests) -> None:
+    """A month of SDK-metered spend for one of the tenant's own customers."""
+    app_env.execute(
+        """
+        INSERT INTO customer_cost (tenant_id, customer_id, period, amount, request_count)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (tenant_id, cid, period, amount, requests),
+    )
+
+
+def test_spend_by_customer_ranks_with_unit_economics(seeded, app_env):
+    # Metered spend (hook events tagged with metadata.customer_id) — the one
+    # breakdown a provider bill can't produce.
+    _customer(app_env, seeded, "acme", PERIOD, 600, 20_000)
+    _customer(app_env, seeded, "globex", PERIOD, 150, 30_000)
+    app_env.commit()
+
+    data = dashboard.spend_by_customer(seeded, PERIOD)
+    top, second = data["customers"]
+    assert (top["customer_id"], second["customer_id"]) == ("acme", "globex")  # by spend
+    assert top["amount"] == 600.0 and top["pct"] == 80.0
+    assert data["total"] == 750.0
+    # Unit economics: acme costs 6x more per call than globex despite fewer calls.
+    assert top["cost_per_request"] == 0.03
+    assert second["cost_per_request"] == 0.005
+
+
+def test_spend_by_customer_reports_coverage_of_the_real_bill(seeded, app_env):
+    # Metered spend is a SUBSET of the authoritative bill, never a second version
+    # of it — the view says how much of the bill actually carries a customer tag.
+    _customer(app_env, seeded, "acme", PERIOD, 779, 1_000)
+    app_env.commit()
+
+    data = dashboard.spend_by_customer(seeded, PERIOD)
+    assert data["inference_total"] == 7790.0  # the whole month's inference bill
+    assert data["total"] == 779.0
+    assert round(data["coverage_pct"], 1) == 10.0
+    assert data["total"] < data["inference_total"]
+    # ...and that denominator is the Overview's number, not a second opinion.
+    assert (
+        data["inference_total"] == dashboard.dashboard(seeded, PERIOD)["totals"]["inference_cost"]
+    )
+
+
+def test_spend_by_customer_deltas_and_new_customers(seeded, app_env):
+    # April -> May, one growing customer and one that only shows up in May.
+    _customer(app_env, seeded, "acme", dt.date(2026, 4, 1), 100, 500)
+    _customer(app_env, seeded, "acme", PERIOD, 150, 700)
+    _customer(app_env, seeded, "newco", PERIOD, 40, 100)
+    app_env.commit()
+
+    by_id = {c["customer_id"]: c for c in dashboard.spend_by_customer(seeded, PERIOD)["customers"]}
+    assert by_id["acme"]["prev_amount"] == 100.0
+    assert by_id["acme"]["delta_pct"] == 50.0
+    # A customer with no prior spend is "new", not a 0% change.
+    assert by_id["newco"]["prev_amount"] is None
+    assert by_id["newco"]["delta_pct"] is None
+
+
+def test_spend_by_customer_is_empty_without_the_sdk(seeded):
+    # Connector-only tenant: no metered calls, so nothing to attribute — and the
+    # coverage figure says so rather than implying the bill has no customers.
+    data = dashboard.spend_by_customer(seeded, PERIOD)
+    assert data["customers"] == []
+    assert data["total"] == 0.0
+    assert data["coverage_pct"] == 0.0
+    assert data["inference_total"] > 0  # there IS a bill; it just isn't tagged
+
+
+def test_spend_by_customer_trend_spans_the_range(seeded, app_env):
+    _customer(app_env, seeded, "acme", dt.date(2026, 3, 1), 10, 100)
+    _customer(app_env, seeded, "acme", dt.date(2026, 5, 1), 30, 300)
+    app_env.commit()
+
+    data = dashboard.spend_by_customer(seeded, range_token="last_3_months")
+    assert data["months"] == 3
+    assert [(t["period"], t["amount"]) for t in data["trend"]] == [
+        ("2026-03-01", 10.0),
+        ("2026-05-01", 30.0),
+    ]
+    assert data["customers"][0]["months_active"] == 2
+
+
+def test_insight_shares_never_exceed_the_reconciled_bill(seeded, app_env):
+    # Regression: a provider metered by BOTH the hook and its cost connector
+    # describes the same spend twice. The dashboard total reconciles them, so the
+    # insight shares must use the same basis — summing raw rows once produced
+    # "101% of inference spend", which is exactly the black-box number invariant 3
+    # forbids.
+    app_env.execute(
+        """
+        INSERT INTO inference_cost
+            (tenant_id, provider, model, amount, period, source, confidence)
+        VALUES (%s, 'anthropic', 'c', 500, %s, 'hook', 'high')
+        """,
+        (seeded, PERIOD),
+    )
+    app_env.commit()
+
+    data = dashboard.dashboard(seeded, PERIOD)
+    coverage = next(t for t in (i["text"] for i in data["insights"]) if "no environment set" in t)
+    # The seeded month's connector bill is $7,790, all of it unclassified — the
+    # hook rows don't inflate it past 100%.
+    assert coverage.startswith("100% of inference spend ($7,790)")
+    assert data["totals"]["inference_cost"] == 7790.0
+
+
+def test_customer_coverage_uses_the_reconciled_bill(seeded, app_env):
+    # Same reconciliation trap as the insights: hook rows and their connector rows
+    # are the same dollar. Coverage must divide by the bill the Overview reports,
+    # or a fully-tagged tenant would appear to cover less than it does.
+    _customer(app_env, seeded, "acme", PERIOD, 500, 1_000)
+    app_env.execute(
+        """
+        INSERT INTO inference_cost
+            (tenant_id, provider, model, amount, period, source, confidence)
+        VALUES (%s, 'anthropic', 'c', 500, %s, 'hook', 'high')
+        """,
+        (seeded, PERIOD),
+    )
+    app_env.commit()
+
+    data = dashboard.spend_by_customer(seeded, PERIOD)
+    # $7,790 stays the bill — the hook row doesn't add a sixth $500 on top of it.
+    assert data["inference_total"] == 7790.0

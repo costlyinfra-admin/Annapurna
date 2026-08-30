@@ -9,7 +9,13 @@ vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
   return {
     ...actual,
-    api: { me: vi.fn(), dashboard: vi.fn(), providerSpend: vi.fn(), refreshInference: vi.fn() },
+    api: {
+      me: vi.fn(),
+      dashboard: vi.fn(),
+      providerSpend: vi.fn(),
+      customerSpend: vi.fn(),
+      refreshInference: vi.fn(),
+    },
   };
 });
 
@@ -251,7 +257,7 @@ describe("Dashboard (Overview)", () => {
     // Features tab is the default view.
     await screen.findByText("Key insights");
 
-    fireEvent.click(screen.getByRole("tab", { name: "By provider" }));
+    fireEvent.click(screen.getByRole("tab", { name: "By Provider" }));
     // Spend by source splits into Inference / Build sub-tabs; Inference is default.
     expect(await screen.findByText("Inference (run) cost by provider")).toBeInTheDocument();
     // Build cost lives on the other sub-tab — hidden until selected.
@@ -349,7 +355,7 @@ describe("Dashboard (Overview)", () => {
     renderDashboard();
     await screen.findByText("Key insights");
 
-    fireEvent.click(screen.getByRole("tab", { name: "By developer" }));
+    fireEvent.click(screen.getByRole("tab", { name: "By Developer" }));
     expect(await screen.findByText("Build cost by developer")).toBeInTheDocument();
     // The combined "Name (handle)" label renders; name-only falls back gracefully.
     expect(screen.getByText("Muzaffar (Muzaffar-ni)")).toBeInTheDocument();
@@ -357,6 +363,81 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
     // Each developer breaks down by the tool they used.
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
+  });
+
+  it("shows spend per customer, with unit economics and coverage of the bill", async () => {
+    vi.mocked(api.customerSpend).mockResolvedValue({
+      start: "2026-05-01",
+      end: "2026-05-01",
+      months: 1,
+      total: 750,
+      customers: [
+        {
+          customer_id: "acme",
+          amount: 600,
+          pct: 80,
+          requests: 20000,
+          cost_per_request: 0.03,
+          prev_amount: 400,
+          delta_pct: 50,
+          months_active: 1,
+        },
+        {
+          customer_id: "globex",
+          amount: 150,
+          pct: 20,
+          requests: 30000,
+          cost_per_request: 0.005,
+          prev_amount: null,
+          delta_pct: null,
+          months_active: 1,
+        },
+      ],
+      trend: [{ period: "2026-05-01", amount: 750 }],
+      inference_total: 5000,
+      coverage_pct: 15,
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+
+    fireEvent.click(screen.getByRole("tab", { name: "By Customer" }));
+    expect(await screen.findByText("Inference cost by customer")).toBeInTheDocument();
+
+    // Every customer is listed in the table (the bars above show only the top few).
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("acme")).toBeInTheDocument();
+    expect(within(table).getByText("globex")).toBeInTheDocument();
+    // Sub-cent unit cost keeps its precision instead of rounding to $0.00.
+    expect(screen.getByText("$0.005")).toBeInTheDocument();
+    expect(screen.getByText("$0.03")).toBeInTheDocument();
+    // A customer with no prior spend reads as new, not as a 0% change.
+    expect(screen.getByText("new")).toBeInTheDocument();
+    expect(screen.getByText(/▲ 50%/)).toBeInTheDocument();
+    // Metered spend is a subset of the bill, and the page says how big a subset.
+    expect(screen.getByText(/15% of the \$5,000 inference bill/)).toBeInTheDocument();
+  });
+
+  it("explains that per-customer cost needs the SDK when nothing is tagged", async () => {
+    vi.mocked(api.customerSpend).mockResolvedValue({
+      start: "2026-05-01",
+      end: "2026-05-01",
+      months: 1,
+      total: 0,
+      customers: [],
+      trend: [],
+      inference_total: 5000,
+      coverage_pct: 0,
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+
+    fireEvent.click(screen.getByRole("tab", { name: "By Customer" }));
+    expect(await screen.findByText("No customer-attributed spend yet")).toBeInTheDocument();
+    expect(screen.getByText(/never who it was spent on/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Install the SDK" })).toHaveAttribute(
+      "href",
+      "/install-sdk",
+    );
   });
 
   it("re-pulls the provider/developer breakdowns on refresh", async () => {
@@ -382,7 +463,7 @@ describe("Dashboard (Overview)", () => {
     await screen.findByText("Key insights");
 
     // The inference/build breakdowns live on the By provider tab.
-    fireEvent.click(screen.getByRole("tab", { name: "By provider" }));
+    fireEvent.click(screen.getByRole("tab", { name: "By Provider" }));
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledTimes(1));
 
     // Refresh must re-pull them too — not just the summary tiles.

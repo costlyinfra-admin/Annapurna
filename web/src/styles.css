@@ -498,6 +498,12 @@ select {
   text-transform: capitalize;
 }
 
+/* Identifiers the customer chose (customer ids) — shown exactly as they sent
+   them, so they still match their own systems. */
+.provider-bar-name.verbatim {
+  text-transform: none;
+}
+
 /* Secondary context beside a bar's label (e.g. "1.2M tok") — kept as written. */
 .provider-bar-meta {
   font-weight: 400;
