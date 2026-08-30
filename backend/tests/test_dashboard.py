@@ -793,3 +793,29 @@ def test_customer_coverage_uses_the_reconciled_bill(seeded, app_env):
     data = dashboard.spend_by_customer(seeded, PERIOD)
     # $7,790 stays the bill — the hook row doesn't add a sixth $500 on top of it.
     assert data["inference_total"] == 7790.0
+
+
+def test_demo_seed_fills_the_by_customer_tab(tenant_id, app_env):
+    # The demo tenant must never land on the "install the SDK" empty state — that
+    # message is for real connector-only tenants, and it makes the demo look
+    # broken. This pins the extended (demo) seed to a populated, coherent view.
+    insert_sample_data(app_env, tenant_id, extended=True)
+    app_env.commit()
+
+    data = dashboard.spend_by_customer(tenant_id, PERIOD)
+    assert len(data["customers"]) >= 5
+    assert data["total"] > 0
+
+    # Metered spend stays a believable SUBSET of the bill, as the tab claims.
+    assert 0 < data["coverage_pct"] < 100
+    assert data["total"] < data["inference_total"]
+    assert round(sum(c["pct"] for c in data["customers"]), 2) == 100.0
+
+    # The table is worth looking at: the rows differ from each other.
+    assert any(c["delta_pct"] is None for c in data["customers"])  # a new customer
+    assert any((c["delta_pct"] or 0) < 0 for c in data["customers"])  # one shrinking
+    per_call = [c["cost_per_request"] for c in data["customers"]]
+    assert max(per_call) > min(per_call) * 10  # unit economics actually vary
+
+    # And a trend to draw: 12 months of history for the longest-running customers.
+    assert len(dashboard.spend_by_customer(tenant_id, range_token="last_12_months")["trend"]) == 12

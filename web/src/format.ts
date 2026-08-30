@@ -33,11 +33,12 @@ const USD_UNIT = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
 });
 
-/** Per-unit price (cost per request, per call). Sub-cent values keep their
- *  precision — $0.0042 rather than the $0.00 `money` would round it to. */
+/** Per-unit price (cost per request, per call). Sub-dollar values keep four
+ *  decimals — $0.0042 rather than the $0.00 `money` would round it to, and
+ *  $0.0556 rather than a $0.06 that hides the difference between two rows. */
 export function unitMoney(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  return Math.abs(value) < 0.01 ? USD_UNIT.format(value) : money(value);
+  return Math.abs(value) < 1 ? USD_UNIT.format(value) : money(value);
 }
 
 const COMPACT = new Intl.NumberFormat("en-US", {

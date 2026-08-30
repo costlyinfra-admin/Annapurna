@@ -640,6 +640,16 @@ def _months(start: tuple, count: int) -> list:
     return out
 
 
+def _months_ending(last: _dt.date, count: int) -> list:
+    """`count` first-of-month dates ending at `last` (so the newest month is last)."""
+    month = last.month - (count - 1)
+    year = last.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    return _months((year, month), count)
+
+
 def _ramp(latest: float, i: int, n: int, low: float = 0.4) -> float:
     """Scale `latest` from `low` (oldest month) up to 1.0 (newest)."""
     if n <= 1:
@@ -921,7 +931,59 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
     #    confidence), and it carries a one-time fine-tuning run as BUILD cost.
     _add_self_hosted_demo(conn, tenant_id)
 
+    # 4) Per-customer metered spend (what the SDK adds on top of the connectors).
+    _add_customer_demo(conn, tenant_id)
+
     return len(_NEW_FEATURES) + 2
+
+
+#: Demo customers for the Overview's "By Customer" tab. Acme Security is a
+#: cybersecurity vendor, so these are the enterprises it sells to. Each is shaped
+#: to show a different reading of the same table, because a list of near-identical
+#: rows teaches nothing:
+#:   (customer, latest monthly $, calls per $, months of history, growth floor)
+#:   * northwind-financial — the whale: heavy Opus review work, few calls, by far
+#:     the highest cost per request;
+#:   * globex-retail — the opposite: millions of cheap triage calls, a fraction of
+#:     a cent each, so volume and spend rank differently;
+#:   * vertex-health / initech-legal — steady mid-market;
+#:   * umbrella-defense — onboarded last month, so it reads "new", not "+0%";
+#:   * soylent-logistics — winding down, the one shrinking line.
+_DEMO_CUSTOMERS = [
+    ("northwind-financial", 2650.00, 18, 12, 0.55),
+    ("globex-retail", 1180.00, 5200, 12, 0.35),
+    ("vertex-health", 1240.00, 240, 12, 0.50),
+    ("initech-legal", 610.00, 310, 9, 0.45),
+    ("umbrella-defense", 480.00, 190, 1, 1.00),
+    ("soylent-logistics", 205.00, 260, 12, 2.40),
+]
+
+
+def _add_customer_demo(conn, tenant_id) -> None:
+    """Per-customer metered spend, so the "By Customer" tab has something to show.
+
+    In production this table is written only by the metering SDK (hook events
+    carrying `metadata.customer_id`) — which is why the tab explains the SDK when
+    it is empty. The demo tenant seeds it directly rather than faking hook rows in
+    `inference_cost`: those would be reconciled against the connector bill and
+    would move the demo's per-feature attribution into Unattributed. Customer
+    spend therefore stays a believable SUBSET of the bill (roughly a third of it),
+    which is exactly how the tab describes itself.
+    """
+    for customer, latest, calls_per_dollar, months, low in _DEMO_CUSTOMERS:
+        periods = _months_ending(DEFAULT_PERIOD, months)
+        n = len(periods)
+        for i, period in enumerate(periods):
+            amount = round(_ramp(latest, i, n, low) * _SEASON[period.month - 1], 2)
+            if amount <= 0:
+                continue
+            conn.execute(
+                """
+                INSERT INTO customer_cost (tenant_id, customer_id, period, amount, request_count)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (tenant_id, customer, period, amount, int(amount * calls_per_dollar)),
+            )
 
 
 def _add_self_hosted_demo(conn, tenant_id) -> None:
