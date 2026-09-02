@@ -627,6 +627,9 @@ def _persist_proposals(
                     actor=getattr(pr, "author", None),
                     commits=getattr(pr, "commits", None),
                     files_changed=getattr(pr, "changed_files", None),
+                    additions=getattr(pr, "additions", None),
+                    deletions=getattr(pr, "deletions", None),
+                    merged_at=_merged_date(pr),
                     title=getattr(pr, "title", None),
                     branch=getattr(pr, "branch", None),
                     url=getattr(pr, "url", None),
@@ -647,6 +650,9 @@ def _add_signal(
     actor=None,
     commits=None,
     files_changed=None,
+    additions=None,
+    deletions=None,
+    merged_at=None,
     title=None,
     branch=None,
     url=None,
@@ -655,8 +661,8 @@ def _add_signal(
         """
         INSERT INTO feature_signal (tenant_id, feature_id, signal_type, external_ref,
                                     confidence, source, actor, commits, files_changed,
-                                    title, branch, url)
-        VALUES (%s, %s, %s, %s, %s, 'github', %s, %s, %s, %s, %s, %s)
+                                    additions, deletions, merged_at, title, branch, url)
+        VALUES (%s, %s, %s, %s, %s, 'github', %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
@@ -667,11 +673,25 @@ def _add_signal(
             actor,
             commits,
             files_changed,
+            additions,
+            deletions,
+            merged_at,
             title,
             branch,
             url,
         ),
     )
+
+
+def _merged_date(pr) -> Optional[dt.date]:
+    """The PR's own merge date — the date the work landed, not when we synced."""
+    raw = getattr(pr, "merged_at", None)
+    if not raw:
+        return None
+    try:
+        return dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
 
 
 # Type alias documenting the clusterer contract (used in tests for injection).

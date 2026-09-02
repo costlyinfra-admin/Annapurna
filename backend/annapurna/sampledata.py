@@ -56,12 +56,16 @@ def _add_signal(
     actor=None,
     commits=None,
     files_changed=None,
+    additions=None,
+    deletions=None,
+    merged_at=None,
 ):
     conn.execute(
         """
         INSERT INTO feature_signal (tenant_id, feature_id, signal_type, external_ref,
-                                    confidence, source, actor, commits, files_changed)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    confidence, source, actor, commits, files_changed,
+                                    additions, deletions, merged_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             tenant_id,
@@ -73,6 +77,9 @@ def _add_signal(
             actor,
             commits,
             files_changed,
+            additions,
+            deletions,
+            merged_at,
         ),
     )
 
@@ -304,6 +311,9 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         actor="alice",
         commits=9,
         files_changed=21,
+        additions=480,
+        deletions=120,
+        merged_at=_dt.date(2026, 5, 6),
     )
     _add_signal(
         conn,
@@ -315,6 +325,9 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         actor="alice",
         commits=5,
         files_changed=16,
+        additions=260,
+        deletions=90,
+        merged_at=_dt.date(2026, 5, 14),
     )
     _add_signal(
         conn,
@@ -326,6 +339,9 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         actor="bob",
         commits=7,
         files_changed=12,
+        additions=310,
+        deletions=45,
+        merged_at=_dt.date(2026, 5, 11),
     )
     _add_signal(
         conn,
@@ -337,6 +353,9 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         actor="alice",
         commits=6,
         files_changed=9,
+        additions=175,
+        deletions=60,
+        merged_at=_dt.date(2026, 5, 19),
     )
     _add_signal(conn, tenant_id, soc, "repo", "acme/soc-copilot", "med")
     _add_signal(
@@ -349,6 +368,9 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         actor="carol",
         commits=4,
         files_changed=7,
+        additions=140,
+        deletions=25,
+        merged_at=_dt.date(2026, 5, 8),
     )
     _add_signal(
         conn,
@@ -360,6 +382,9 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         actor="dave",
         commits=3,
         files_changed=5,
+        additions=95,
+        deletions=15,
+        merged_at=_dt.date(2026, 5, 21),
     )
 
     # --- Build cost (by developer and tool) -------------------------------
@@ -934,6 +959,12 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
     # 4) Per-customer metered spend (what the SDK adds on top of the connectors).
     _add_customer_demo(conn, tenant_id)
 
+    # 5) A year of merged PRs, so "By Developer" can report activity per period.
+    all_features = conn.execute(
+        "SELECT id FROM feature WHERE tenant_id = %s ORDER BY created_at", (tenant_id,)
+    ).fetchall()
+    _add_activity_demo(conn, tenant_id, [f[0] for f in all_features])
+
     return len(_NEW_FEATURES) + 2
 
 
@@ -984,6 +1015,57 @@ def _add_customer_demo(conn, tenant_id) -> None:
                 """,
                 (tenant_id, customer, period, amount, int(amount * calls_per_dollar)),
             )
+
+
+#: Demo engineering activity for the "By Developer" tab's productivity section.
+#: Shaped so the table shows genuinely different working styles rather than six
+#: variations of the same row — the point being that PR count alone ranks people
+#: very differently from lines or from what their tooling costs.
+#:   (handle, PRs/month, commits per PR, files per PR, +lines per PR, -lines per PR)
+_DEMO_ACTIVITY = [
+    ("alice", 5, 8, 19, 420, 130),  # steady, large well-tested changes
+    ("bob", 9, 3, 6, 130, 40),  # many small PRs — highest count, least code
+    ("carol", 3, 11, 34, 690, 310),  # few PRs, the biggest refactors
+    ("dave", 4, 5, 9, 180, 55),
+    ("erin", 6, 6, 13, 260, 95),
+    ("frank", 2, 7, 15, 210, 480),  # net deleter — removing more than adding
+    ("grace", 4, 9, 22, 380, 140),
+    ("heidi", 3, 4, 8, 150, 60),
+]
+
+
+def _add_activity_demo(conn, tenant_id, feature_ids: list) -> None:
+    """A year of merged PRs per developer, so activity can be read per period.
+
+    Real PR evidence arrives from the GitHub connector during discovery. The demo
+    fabricates an equivalent stream: every PR carries its own merge date, author
+    and size, which is exactly what the Overview's activity table reads. Numbers
+    vary month to month (the same seasonal curve the cost history uses) so the
+    period selector visibly changes the table instead of showing a flat count.
+    """
+    periods = _months_ending(DEFAULT_PERIOD, 12)
+    number = 2000
+    for handle, per_month, commits, files, adds, dels in _DEMO_ACTIVITY:
+        for i, period in enumerate(periods):
+            count = max(1, round(per_month * _SEASON[period.month - 1] * _ramp(1.0, i, 12, 0.7)))
+            for k in range(count):
+                number += 1
+                # Spread merges across the month so a partial range still cuts it.
+                day = min(28, 1 + (k * 29) // max(count, 1))
+                _add_signal(
+                    conn,
+                    tenant_id,
+                    feature_ids[number % len(feature_ids)],
+                    "pr",
+                    f"acme/core#{number}",
+                    "high",
+                    actor=handle,
+                    commits=commits,
+                    files_changed=files,
+                    additions=adds,
+                    deletions=dels,
+                    merged_at=_dt.date(period.year, period.month, day),
+                )
 
 
 def _add_self_hosted_demo(conn, tenant_id) -> None:

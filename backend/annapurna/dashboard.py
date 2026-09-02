@@ -1354,6 +1354,63 @@ def spend_by_provider(
             for d in sorted(developers.values(), key=lambda d: -d["amount"])
         ]
 
+        # ---- Engineering activity per developer (what they shipped) --------
+        # Build cost says what a developer's AI tooling cost; this says what came
+        # out the other side. It reads PR evidence — the same feature_signal rows
+        # behind every build-cost attribution — scoped by the PR's own merge date,
+        # so it lines up with the spend beside it instead of being all-time.
+        # PRs merged before migration 0035 have no merged_at and no line counts;
+        # they are reported as unknown ("—"), never as zero.
+        activity_rows = conn.execute(
+            """
+            SELECT lower(actor),
+                   COUNT(DISTINCT external_ref),
+                   COUNT(DISTINCT feature_id),
+                   SUM(commits), SUM(files_changed), SUM(additions), SUM(deletions)
+            FROM feature_signal
+            WHERE signal_type = 'pr' AND actor IS NOT NULL
+              AND merged_at >= %s AND merged_at < %s
+            GROUP BY lower(actor)
+            """,
+            (start, next_month(end)),
+        ).fetchall()
+        # Spend per GitHub handle, matched case-insensitively — the same rule the
+        # build-cost allocator uses to attribute a PR to a developer.
+        spend_by_handle: dict[str, dict] = {}
+        for d in developers.values():
+            if d["handle"]:
+                spend_by_handle[d["handle"].lower()] = d
+        developer_activity = [
+            {
+                "handle": handle,
+                "label": (
+                    developer_label(
+                        spend_by_handle[handle]["name"], spend_by_handle[handle]["handle"]
+                    )
+                    if handle in spend_by_handle
+                    else handle
+                ),
+                "prs": int(prs),
+                # Features this developer's merged PRs touched.
+                "features": int(features),
+                "commits": int(commits) if commits is not None else None,
+                "files_changed": int(files) if files is not None else None,
+                "additions": int(adds) if adds is not None else None,
+                "deletions": int(dels) if dels is not None else None,
+                # Their AI coding-tool spend over the SAME window, so the two
+                # halves of the row are comparable.
+                "build_cost": spend_by_handle[handle]["amount"]
+                if handle in spend_by_handle
+                else 0.0,
+                "cost_per_pr": (spend_by_handle[handle]["amount"] / prs)
+                if handle in spend_by_handle and prs
+                else None,
+            }
+            for handle, prs, features, commits, files, adds, dels in sorted(
+                activity_rows, key=lambda r: -r[1]
+            )
+        ]
+
         # ---- Per-customer metered spend (from SDK metadata.customer_id) ----
         customer_rows = conn.execute(
             """
@@ -1480,6 +1537,7 @@ def spend_by_provider(
         "build_total": build_total,
         "build_by_tool": build_by_tool,
         "build_by_developer": build_by_developer,
+        "developer_activity": developer_activity,
         "build_trend": build_trend,
         "customer_total": customer_total,
         "by_customer": by_customer,

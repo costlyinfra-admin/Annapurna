@@ -21,6 +21,7 @@ const EMPTY: ProviderSpend = {
   build_total: 0,
   build_by_tool: [],
   build_by_developer: [],
+  developer_activity: [],
   build_trend: [],
   customer_total: 0,
   by_customer: [],

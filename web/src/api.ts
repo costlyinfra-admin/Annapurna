@@ -545,6 +545,19 @@ export interface ProviderSpend {
   daily_trend: ClassificationTrendPoint[];
   build_total: number;
   build_by_tool: { tool: string; amount: number; pct: number }[];
+  /** Engineering activity per developer over the same window (PR evidence). */
+  developer_activity: {
+    handle: string;
+    label: string;
+    prs: number;
+    features: number;
+    commits: number | null;
+    files_changed: number | null;
+    additions: number | null;
+    deletions: number | null;
+    build_cost: number;
+    cost_per_pr: number | null;
+  }[];
   build_by_developer: {
     developer_id: string;
     // Display label: "Name (handle)", or whichever identity is available.

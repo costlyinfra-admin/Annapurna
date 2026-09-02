@@ -31,6 +31,27 @@ const TRIAGE = {
   confidence: "med",
 };
 
+/** An empty ProviderSpend — spread it and override only what a test cares about. */
+const EMPTY_SPEND = {
+  start: "2026-05-01",
+  end: "2026-05-01",
+  total: 0,
+  by_provider: [],
+  trend: [],
+  daily_trend: [],
+  build_total: 0,
+  build_by_tool: [],
+  developer_activity: [],
+  build_by_developer: [],
+  build_trend: [],
+  customer_total: 0,
+  by_customer: [],
+  token_total: 0,
+  by_token_type: [],
+  workspace_total: 0,
+  by_workspace: [],
+};
+
 const DATA = {
   period: "2026-05-01",
   start: "2026-05-01",
@@ -218,6 +239,7 @@ describe("Dashboard (Overview)", () => {
         { tool: "claude_code", amount: 181, pct: 67.04 },
         { tool: "cursor", amount: 89, pct: 32.96 },
       ],
+      developer_activity: [],
       build_by_developer: [
         {
           developer_id: "erin",
@@ -327,6 +349,7 @@ describe("Dashboard (Overview)", () => {
       daily_trend: [],
       build_total: 270,
       build_by_tool: [],
+      developer_activity: [],
       build_by_developer: [
         {
           developer_id: "Muzaffar-ni",
@@ -363,6 +386,67 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
     // Each developer breaks down by the tool they used.
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
+  });
+
+  it("tracks engineering activity per developer under the cost breakdown", async () => {
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      ...EMPTY_SPEND,
+      build_total: 270,
+      build_by_developer: [
+        {
+          developer_id: "bob",
+          label: "Bob (bob)",
+          amount: 64,
+          pct: 100,
+          by_tool: [{ tool: "cursor", amount: 64, pct: 100 }],
+        },
+      ],
+      developer_activity: [
+        {
+          handle: "bob",
+          label: "Bob (bob)",
+          prs: 11,
+          features: 10,
+          commits: 37,
+          files_changed: 72,
+          additions: 1610,
+          deletions: 445,
+          build_cost: 64,
+          cost_per_pr: 5.82,
+        },
+        {
+          // Discovered before line counts were recorded — unknown, not zero.
+          handle: "olddev",
+          label: "olddev",
+          prs: 2,
+          features: 1,
+          commits: null,
+          files_changed: null,
+          additions: null,
+          deletions: null,
+          build_cost: 0,
+          cost_per_pr: null,
+        },
+      ],
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+
+    fireEvent.click(screen.getByRole("tab", { name: "By Developer" }));
+    expect(await screen.findByText("Engineering activity")).toBeInTheDocument();
+
+    const activity = screen.getByText("Engineering activity").closest("section")!;
+    const bob = within(activity).getByText("Bob (bob)").closest("tr")!;
+    expect(within(bob).getByText("11")).toBeInTheDocument(); // PRs
+    expect(within(bob).getByText(/\+1\.6K/)).toBeInTheDocument(); // lines added
+    expect(within(bob).getByText("$5.82")).toBeInTheDocument(); // cost per PR
+
+    // Missing stats read as an em dash, never as a zero that implies no work.
+    const old = within(activity).getByText("olddev").closest("tr")!;
+    expect(within(old).getAllByText("—").length).toBeGreaterThan(0);
+
+    // Counting shipped work is not a performance rating, and the page says so.
+    expect(screen.getByText(/activity, not performance/)).toBeInTheDocument();
   });
 
   it("shows spend per customer, with unit economics and coverage of the bill", async () => {
@@ -450,6 +534,7 @@ describe("Dashboard (Overview)", () => {
       daily_trend: [],
       build_total: 0,
       build_by_tool: [],
+      developer_activity: [],
       build_by_developer: [],
       build_trend: [],
       customer_total: 0,

@@ -819,3 +819,93 @@ def test_demo_seed_fills_the_by_customer_tab(tenant_id, app_env):
 
     # And a trend to draw: 12 months of history for the longest-running customers.
     assert len(dashboard.spend_by_customer(tenant_id, range_token="last_12_months")["trend"]) == 12
+
+
+def test_developer_activity_is_scoped_to_the_period(seeded, app_env):
+    # Activity sits beside per-developer spend on the same tab, so it must cover
+    # the same window — scoped by the PR's own MERGE date, not by when Annapurna
+    # happened to sync it.
+    app_env.execute(
+        """
+        INSERT INTO feature_signal
+            (tenant_id, feature_id, signal_type, external_ref, confidence, source,
+             actor, commits, files_changed, additions, deletions, merged_at)
+        SELECT %s, id, 'pr', 'acme/core#900', 'high', 'github',
+               'alice', 4, 8, 200, 50, %s
+        FROM feature WHERE tenant_id = %s ORDER BY created_at LIMIT 1
+        """,
+        (seeded, dt.date(2026, 2, 14), seeded),
+    )
+    app_env.commit()
+
+    may = {
+        a["handle"]: a for a in dashboard.spend_by_provider(seeded, PERIOD)["developer_activity"]
+    }
+    # The fixture merged alice's three PRs in May; February's falls outside it.
+    assert may["alice"]["prs"] == 3
+    assert may["alice"]["commits"] == 20  # 9 + 5 + 6
+    assert may["alice"]["additions"] == 915  # 480 + 260 + 175
+
+    wide = {
+        a["handle"]: a
+        for a in dashboard.spend_by_provider(seeded, range_token="last_6_months")[
+            "developer_activity"
+        ]
+    }
+    assert wide["alice"]["prs"] == 4  # February's PR is inside this window
+
+
+def test_developer_activity_joins_spend_by_github_handle(seeded):
+    activity = dashboard.spend_by_provider(seeded, PERIOD)["developer_activity"]
+    by_handle = {a["handle"]: a for a in activity}
+
+    # Ranked by PRs merged, and each row carries the same window's tooling spend
+    # so cost per PR is a like-for-like number.
+    assert [a["handle"] for a in activity] == sorted(by_handle, key=lambda h: -by_handle[h]["prs"])
+    alice = by_handle["alice"]
+    assert alice["label"] == "Alice (alice)"  # matched case-insensitively to build_cost
+    assert alice["features"] == 2  # her PRs touched triage + report
+    assert alice["build_cost"] > 0
+    assert round(alice["cost_per_pr"], 2) == round(alice["build_cost"] / alice["prs"], 2)
+
+
+def test_developer_activity_reports_missing_stats_as_unknown(seeded, app_env):
+    # A PR discovered before migration 0035 has no line counts. Reporting 0 lines
+    # would read as "wrote nothing", which is a different claim from "we don't know".
+    app_env.execute(
+        """
+        INSERT INTO feature_signal
+            (tenant_id, feature_id, signal_type, external_ref, confidence, source,
+             actor, merged_at)
+        SELECT %s, id, 'pr', 'acme/core#901', 'high', 'github', 'zoe', %s
+        FROM feature WHERE tenant_id = %s ORDER BY created_at LIMIT 1
+        """,
+        (seeded, PERIOD, seeded),
+    )
+    app_env.commit()
+
+    zoe = next(
+        a
+        for a in dashboard.spend_by_provider(seeded, PERIOD)["developer_activity"]
+        if a["handle"] == "zoe"
+    )
+    assert zoe["prs"] == 1
+    assert zoe["additions"] is None and zoe["commits"] is None
+    # No build-cost row for zoe: no AI tooling spend, so no cost per PR to report.
+    assert zoe["build_cost"] == 0.0
+    assert zoe["cost_per_pr"] is None
+    assert zoe["label"] == "zoe"
+
+
+def test_demo_seed_fills_the_developer_activity_table(tenant_id, app_env):
+    # Same guard as the By Customer tab: the demo must show a populated, varied
+    # table, not an empty section.
+    insert_sample_data(app_env, tenant_id, extended=True)
+    app_env.commit()
+
+    rows = dashboard.spend_by_provider(tenant_id, PERIOD)["developer_activity"]
+    assert len(rows) >= 6
+    # The table is worth reading: whoever merges the most PRs is NOT whoever
+    # writes the most code, which is the whole caveat the section carries.
+    assert max(rows, key=lambda r: r["prs"]) is not max(rows, key=lambda r: r["additions"])
+    assert all(r["commits"] and r["additions"] for r in rows)

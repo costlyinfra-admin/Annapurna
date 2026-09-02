@@ -39,8 +39,11 @@ class PullRequest:
     merged_at: str  # ISO-8601
     url: str
     labels: list[str] = field(default_factory=list)  # PR labels (strong capability signal)
-    commits: Optional[int] = None  # filled from the PR detail endpoint (best-effort)
+    # All four filled from the PR detail endpoint in one request (best-effort).
+    commits: Optional[int] = None
     changed_files: Optional[int] = None
+    additions: Optional[int] = None
+    deletions: Optional[int] = None
 
     @property
     def ref(self) -> str:
@@ -226,7 +229,12 @@ class GitHubClient:
                     continue
                 pull = _to_pull_request(repo, pr)
                 if with_stats:
-                    pull.commits, pull.changed_files = self._fetch_pr_stats(repo, pull.number)
+                    (
+                        pull.commits,
+                        pull.changed_files,
+                        pull.additions,
+                        pull.deletions,
+                    ) = self._fetch_pr_stats(repo, pull.number)
                 out.append(pull)
             # Sorted by updated desc: once an entire page predates the window, stop.
             if page_all_stale:
@@ -235,16 +243,25 @@ class GitHubClient:
                 break
         return out
 
-    def _fetch_pr_stats(self, repo: str, number: int) -> tuple[Optional[int], Optional[int]]:
-        """Commit + changed-file counts from a PR's detail endpoint (best-effort)."""
+    def _fetch_pr_stats(self, repo: str, number: int) -> tuple:
+        """Size of a PR from its detail endpoint: commits, files, +lines, -lines.
+
+        One request covers all four — the endpoint returns them together — so
+        line counts cost nothing beyond the call already being made.
+        """
         try:
             data = self._get(f"/repos/{repo}/pulls/{number}").json()
             if not isinstance(data, dict):
-                return None, None
-            return data.get("commits"), data.get("changed_files")
+                return None, None, None, None
+            return (
+                data.get("commits"),
+                data.get("changed_files"),
+                data.get("additions"),
+                data.get("deletions"),
+            )
         except Exception:
             # Stats are non-critical; never let them break the connector.
-            return None, None
+            return None, None, None, None
 
     # ---- GitHub Copilot seat billing (build cost) ----------------------
     def copilot_plan_type(self, owner: str) -> str:
