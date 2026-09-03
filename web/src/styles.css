@@ -588,7 +588,9 @@ select {
 
 .provider-bar-track {
   height: 8px;
-  background: var(--bg);
+  /* Tracks read against the white card, as the site's progress bars do —
+     --bg here was all but invisible on it. */
+  background: var(--surface-alt);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
@@ -2385,11 +2387,10 @@ a.exec-value:hover {
   width: 100%;
   max-width: 46px;
   border-radius: 6px 6px 0 0;
-  background: linear-gradient(180deg, var(--accent), #4a4d42);
-  transition: opacity 0.12s;
-}
-
-.trend-bar {
+  /* Flat, like every fill in costlyinfra.com's data viz and like the stacked
+     segments and .provider-bar-fill beside it. The gradient here used to fade
+     into a mid-tone that belongs to no palette. */
+  background: var(--accent);
   transition: opacity 0.12s ease-out;
 }
 
