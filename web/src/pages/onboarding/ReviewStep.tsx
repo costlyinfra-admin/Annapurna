@@ -4,12 +4,13 @@
  * Runs discovery against a GitHub org, then lets the user curate the proposals:
  * rename, delete, split (one proposal is really two), merge (two are one), and
  * add a feature manually. Each proposal shows its PR/branch evidence, a
- * discovery-confidence badge, and whether it is an AI feature (which discovery
- * guesses from the PRs and the user can correct here).
+ * discovery-confidence badge, and the product surface it belongs to (which
+ * discovery guesses from the PRs and the user can correct here).
  */
 import { useEffect, useState } from "react";
 import { api, ApiError, type Feature } from "../../api";
-import { AiKindBadge } from "../../components/badges";
+import { CategoryBadge } from "../../components/badges";
+import { CategoryPicker } from "../../components/CategoryPicker";
 
 const NEEDS_REVIEW = "Needs review";
 
@@ -307,22 +308,15 @@ function FeatureCard({
             ) : (
               <ConfidenceBadge level={feature.discovery_confidence} />
             )}
-            <AiKindBadge kind={feature.ai_kind} source={feature.ai_kind_source} />
+            <CategoryBadge category={feature.category} source={feature.category_source} />
             <span className="feature-actions">
-              <label
-                className="ai-kind-toggle"
-                title="Does this feature call AI models at runtime? Your choice is kept — re-running discovery won't change it."
-              >
-                <input
-                  type="checkbox"
-                  checked={feature.ai_kind === "ai"}
-                  onChange={async (e) => {
-                    await api.setFeatureAiKind(feature.id, e.target.checked ? "ai" : "non_ai");
-                    await onChanged();
-                  }}
-                />
-                AI feature
-              </label>
+              <CategoryPicker
+                value={feature.category}
+                onChange={async (category) => {
+                  await api.setFeatureCategory(feature.id, category);
+                  await onChanged();
+                }}
+              />
               <button className="link" onClick={() => setEditing(true)}>
                 Rename
               </button>

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import calendar as _cal
 import datetime as _dt
+from typing import Optional
 
 import psycopg
 
@@ -33,15 +34,26 @@ def _add_feature(
     description: str,
     status: str,
     discovery_confidence: str,
+    category: Optional[str] = None,
 ) -> str:
     row = conn.execute(
         """
-        INSERT INTO feature (tenant_id, name, description, status,
-                             shipped_at, discovery_confidence)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO feature (tenant_id, name, description, status, shipped_at,
+                             discovery_confidence, category, category_source)
+        VALUES (%s, %s, %s, %s, %s, %s, %s,
+                CASE WHEN %s::text IS NULL THEN NULL ELSE 'discovery' END)
         RETURNING id
         """,
-        (tenant_id, name, description, status, DEFAULT_PERIOD, discovery_confidence),
+        (
+            tenant_id,
+            name,
+            description,
+            status,
+            DEFAULT_PERIOD,
+            discovery_confidence,
+            category,
+            category,
+        ),
     ).fetchone()
     return row[0]
 
@@ -272,6 +284,7 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         "Auto-classifies and prioritizes incoming security alerts.",
         "confirmed",
         "high",
+        "api",
     )
     report = _add_feature(
         conn,
@@ -280,6 +293,7 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         "Generates customer-facing incident and posture reports.",
         "confirmed",
         "high",
+        "reporting",
     )
     soc = _add_feature(
         conn,
@@ -288,6 +302,7 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         "Chat assistant for SOC analysts over investigation context.",
         "confirmed",
         "med",
+        "chat",
     )
     vuln = _add_feature(
         conn,
@@ -296,6 +311,7 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
         "Summarizes CVE/vulnerability findings for tickets.",
         "proposed",
         "low",
+        "docs",
     )
 
     # --- Evidence signals (the trail) -------------------------------------
@@ -586,6 +602,7 @@ _SEASON = [0.98, 0.96, 1.00, 1.03, 1.06, 1.04, 0.98, 0.97, 1.02, 1.07, 1.12, 1.0
 _NEW_FEATURES = [
     {
         "name": "Phishing detection",
+        "category": "api",
         "desc": "Classifies suspicious emails and URLs in real time.",
         "status": "confirmed",
         "conf": "high",
@@ -603,6 +620,7 @@ _NEW_FEATURES = [
     },
     {
         "name": "Malware sandbox analysis",
+        "category": "api",
         "desc": "Summarizes detonation reports from the malware sandbox.",
         "status": "confirmed",
         "conf": "med",
@@ -619,6 +637,7 @@ _NEW_FEATURES = [
     },
     {
         "name": "Compliance assistant",
+        "category": "chat",
         "desc": "Maps security controls to evidence for audits (SOC 2, ISO 27001).",
         "status": "confirmed",
         "conf": "high",
@@ -636,6 +655,7 @@ _NEW_FEATURES = [
     },
     {
         "name": "Anomaly explainer",
+        "category": "docs",
         "desc": "Explains UEBA anomalies in plain language for analysts.",
         "status": "proposed",
         "conf": "med",
@@ -858,7 +878,9 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
     # 2) New features, each with a full 24-month history (Jun 2024 -> May 2026).
     full = _months((2024, 6), 24)
     for f in _NEW_FEATURES:
-        fid = _add_feature(conn, tenant_id, f["name"], f["desc"], f["status"], f["conf"])
+        fid = _add_feature(
+            conn, tenant_id, f["name"], f["desc"], f["status"], f["conf"], f["category"]
+        )
         _add_signal(conn, tenant_id, fid, "branch", f["branch"], "high")
         for dev, tool, ref, amount, conf, commits, files in f["build"]:
             _add_signal(
@@ -933,6 +955,7 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
         "Enriches raw alerts with context via a hosted Llama-3.1-70B endpoint.",
         "confirmed",
         "med",
+        "data",
     )
     _add_signal(conn, tenant_id, enrich, "branch", "feature/enrich-*", "high")
     _add_build_cost(conn, tenant_id, enrich, "grace", "claude_code", "acme/core#1560", 68.00, "med")
@@ -1072,15 +1095,15 @@ def _add_activity_demo(conn, tenant_id, feature_ids: list) -> None:
 
 
 #: Ordinary engineering that cost real AI-tooling money to build but calls no
-#: model at runtime. Every customer has these, and they are the reason the
-#: Overview carries an AI / Non-AI column: they belong in the build-cost picture
-#: and would distort every per-feature inference comparison if counted as AI.
-#:   (name, description, branch, [(dev, tool, pr_ref, monthly $, commits, files)])
+#: model at runtime. Every customer has these, and they are half of why the
+#: Overview carries a Type column: a product is a mix of surfaces, and a list
+#: that shows only the AI ones is not the product.
 _NON_AI_FEATURES = [
     {
         "name": "SSO and SCIM provisioning",
         "desc": "SAML sign-in and directory-synced user provisioning for enterprise tenants.",
         "branch": "feature/sso-*",
+        "category": "auth",
         "build": [
             ("dave", "cursor", "acme/core#1571", 74.00, 12, 31),
             ("heidi", "copilot", "acme/core#1578", 41.00, 7, 18),
@@ -1090,12 +1113,14 @@ _NON_AI_FEATURES = [
         "name": "Billing and invoice exports",
         "desc": "Scheduled CSV/PDF exports of usage and invoices for finance teams.",
         "branch": "feature/billing-export-*",
+        "category": "reporting",
         "build": [("bob", "cursor", "acme/core#1583", 52.00, 9, 22)],
     },
     {
         "name": "Audit log viewer",
         "desc": "Searchable, filterable audit trail of every action taken in the console.",
         "branch": "feature/audit-log-*",
+        "category": "ui",
         "build": [("grace", "claude_code", "acme/core#1590", 63.00, 8, 19)],
     },
 ]
@@ -1113,11 +1138,13 @@ def _add_non_ai_demo(conn, tenant_id) -> int:
         fid = conn.execute(
             """
             INSERT INTO feature (tenant_id, name, description, status, shipped_at,
-                                 discovery_confidence, ai_kind, ai_kind_source)
-            VALUES (%s, %s, %s, 'confirmed', %s, 'high', 'non_ai', 'discovery')
+                                 discovery_confidence, ai_kind, ai_kind_source,
+                                 category, category_source)
+            VALUES (%s, %s, %s, 'confirmed', %s, 'high', 'non_ai', 'discovery',
+                    %s, 'discovery')
             RETURNING id
             """,
-            (tenant_id, f["name"], f["desc"], DEFAULT_PERIOD),
+            (tenant_id, f["name"], f["desc"], DEFAULT_PERIOD, f["category"]),
         ).fetchone()[0]
         _add_signal(conn, tenant_id, fid, "branch", f["branch"], "high")
         for dev, tool, ref, amount, commits, files in f["build"]:
@@ -1147,6 +1174,7 @@ def _add_self_hosted_demo(conn, tenant_id) -> None:
         "Fine-tuned Llama-3.1-70B on our own GPUs triages raw log noise.",
         "confirmed",
         "med",
+        "data",
     )
     _add_signal(conn, tenant_id, feature, "branch", "feature/logtriage-*", "high")
     _add_signal(

@@ -17,7 +17,8 @@ vi.mock("../api", async (importActual) => {
     api: {
       me: vi.fn(),
       featureDetail: vi.fn(),
-      setFeatureAiKind: vi.fn(),
+      setFeatureCategory: vi.fn(),
+      featureCategories: vi.fn(),
       featureInference: vi.fn(),
       featureOpportunities: vi.fn(),
       applyOpportunity: vi.fn(),
@@ -97,8 +98,8 @@ const DETAIL = {
   description: "Classifies alerts.",
   status: "confirmed",
   discovery_confidence: "high",
-  ai_kind: "ai",
-  ai_kind_source: "inference",
+  category: "api",
+  category_source: "discovery",
   period: "2026-05-01",
   start: "2026-05-01",
   end: "2026-05-01",
@@ -176,6 +177,13 @@ describe("FeatureDetail", () => {
     vi.clearAllMocks();
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
     vi.mocked(api.featureDetail).mockResolvedValue(DETAIL);
+    // The category picker fetches its vocabulary on mount.
+    vi.mocked(api.featureCategories).mockResolvedValue({
+      categories: [
+        { value: "api", label: "API" },
+        { value: "auth", label: "Auth" },
+      ],
+    });
     vi.mocked(api.featureInference).mockResolvedValue(INFERENCE);
     vi.mocked(api.featureOpportunities).mockResolvedValue(OPPORTUNITIES);
     vi.mocked(api.applyOpportunity).mockResolvedValue({
@@ -377,14 +385,23 @@ describe("FeatureDetail", () => {
     expect(api.featureDetail).toHaveBeenCalledWith("f1", { kind: "last_6_months" });
   });
 
-  it("lets someone mark the feature as non-AI from its detail page", async () => {
+  it("lets someone retag the feature from its detail page", async () => {
     // Most features are confirmed, and never appear on the Features review list —
     // so the detail page has to carry the control too, or they can't be corrected.
-    vi.mocked(api.setFeatureAiKind).mockResolvedValue({} as never);
+    vi.mocked(api.setFeatureCategory).mockResolvedValue({} as never);
+    vi.mocked(api.featureCategories).mockResolvedValue({
+      categories: [
+        { value: "api", label: "API" },
+        { value: "auth", label: "Auth" },
+      ],
+    });
     renderDetail();
-    expect(await screen.findByText("AI")).toBeInTheDocument();
+    // The badge, not the picker's <option> of the same name.
+    expect(await screen.findByText("API", { selector: ".badge" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("AI feature"));
-    await waitFor(() => expect(api.setFeatureAiKind).toHaveBeenCalledWith("f1", "non_ai"));
+    const picker = await screen.findByLabelText("Feature type");
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    fireEvent.change(picker, { target: { value: "auth" } });
+    await waitFor(() => expect(api.setFeatureCategory).toHaveBeenCalledWith("f1", "auth"));
   });
 });

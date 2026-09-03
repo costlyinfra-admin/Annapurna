@@ -265,9 +265,11 @@ class UsageRequest(BaseModel):
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 
 
-class AiKindRequest(BaseModel):
-    # null clears the manual decision and hands the feature back to the evidence.
-    ai_kind: Optional[Literal["ai", "non_ai"]] = None
+class CategoryRequest(BaseModel):
+    # null clears the tag and hands the feature back to the discovery guess.
+    category: Optional[
+        Literal["chat", "api", "ui", "docs", "data", "auth", "reporting", "integration", "infra"]
+    ] = None
 
 
 class HookSignal(BaseModel):
@@ -1156,11 +1158,20 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found"
             ) from exc
 
-    @app.put("/api/features/{feature_id}/kind")
-    def set_feature_ai_kind(feature_id: str, body: AiKindRequest, user: CurrentUser) -> dict:
-        """Mark a feature as an AI feature or an ordinary one (or clear the mark)."""
+    @app.get("/api/features/categories")
+    def feature_categories(user: CurrentUser) -> dict:
+        """The category vocabulary + labels, so the UI never hardcodes the list."""
+        return {
+            "categories": [
+                {"value": c, "label": discovery.CATEGORY_LABELS[c]} for c in discovery.CATEGORIES
+            ]
+        }
+
+    @app.put("/api/features/{feature_id}/category")
+    def set_feature_category(feature_id: str, body: CategoryRequest, user: CurrentUser) -> dict:
+        """Tag a feature with its product surface (or clear the tag)."""
         try:
-            return features.set_ai_kind(user["tenant_id"], feature_id, body.ai_kind)
+            return features.set_category(user["tenant_id"], feature_id, body.category)
         except features.FeatureNotFound as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found"

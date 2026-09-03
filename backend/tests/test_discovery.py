@@ -305,3 +305,40 @@ def test_ai_kind_reads_labels_and_body_too():
         labels=["backend"],
     )
     assert discovery._ai_kind([pr]) == "ai"
+
+
+@pytest.mark.parametrize(
+    "title,branch,expected",
+    [
+        ("Streaming chat assistant for the console", "feature/chat", "chat"),
+        ("Add SAML single sign-on", "feature/sso", "auth"),
+        ("Scheduled invoice exports for finance", "feature/invoice-export", "reporting"),
+        ("Slack connector for alerts", "feature/slack-integration", "integration"),
+        ("Nightly ingestion pipeline for logs", "feature/ingest", "data"),
+        ("Terraform module for the staging cluster", "chore/terraform", "infra"),
+        ("Rewrite the onboarding guide", "docs/onboarding", "docs"),
+        ("Public REST endpoints for incidents", "feature/api-incidents", "api"),
+        ("Responsive layout for the alerts screen", "feature/alerts-ui", "ui"),
+    ],
+)
+def test_category_reads_pr_evidence(title, branch, expected):
+    assert discovery._category([_pr(1, "acme/core", title, branch)]) == expected
+
+
+def test_category_prefers_the_more_specific_surface():
+    # A PR can honestly match several buckets. "SSO login screen" is Auth work
+    # that happens to have a UI; "chat API" is Chat that happens to be an API.
+    assert (
+        discovery._category([_pr(1, "acme/core", "SSO login screen", "feature/sso-ui")]) == "auth"
+    )
+    assert (
+        discovery._category([_pr(2, "acme/core", "Chat API endpoint", "feature/chat-api")])
+        == "chat"
+    )
+
+
+def test_category_is_none_when_the_evidence_does_not_say():
+    # No guess is better than a wrong one: the user is the one who corrects it,
+    # and an untagged row invites a tag where a wrong tag hides the question.
+    assert discovery._category([_pr(1, "acme/core", "Bump dependencies", "chore/bump")]) is None
+    assert discovery._category([]) is None

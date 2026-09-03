@@ -17,7 +17,8 @@ vi.mock("../../api", async (importActual) => {
       deleteFeature: vi.fn(),
       splitFeature: vi.fn(),
       mergeFeatures: vi.fn(),
-      setFeatureAiKind: vi.fn(),
+      setFeatureCategory: vi.fn(),
+      featureCategories: vi.fn(),
     },
   };
 });
@@ -39,8 +40,8 @@ const THREAT: Feature = {
   description: "",
   status: "proposed",
   discovery_confidence: "high",
-  ai_kind: "ai",
-  ai_kind_source: "discovery",
+  category: "chat",
+  category_source: "discovery",
   signals: [
     { id: "s1", signal_type: "pr", external_ref: "acme/core#1", confidence: "high" },
     { id: "s2", signal_type: "pr", external_ref: "acme/core#2", confidence: "high" },
@@ -53,6 +54,13 @@ describe("ReviewStep", () => {
     vi.clearAllMocks();
     // Component loads the saved scope on mount; default to "nothing saved".
     vi.mocked(api.discoveryScope).mockResolvedValue({ owner: null, repos: [] });
+    // The category picker fetches its vocabulary on mount.
+    vi.mocked(api.featureCategories).mockResolvedValue({
+      categories: [
+        { value: "ui", label: "UI" },
+        { value: "auth", label: "Auth" },
+      ],
+    });
   });
 
   it("runs discovery and renders proposals with evidence + confidence", async () => {
@@ -162,13 +170,22 @@ describe("ReviewStep", () => {
     await waitFor(() => expect(api.addFeature).toHaveBeenCalledWith("Manual"));
   });
 
-  it("lets someone correct the AI / non-AI guess, and remembers it", async () => {
-    vi.mocked(api.listFeatures).mockResolvedValue([{ ...THREAT, ai_kind: "non_ai" }]);
-    vi.mocked(api.setFeatureAiKind).mockResolvedValue({ ...THREAT, ai_kind: "ai" });
+  it("lets someone correct the category guess, and remembers it", async () => {
+    vi.mocked(api.listFeatures).mockResolvedValue([{ ...THREAT, category: "ui" }]);
+    vi.mocked(api.setFeatureCategory).mockResolvedValue({ ...THREAT, category: "auth" });
+    vi.mocked(api.featureCategories).mockResolvedValue({
+      categories: [
+        { value: "ui", label: "UI" },
+        { value: "auth", label: "Auth" },
+      ],
+    });
     render(<ReviewStep />);
 
-    expect(await screen.findByText("Non-AI")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("AI feature"));
-    await waitFor(() => expect(api.setFeatureAiKind).toHaveBeenCalledWith("f1", "ai"));
+    // The badge, not the picker's <option> of the same name.
+    expect(await screen.findByText("UI", { selector: ".badge" })).toBeInTheDocument();
+    const picker = await screen.findByLabelText("Feature type");
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    fireEvent.change(picker, { target: { value: "auth" } });
+    await waitFor(() => expect(api.setFeatureCategory).toHaveBeenCalledWith("f1", "auth"));
   });
 });

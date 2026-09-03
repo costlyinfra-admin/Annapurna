@@ -15,28 +15,46 @@ export function WorthBadge({ value }: { value: string }) {
   return <span className={`badge worth-${value}`}>{WORTH_LABEL[value] ?? value}</span>;
 }
 
-/** Where an AI/non-AI verdict came from — shown on hover, because a keyword
- *  guess and a billing fact deserve different amounts of trust. */
-const AI_KIND_BASIS: Record<string, string> = {
-  user: "Set by hand",
-  inference: "Has inference cost — this feature calls models",
-  discovery: "Guessed from AI keywords in its pull requests",
+/** The product-surface vocabulary, mirroring discovery.CATEGORY_LABELS. The
+ *  server publishes the same list at /api/features/categories for the picker;
+ *  this map only renders what a row already carries, so an unknown value still
+ *  displays rather than disappearing. */
+const CATEGORY_LABELS: Record<string, string> = {
+  chat: "Chat",
+  api: "API",
+  ui: "UI",
+  docs: "Docs",
+  data: "Data/ETL",
+  auth: "Auth",
+  reporting: "Reporting",
+  integration: "Integration",
+  infra: "Infra",
 };
 
-export function AiKindBadge({ kind, source }: { kind: string | null; source?: string | null }) {
-  if (!kind) {
+/** Where a category came from — on hover, since a guess and a human tag are
+ *  not the same claim. */
+const CATEGORY_BASIS: Record<string, string> = {
+  user: "Tagged by hand",
+  discovery: "Guessed from keywords in its pull requests",
+};
+
+export function CategoryBadge({
+  category,
+  source,
+}: {
+  category: string | null;
+  source?: string | null;
+}) {
+  if (!category) {
     return (
-      <span className="badge ai-unknown" title="Nothing has determined this yet">
-        unknown
+      <span className="badge cat-untagged" title="Nobody has tagged this feature yet">
+        Untagged
       </span>
     );
   }
   return (
-    <span
-      className={kind === "ai" ? "badge ai-yes" : "badge ai-no"}
-      title={source ? AI_KIND_BASIS[source] : undefined}
-    >
-      {kind === "ai" ? "AI" : "Non-AI"}
+    <span className={`badge cat-${category}`} title={source ? CATEGORY_BASIS[source] : undefined}>
+      {CATEGORY_LABELS[category] ?? category}
     </span>
   );
 }

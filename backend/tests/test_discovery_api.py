@@ -133,27 +133,32 @@ def test_scope_is_empty_then_remembers_selection(client):
     }
 
 
-def test_feature_ai_kind_endpoint_records_a_user_decision(client):
+def test_feature_category_endpoint_records_a_user_tag(client):
     feature = client.post("/api/features", json={"name": "Alert digest"}).json()
-    assert feature["ai_kind"] is None  # nothing has determined it yet
+    assert feature["category"] is None  # nobody has tagged it yet
 
-    marked = client.put(f"/api/features/{feature['id']}/kind", json={"ai_kind": "non_ai"})
-    assert marked.status_code == 200
-    assert marked.json()["ai_kind"] == "non_ai"
-    assert marked.json()["ai_kind_source"] == "user"
+    tagged = client.put(f"/api/features/{feature['id']}/category", json={"category": "reporting"})
+    assert tagged.status_code == 200
+    assert tagged.json()["category"] == "reporting"
+    assert tagged.json()["category_source"] == "user"
 
-    # Clearing hands it back to the evidence and the discovery guess.
-    cleared = client.put(f"/api/features/{feature['id']}/kind", json={"ai_kind": None})
-    assert cleared.json()["ai_kind"] is None
+    # Clearing hands it back to whatever discovery guesses next.
+    cleared = client.put(f"/api/features/{feature['id']}/category", json={"category": None})
+    assert cleared.json()["category"] is None
 
-    # Only the two known kinds are accepted.
-    assert (
-        client.put(f"/api/features/{feature['id']}/kind", json={"ai_kind": "sort of"}).status_code
-        == 422
+    # Only the shipped vocabulary is accepted.
+    bad = client.put(f"/api/features/{feature['id']}/category", json={"category": "misc"})
+    assert bad.status_code == 422
+    missing = client.put(
+        "/api/features/00000000-0000-0000-0000-000000000000/category",
+        json={"category": "ui"},
     )
-    assert (
-        client.put(
-            "/api/features/00000000-0000-0000-0000-000000000000/kind", json={"ai_kind": "ai"}
-        ).status_code
-        == 404
-    )
+    assert missing.status_code == 404
+
+
+def test_feature_categories_endpoint_publishes_the_vocabulary(client):
+    # The UI renders the picker from this, so the list is never hardcoded twice.
+    body = client.get("/api/features/categories").json()
+    values = [c["value"] for c in body["categories"]]
+    assert {"chat", "api", "ui", "docs", "auth"} <= set(values)
+    assert {"value": "data", "label": "Data/ETL"} in body["categories"]

@@ -12,7 +12,7 @@ from typing import Optional
 
 import psycopg
 
-from . import dashboard
+from . import dashboard, discovery
 from .db import app_dsn, connect, tenant_tx
 from .providers import month_start
 
@@ -52,9 +52,7 @@ def _feature(conn: psycopg.Connection, feature_id: str) -> Optional[dict]:
     row = conn.execute(
         """
         SELECT id, name, description, status, discovery_confidence,
-               ai_kind, ai_kind_source,
-               EXISTS (SELECT 1 FROM inference_cost c
-                       WHERE c.feature_id = feature.id AND c.amount > 0)
+               category, category_source
         FROM feature WHERE id = %s
         """,
         (feature_id,),
@@ -62,16 +60,16 @@ def _feature(conn: psycopg.Connection, feature_id: str) -> Optional[dict]:
     if row is None:
         return None
     # Resolved the same way the Overview resolves it, so the two never disagree.
-    ai_kind, ai_kind_source = dashboard.resolve_ai_kind(row[5], row[6], row[7])
+    category, category_source = dashboard.resolve_category(row[5], row[6])
     return {
         "id": str(row[0]),
         "name": row[1],
         "description": row[2],
         "status": row[3],
         "discovery_confidence": row[4],
-        # 'ai' | 'non_ai' | None (unknown); source says on what basis.
-        "ai_kind": ai_kind,
-        "ai_kind_source": ai_kind_source,
+        # Product surface (chat/api/ui/...), or None when nobody has tagged it.
+        "category": category,
+        "category_source": category_source,
         "signals": _signals(conn, str(row[0])),
     }
 
@@ -121,24 +119,21 @@ def rename_feature(
         return _feature(conn, feature_id)
 
 
-VALID_AI_KINDS = ("ai", "non_ai")
+def set_category(tenant_id: str, feature_id: str, category: Optional[str]) -> dict:
+    """Tag a feature with the product surface it belongs to.
 
-
-def set_ai_kind(tenant_id: str, feature_id: str, ai_kind: Optional[str]) -> dict:
-    """Record a person's AI / non-AI decision for a feature.
-
-    Passing None clears it, handing the feature back to the evidence and the
-    discovery guess. A stored decision is never overwritten by a later discovery
-    run — see discovery._persist_proposals.
+    Passing None clears the tag, handing the feature back to the discovery guess.
+    A tag set here is never overwritten by a later discovery run — see
+    discovery._persist_proposals.
     """
-    if ai_kind is not None and ai_kind not in VALID_AI_KINDS:
-        raise ValueError(f"ai_kind must be one of {VALID_AI_KINDS} or null")
+    if category is not None and category not in discovery.CATEGORIES:
+        raise ValueError(f"category must be one of {discovery.CATEGORIES} or null")
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         if _feature(conn, feature_id) is None:
             raise FeatureNotFound(feature_id)
         conn.execute(
-            "UPDATE feature SET ai_kind = %s, ai_kind_source = %s WHERE id = %s",
-            (ai_kind, "user" if ai_kind else None, feature_id),
+            "UPDATE feature SET category = %s, category_source = %s WHERE id = %s",
+            (category, "user" if category else None, feature_id),
         )
         return _feature(conn, feature_id)
 

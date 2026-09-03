@@ -22,8 +22,8 @@ vi.mock("../api", async (importActual) => {
 const TRIAGE = {
   feature_id: "f1",
   name: "AI threat triage",
-  ai_kind: "ai",
-  ai_kind_source: "inference",
+  category: "api",
+  category_source: "discovery",
   build_cost: 181,
   inference_cost: 4200,
   active_users: 540,
@@ -138,19 +138,19 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText("Nothing flagged")).toBeInTheDocument();
   });
 
-  it("shows whether each feature is an AI feature", async () => {
+  it("shows which part of the product each feature belongs to", async () => {
     vi.mocked(api.dashboard).mockResolvedValue({
       ...DATA,
       features: [
         TRIAGE,
+        { ...TRIAGE, feature_id: "f2", name: "SSO login", category: "auth" },
+        // Nobody has tagged this one — it asks for a tag rather than guessing.
         {
           ...TRIAGE,
-          feature_id: "f2",
-          name: "SSO login",
-          // Build cost, no model calls — the case the column exists for.
-          ai_kind: "non_ai",
-          ai_kind_source: "discovery",
-          inference_cost: 0,
+          feature_id: "f3",
+          name: "Misc work",
+          category: null,
+          category_source: null,
         },
       ],
     });
@@ -160,13 +160,16 @@ describe("Dashboard (Overview)", () => {
     // Scope to the By Feature table — the summary tiles name features too.
     const table = screen.getByRole("table");
     const triage = within(table).getByText("AI threat triage").closest("tr")!;
-    expect(within(triage).getByText("AI")).toBeInTheDocument();
-    const sso = within(table).getByText("SSO login").closest("tr")!;
-    expect(within(sso).getByText("Non-AI")).toBeInTheDocument();
-    // The basis is on hover, because a keyword guess isn't a billing fact.
-    expect(within(sso).getByText("Non-AI")).toHaveAttribute(
+    expect(within(triage).getByText("API")).toBeInTheDocument();
+    expect(
+      within(within(table).getByText("SSO login").closest("tr")!).getByText("Auth"),
+    ).toBeInTheDocument();
+    const misc = within(table).getByText("Misc work").closest("tr")!;
+    expect(within(misc).getByText("Untagged")).toBeInTheDocument();
+    // The basis is on hover, because a keyword guess isn't a human tag.
+    expect(within(triage).getByText("API")).toHaveAttribute(
       "title",
-      expect.stringContaining("Guessed from AI keywords"),
+      expect.stringContaining("Guessed from keywords"),
     );
   });
 

@@ -51,6 +51,8 @@ class Proposal:
     repos: list[str]
     #: 'ai' | 'non_ai' — a keyword read of the PR evidence, never a certainty.
     ai_kind: str = "non_ai"
+    #: Product surface (chat/api/ui/...), or None when the evidence doesn't say.
+    category: Optional[str] = None
 
 
 # --------------------------------------------------------------------------
@@ -254,6 +256,7 @@ def heuristic_cluster(prs: list[PullRequest]) -> list[Proposal]:
                 branch_pattern=_branch_pattern([p.branch for p in pr_list]),
                 repos=sorted({p.repo for p in pr_list}),
                 ai_kind=_ai_kind(pr_list),
+                category=_category(pr_list),
             )
         )
 
@@ -267,6 +270,7 @@ def heuristic_cluster(prs: list[PullRequest]) -> list[Proposal]:
                 branch_pattern=None,
                 repos=sorted({p.repo for p in needs_review}),
                 ai_kind=_ai_kind(needs_review),
+                category=_category(needs_review),
             )
         )
 
@@ -324,25 +328,126 @@ _AI_PHRASES = (
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
+def _evidence_text(prs: list) -> str:
+    """All the words a cluster of PRs gives us, lowercased — titles, branches,
+    labels, and the first part of each body (the rest is usually template)."""
+    return " ".join(
+        str(part or "").lower()
+        for pr in prs
+        for part in (
+            getattr(pr, "title", ""),
+            getattr(pr, "branch", ""),
+            getattr(pr, "body", "")[:2000],
+            " ".join(getattr(pr, "labels", []) or []),
+        )
+    )
+
+
 def _ai_kind(prs: list) -> str:
     """'ai' when the PR evidence names AI machinery outright, else 'non_ai'.
 
     Absence of AI vocabulary is weak evidence, which is why a 'non_ai' verdict is
     always presented as changeable rather than as a finding.
     """
-    haystack = " ".join(
-        str(part or "").lower()
-        for pr in prs
-        for part in (
-            getattr(pr, "title", ""),
-            getattr(pr, "branch", ""),
-            getattr(pr, "body", "")[:2000],  # a long body is mostly template text
-            " ".join(getattr(pr, "labels", []) or []),
-        )
-    )
+    haystack = _evidence_text(prs)
     if any(phrase in haystack for phrase in _AI_PHRASES):
         return "ai"
     return "ai" if _AI_TERMS & set(_WORD_RE.findall(haystack)) else "non_ai"
+
+
+# --------------------------------------------------------------------------
+# Product category (heuristic, deterministic)
+# --------------------------------------------------------------------------
+# What KIND of thing is this feature — which surface of the product does it live
+# on? Unlike AI-ness there is no billing fact to fall back on, so this is a guess
+# from PR vocabulary and nothing more; the user's tag always wins.
+#
+# Ordered, first match wins, because a PR can legitimately mention several: an
+# "SSO login screen" is Auth before it is UI, and a "chat API endpoint" is Chat
+# before it is API. The order below encodes that specificity, most specific first.
+#: (category, terms) — terms are whole words, matched against titles, branches,
+#: bodies and labels.
+_CATEGORY_RULES: tuple = (
+    (
+        "chat",
+        """chat chatbot conversation conversational assistant copilot message messaging
+        thread reply prompt agent""".split(),
+    ),
+    (
+        "auth",
+        """auth authentication authorization sso saml oauth oidc scim login logout signin
+        signup session password mfa 2fa rbac permission permissions role roles tenant
+        identity""".split(),
+    ),
+    (
+        "reporting",
+        """report reports reporting dashboard dashboards invoice invoices billing export
+        exports csv analytics chart charts metric metrics kpi""".split(),
+    ),
+    (
+        "integration",
+        """integration integrations connector connectors webhook webhooks sync oauth-app
+        salesforce slack jira zendesk hubspot stripe third-party partner""".split(),
+    ),
+    (
+        "data",
+        """etl pipeline pipelines ingest ingestion warehouse migration migrations backfill
+        schema index indexing query queries database dataset transform""".split(),
+    ),
+    (
+        "infra",
+        """ci cd deploy deployment docker kubernetes k8s terraform helm infra
+        infrastructure observability logging tracing monitoring alerting runbook
+        pipeline-config build-system""".split(),
+    ),
+    (
+        "docs",
+        """docs doc documentation readme changelog guide guides tutorial help onboarding
+        summary summaries summarize summarise digest""".split(),
+    ),
+    (
+        "api",
+        """api apis endpoint endpoints rest graphql grpc route routes handler sdk client
+        openapi swagger versioning ratelimit""".split(),
+    ),
+    (
+        "ui",
+        """ui ux frontend front-end component components page pages screen screens view
+        views css styling layout modal button form table nav navigation responsive
+        accessibility a11y""".split(),
+    ),
+)
+
+#: Every category, in the order the UI offers them.
+CATEGORIES = tuple(c for c, _ in _CATEGORY_RULES)
+
+#: Human labels, shared with the frontend through the meta endpoint.
+CATEGORY_LABELS = {
+    "chat": "Chat",
+    "api": "API",
+    "ui": "UI",
+    "docs": "Docs",
+    "data": "Data/ETL",
+    "auth": "Auth",
+    "reporting": "Reporting",
+    "integration": "Integration",
+    "infra": "Infra",
+}
+
+
+def _category(prs: list) -> Optional[str]:
+    """Best guess at a feature's product surface, or None when nothing matches.
+
+    None is a real answer: "the PR titles don't say" is more useful than a
+    confident wrong tag, because the user is the one who will correct it.
+    """
+    words = set(_WORD_RE.findall(_evidence_text(prs)))
+    if not words:
+        return None
+    for category, terms in _CATEGORY_RULES:
+        if words & set(terms):
+            return category
+    return None
 
 
 def _branch_pattern(branches: list[str]) -> Optional[str]:
@@ -489,6 +594,7 @@ def _proposals_from_json(text: str, prs: list[PullRequest]) -> list[Proposal]:
                 branch_pattern=item.get("branch_pattern") or None,
                 repos=sorted({repo_by_ref[r] for r in refs}),
                 ai_kind=_ai_kind([pr_by_ref[r] for r in refs]),
+                category=_category([pr_by_ref[r] for r in refs]),
             )
         )
     return proposals
@@ -671,10 +777,23 @@ def _persist_proposals(
                         ai_kind = CASE WHEN ai_kind_source = 'user'
                                        THEN ai_kind ELSE %s END,
                         ai_kind_source = CASE WHEN ai_kind_source = 'user'
-                                              THEN 'user' ELSE 'discovery' END
+                                              THEN 'user' ELSE 'discovery' END,
+                        category = CASE WHEN category_source = 'user'
+                                        THEN category ELSE %s END,
+                        category_source = CASE WHEN category_source = 'user' THEN 'user'
+                                               WHEN %s::text IS NULL THEN NULL
+                                               ELSE 'discovery' END
                     WHERE id = %s
                     """,
-                    (prop.name, prop.description, prop.confidence, prop.ai_kind, feature_id),
+                    (
+                        prop.name,
+                        prop.description,
+                        prop.confidence,
+                        prop.ai_kind,
+                        prop.category,
+                        prop.category,
+                        feature_id,
+                    ),
                 )
                 # Signals are regenerated wholesale — the PR set may have changed.
                 conn.execute("DELETE FROM feature_signal WHERE feature_id = %s", (feature_id,))
@@ -683,11 +802,20 @@ def _persist_proposals(
                     """
                     INSERT INTO feature
                         (tenant_id, name, description, status, discovery_confidence,
-                         ai_kind, ai_kind_source)
-                    VALUES (%s, %s, %s, 'proposed', %s, %s, 'discovery')
+                         ai_kind, ai_kind_source, category, category_source)
+                    VALUES (%s, %s, %s, 'proposed', %s, %s, 'discovery', %s,
+                            CASE WHEN %s::text IS NULL THEN NULL ELSE 'discovery' END)
                     RETURNING id
                     """,
-                    (tenant_id, prop.name, prop.description, prop.confidence, prop.ai_kind),
+                    (
+                        tenant_id,
+                        prop.name,
+                        prop.description,
+                        prop.confidence,
+                        prop.ai_kind,
+                        prop.category,
+                        prop.category,
+                    ),
                 ).fetchone()[0]
 
             if prop.branch_pattern:

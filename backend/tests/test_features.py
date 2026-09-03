@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
-
 import pytest
 from annapurna import discovery, features
 from annapurna.github import PullRequest
@@ -109,62 +107,53 @@ def test_confirm_features(discovered):
     assert features.list_features(discovered, status="proposed") == []
 
 
-def test_set_ai_kind_is_a_user_decision_that_survives_rediscovery(tenant_id, app_env):
-    # Discovery guessed wrong — a feature whose PRs never say "LLM" but which does
-    # call one. The correction has to outlive the next discovery run, or the user
-    # fixes it forever.
-    feature = features.add_feature(tenant_id, "Alert digest")
+def test_set_category_is_a_user_tag_that_survives_rediscovery(tenant_id, app_env):
+    # Discovery guessed "ui" from a PR about a screen; it's really the auth flow.
+    # The correction has to outlive the next discovery run, or the user re-fixes
+    # it forever.
+    feature = features.add_feature(tenant_id, "Login screen")
     app_env.execute(
-        "UPDATE feature SET ai_kind = 'non_ai', ai_kind_source = 'discovery' WHERE id = %s",
+        "UPDATE feature SET category = 'ui', category_source = 'discovery' WHERE id = %s",
         (feature["id"],),
     )
     app_env.commit()
 
-    updated = features.set_ai_kind(tenant_id, feature["id"], "ai")
-    assert updated["ai_kind"] == "ai"
-    assert updated["ai_kind_source"] == "user"
+    updated = features.set_category(tenant_id, feature["id"], "auth")
+    assert updated["category"] == "auth"
+    assert updated["category_source"] == "user"
 
     # What discovery would write on a re-run: the CASE guard must leave it alone.
     app_env.execute(
         """
         UPDATE feature
-        SET ai_kind = CASE WHEN ai_kind_source = 'user' THEN ai_kind ELSE 'non_ai' END,
-            ai_kind_source = CASE WHEN ai_kind_source = 'user' THEN 'user' ELSE 'discovery' END
+        SET category = CASE WHEN category_source = 'user' THEN category ELSE 'ui' END,
+            category_source = CASE WHEN category_source = 'user'
+                                   THEN 'user' ELSE 'discovery' END
         WHERE id = %s
         """,
         (feature["id"],),
     )
     app_env.commit()
-    assert features.list_features(tenant_id)[0]["ai_kind"] == "ai"
+    assert features.list_features(tenant_id)[0]["category"] == "auth"
 
 
-def test_clearing_ai_kind_hands_the_feature_back_to_the_evidence(tenant_id, app_env):
+def test_clearing_a_category_hands_the_feature_back_to_the_guess(tenant_id):
     feature = features.add_feature(tenant_id, "Report export")
-    features.set_ai_kind(tenant_id, feature["id"], "ai")
+    features.set_category(tenant_id, feature["id"], "reporting")
 
-    cleared = features.set_ai_kind(tenant_id, feature["id"], None)
-    assert cleared["ai_kind"] is None and cleared["ai_kind_source"] is None
+    cleared = features.set_category(tenant_id, feature["id"], None)
+    assert cleared["category"] is None and cleared["category_source"] is None
 
 
-def test_set_ai_kind_rejects_an_unknown_value(tenant_id):
+def test_set_category_rejects_a_value_outside_the_vocabulary(tenant_id):
     feature = features.add_feature(tenant_id, "Anything")
     with pytest.raises(ValueError):
-        features.set_ai_kind(tenant_id, feature["id"], "maybe")
+        features.set_category(tenant_id, feature["id"], "miscellaneous")
 
 
-def test_feature_reads_ai_from_inference_cost_without_any_ruling(tenant_id, app_env):
-    # No discovery guess, no user decision — but it bills for model calls, so the
-    # feature list says AI on the same basis the Overview does.
-    feature = features.add_feature(tenant_id, "Triage")
-    app_env.execute(
-        """
-        INSERT INTO inference_cost (tenant_id, feature_id, provider, model, amount,
-                                    period, source, confidence)
-        VALUES (%s, %s, 'anthropic', 'c', 12, %s, 'cost_api', 'high')
-        """,
-        (tenant_id, feature["id"], dt.date(2026, 5, 1)),
-    )
-    app_env.commit()
-
-    assert features.list_features(tenant_id)[0]["ai_kind"] == "ai"
-    assert features.list_features(tenant_id)[0]["ai_kind_source"] == "inference"
+def test_a_new_feature_starts_untagged(tenant_id):
+    # Nothing guesses a category for a hand-added feature — it is untagged until
+    # somebody says otherwise, which is what the Overview column reports.
+    features.add_feature(tenant_id, "Triage")
+    assert features.list_features(tenant_id)[0]["category"] is None
+    assert features.list_features(tenant_id)[0]["category_source"] is None
