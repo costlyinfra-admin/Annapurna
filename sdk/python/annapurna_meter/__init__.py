@@ -28,7 +28,7 @@ import urllib.request
 from collections import OrderedDict
 from typing import Any, Optional
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 
 class Meter:
