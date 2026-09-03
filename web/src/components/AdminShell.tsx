@@ -5,6 +5,7 @@
  */
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { BrandMark } from "./BrandMark";
 
 const NAV = [
   { to: "/admin", label: "Dashboard", end: true },
@@ -25,7 +26,10 @@ export function AdminShell() {
     <div className="app-shell">
       <aside className="sidebar admin-sidebar">
         <div className="sidebar-brand">
-          <span className="brand">Annapurna</span>
+          <span className="brand">
+            <BrandMark />
+            Annapurna
+          </span>
           <span className="admin-tag">Admin</span>
         </div>
         <nav className="sidebar-nav">

@@ -11,6 +11,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { REFRESH_ALERTS_EVENT } from "../pages/Dashboard";
+import { BrandMark } from "./BrandMark";
 
 const NAV = [
   { to: "/", label: "Overview", end: true },
@@ -68,7 +69,10 @@ export function AppShell() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span className="brand">Annapurna</span>
+          <span className="brand">
+            <BrandMark />
+            Annapurna
+          </span>
         </div>
         <nav className="sidebar-nav">
           {NAV.map((item) => (

@@ -270,17 +270,12 @@ select {
   color: var(--ink);
 }
 
-/* The mark echoes costlyinfra.com's logo: a near-black squircle with a lime
-   glyph inside. Sized in em so it scales with whichever wordmark it sits beside
-   (the sidebar's and the taller one on the auth cards). The old version faded
-   ink into lime under a blur, which at 11px resolved to a grey smudge rather
-   than to a logo. */
-.brand::before {
-  content: "";
-  width: 0.78em;
-  height: 0.78em;
-  border-radius: 30%;
-  background: radial-gradient(circle at 50% 50%, var(--lime) 0 27%, transparent 28%), var(--accent);
+/* The real logo (components/BrandMark.tsx) sits where a CSS approximation used
+   to. Sized in em so it tracks whichever wordmark it sits beside. */
+.brand-mark {
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
 }
 
 .muted {

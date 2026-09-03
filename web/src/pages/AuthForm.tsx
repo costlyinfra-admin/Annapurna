@@ -2,6 +2,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api";
+import { BrandMark } from "../components/BrandMark";
 
 interface AuthFormProps {
   title: string;
@@ -32,7 +33,10 @@ export function AuthForm({ title, submitLabel, onSubmit, footer, note }: AuthFor
 
   return (
     <div className="auth-card">
-      <h1 className="brand">Annapurna</h1>
+      <h1 className="brand">
+        <BrandMark />
+        Annapurna
+      </h1>
       <h2>{title}</h2>
       <form onSubmit={handleSubmit}>
         <label>

@@ -1,0 +1,11 @@
+<!-- The CostlyInfra mark, matching costlyinfra.com and the in-app BrandMark.
+     Flat fills rather than the gradient: a favicon renders at 16px, where a
+     gradient and a 1px inner stroke only muddy it. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <rect x="2" y="2" width="44" height="44" rx="13" fill="#1a1c17"/>
+  <path d="M32.5 16.5c-1.8-2.6-5-4.2-8.5-4.2-5.8 0-10.5 4.7-10.5 11.7s4.7 11.7 10.5 11.7c3.5 0 6.7-1.6 8.5-4.2"
+        fill="none" stroke="#faf9f5" stroke-width="4.4" stroke-linecap="round"/>
+  <rect x="26.5" y="20" width="3.4" height="9" rx="1.7" fill="#ddf859"/>
+  <rect x="31.5" y="23.5" width="3.4" height="5.5" rx="1.7" fill="#ddf859" fill-opacity="0.8"/>
+  <rect x="36.5" y="26.5" width="3.4" height="2.5" rx="1.25" fill="#ddf859" fill-opacity="0.6"/>
+</svg>
