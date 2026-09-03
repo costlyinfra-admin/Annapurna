@@ -1,6 +1,6 @@
 [project]
 name = "annapurna-meter"
-version = "0.3.1"
+version = "0.4.0"
 description = "Annapurna metering hook — emit per-call LLM usage events for per-feature cost attribution."
 readme = "README.md"
 requires-python = ">=3.9"

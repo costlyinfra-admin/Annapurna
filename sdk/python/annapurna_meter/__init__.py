@@ -6,11 +6,22 @@ feature_id and posts them to the hook-ingest endpoint. Cost is computed server
 side from Annapurna's pricing tables — the SDK never sees prices.
 
 Design principles:
-  * **Never break the caller.** Reporting happens on a background thread and all
-    errors are swallowed. If Annapurna is down or misconfigured, your app is fine.
+  * **Never break the caller.** Recording appends to an in-memory queue and
+    returns; a single background worker batches and posts. Nothing on the call
+    path can block, raise, or wait on the network. If Annapurna is down,
+    misconfigured, or asleep, your app is unaffected.
+  * **Bounded.** One worker thread per meter, whatever the traffic, and a capped
+    queue. When the queue is full the oldest events are dropped and counted —
+    metering degrades, the application does not.
   * **Tiny footprint.** Standard library only.
   * **Optional.** With no ingest URL/token configured, every call is a no-op, so
     the same code runs whether or not the hook is enabled.
+
+Delivery: events are batched (up to ``batch_size``) and flushed either when a
+batch fills or after ``flush_interval`` seconds, whichever comes first. Call
+``meter.flush()`` to force a send — do this before exiting a short-lived process
+(a script, a serverless handler) where the worker may not get a chance to run.
+An ``atexit`` hook flushes automatically, with a short deadline.
 
 Configuration (constructor args or environment):
   ANNAPURNA_INGEST_URL    e.g. https://app.annapurna.example/api/hook/events
@@ -19,16 +30,31 @@ Configuration (constructor args or environment):
 
 from __future__ import annotations
 
+import atexit
+import datetime as dt
 import hashlib
 import json
 import os
 import threading
 import time
 import urllib.request
-from collections import OrderedDict
+import weakref
+from collections import OrderedDict, deque
 from typing import Any, Optional
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
+
+#: Delivery defaults. Batch size is well under the server's 10,000-event cap;
+#: the interval bounds how much is lost if the process is killed outright.
+BATCH_SIZE = 50
+FLUSH_INTERVAL = 5.0
+QUEUE_MAX = 10_000
+#: How long atexit waits for the queue to drain. Deliberately short: metering
+#: must never noticeably delay a deploy, restart or scale-down.
+SHUTDOWN_TIMEOUT = 2.0
+
+#: Live meters, so one atexit hook can flush them all without keeping any alive.
+_METERS: weakref.WeakSet = weakref.WeakSet()
 
 
 class Meter:
@@ -42,7 +68,10 @@ class Meter:
         metadata: Optional[dict] = None,
         optimize: bool = False,
         prefix_chars: int = 2000,
-        flush_interval: float = 60.0,
+        flush_interval: float = FLUSH_INTERVAL,
+        batch_size: int = BATCH_SIZE,
+        queue_max: int = QUEUE_MAX,
+        optimize_flush_interval: float = 60.0,
         salt: Optional[str] = None,
         transport: Optional[Any] = None,
     ):
@@ -61,10 +90,26 @@ class Meter:
         # call path, bounded, and fail-safe.
         self._salt = salt
         self._optimizer = (
-            _Optimizer(self, prefix_chars=prefix_chars, flush_interval=flush_interval)
+            _Optimizer(self, prefix_chars=prefix_chars, flush_interval=optimize_flush_interval)
             if optimize
             else None
         )
+
+        # --- delivery: a bounded queue drained by one background worker ----
+        self._batch_size = max(1, int(batch_size))
+        self._flush_interval = max(0.0, float(flush_interval))
+        self._queue_max = max(1, int(queue_max))
+        self._queue: deque = deque()
+        # One condition guards the queue and every flag below it.
+        self._cv = threading.Condition()
+        self._worker: Optional[threading.Thread] = None
+        self._worker_pid: Optional[int] = None
+        self._sending = False
+        self._flush_now = False
+        #: Events discarded because the queue was full. Metering degrades
+        #: visibly rather than silently, and never at the application's expense.
+        self.dropped = 0
+        _METERS.add(self)
 
     @property
     def enabled(self) -> bool:
@@ -81,17 +126,20 @@ class Meter:
         occurred_at: Optional[str] = None,
         latency_ms: Optional[int] = None,
         metadata: Optional[dict] = None,
-    ) -> Optional[threading.Thread]:
-        """Report a single metered call. Returns the background thread (or None)."""
+    ) -> None:
+        """Report a single metered call. Queues it and returns immediately."""
         event = {
             "provider": provider,
             "model": model,
             "tokens_in": int(tokens_in or 0),
             "tokens_out": int(tokens_out or 0),
             "feature_id": feature_id or self.feature_id,
+            # Stamped HERE, not at send time: delivery is deferred, and the
+            # server derives the billing month from this field (falling back to
+            # arrival). Without it a call made at 23:59 on the last of the month
+            # could be posted seconds later and land in the wrong month.
+            "occurred_at": occurred_at or _now_iso(),
         }
-        if occurred_at:
-            event["occurred_at"] = occurred_at
         if latency_ms is not None:
             event["latency_ms"] = int(latency_ms)
         merged = {**self.metadata, **(metadata or {})}
@@ -107,7 +155,7 @@ class Meter:
         model: Optional[str] = None,
         latency_ms: Optional[int] = None,
         metadata: Optional[dict] = None,
-    ) -> Optional[threading.Thread]:
+    ) -> None:
         """Record from an Anthropic Messages response (usage.input_tokens/output_tokens)."""
         tin, tout = _usage(response, ("input_tokens", "output_tokens"))
         return self.record(
@@ -128,7 +176,7 @@ class Meter:
         model: Optional[str] = None,
         latency_ms: Optional[int] = None,
         metadata: Optional[dict] = None,
-    ) -> Optional[threading.Thread]:
+    ) -> None:
         """Record from an OpenAI response (usage.prompt_tokens/completion_tokens)."""
         tin, tout = _usage(response, ("prompt_tokens", "completion_tokens"))
         return self.record(
@@ -149,7 +197,7 @@ class Meter:
         model: Optional[str] = None,
         latency_ms: Optional[int] = None,
         metadata: Optional[dict] = None,
-    ) -> Optional[threading.Thread]:
+    ) -> None:
         """Record from a Google Gemini response (usage_metadata token counts)."""
         usage = _attr(response, "usage_metadata", {}) or {}
         tin = int(_attr(usage, "prompt_token_count", 0) or 0)
@@ -173,7 +221,7 @@ class Meter:
         model: Optional[str] = None,
         latency_ms: Optional[int] = None,
         metadata: Optional[dict] = None,
-    ) -> Optional[threading.Thread]:
+    ) -> None:
         """Record from any OpenAI-compatible response (hosted open-source models).
 
         Together, Fireworks, Groq, OpenRouter, DeepInfra, etc. all return the
@@ -191,10 +239,109 @@ class Meter:
             metadata=metadata,
         )
 
-    def _send(self, events: list) -> Optional[threading.Thread]:
+    # ----------------------------------------------------------------------
+    # Delivery: enqueue on the call path, batch and post on one worker
+    # ----------------------------------------------------------------------
+    def _send(self, events: list) -> None:
+        """Queue events for delivery. Returns immediately; never raises."""
+        if not self.enabled or not events:
+            return  # not configured -> no-op
+        try:
+            with self._cv:
+                self._reset_after_fork_locked()
+                for event in events:
+                    if len(self._queue) >= self._queue_max:
+                        # Full: shed the oldest so the newest always gets in, and
+                        # so a stalled endpoint can never grow this unboundedly.
+                        self._queue.popleft()
+                        self.dropped += 1
+                    self._queue.append(event)
+                self._ensure_worker_locked()
+                self._cv.notify()
+        except Exception:
+            pass  # metering must never raise into the caller's request path
+
+    def _reset_after_fork_locked(self) -> None:
+        """Start clean in a forked child.
+
+        Threads do not survive fork, so a child inherits a worker object that
+        will never run again — and a copy of the parent's queue, which the parent
+        is still going to send. Under gunicorn/uWSGI pre-fork (how these apps are
+        usually deployed) that would mean silently metering nothing per worker,
+        and duplicating whatever was in flight at fork time.
+        """
+        pid = os.getpid()
+        if self._worker_pid is not None and self._worker_pid != pid:
+            self._queue.clear()  # the parent still owns these
+            self._worker = None
+            self._worker_pid = None
+            self._sending = False
+            self._flush_now = False
+
+    def _ensure_worker_locked(self) -> None:
+        """Start the single worker on first use. Failure degrades to a no-op."""
+        if self._worker is not None:
+            return
+        worker = _spawn(self._run)
+        if worker is not None:
+            self._worker = worker
+            self._worker_pid = os.getpid()
+
+    def _run(self) -> None:
+        """Drain the queue in batches, forever. One of these per meter."""
+        while True:
+            with self._cv:
+                while not self._queue:
+                    self._cv.wait()  # idle: costs nothing until an event arrives
+                # Something arrived. Give it a moment to be joined by others, so
+                # a busy process sends one request per batch rather than per call.
+                deadline = time.monotonic() + self._flush_interval
+                while len(self._queue) < self._batch_size and not self._flush_now:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._cv.wait(remaining)
+                batch = [
+                    self._queue.popleft() for _ in range(min(len(self._queue), self._batch_size))
+                ]
+                self._sending = True
+            try:
+                self._post_sync(batch)
+            finally:
+                with self._cv:
+                    self._sending = False
+                    if not self._queue:
+                        self._flush_now = False
+                    self._cv.notify_all()  # wake any flush() waiting on us
+
+    def flush(self, timeout: float = SHUTDOWN_TIMEOUT) -> bool:
+        """Send what is queued now. True if the queue drained within `timeout`.
+
+        Worth calling before a short-lived process exits — a script, a serverless
+        handler — where the worker may not otherwise get scheduled. Never raises,
+        and never waits longer than `timeout`.
+        """
         if not self.enabled:
-            return None  # not configured -> no-op
-        return _spawn(lambda: self._post_sync(events))
+            return True
+        try:
+            deadline = time.monotonic() + max(0.0, timeout)
+            with self._cv:
+                if not self._queue and not self._sending:
+                    return True
+                self._reset_after_fork_locked()
+                self._ensure_worker_locked()
+                if self._worker is None:
+                    return False  # no worker could be started; nothing will drain
+                self._flush_now = True
+                self._cv.notify_all()
+                while self._queue or self._sending:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return False
+                    self._cv.wait(remaining)
+            return True
+        except Exception:
+            return False
 
     def _post_sync(self, events: list) -> None:
         """POST events on the CURRENT thread. Callers run this off the request path."""
@@ -238,43 +385,63 @@ class Meter:
             self._salt = None
         return self._salt
 
-    def _record_wrapped(
-        self, provider: str, request: dict, response: Any, latency_ms: int
-    ) -> Optional[threading.Thread]:
-        """Record an auto-instrumented (wrap()) call — all work off the call path.
+    def _record_wrapped(self, provider: str, request: dict, response: Any, latency_ms: int) -> None:
+        """Record an auto-instrumented (wrap()) call. Queues it and returns.
 
-        Token extraction, optimize-mode hashing and the POST all run on the
-        background thread, so the caller's request never pays for them.
+        The event is built here, on the caller's thread, rather than deferred:
+        the queue then holds small fixed-shape dicts instead of references to
+        whole request/response objects, so its memory bound means something. The
+        work is a handful of attribute reads (and, only with optimize mode on, a
+        JSON dump plus a hash) — microseconds against an LLM call's milliseconds.
+        The network is what stays off the call path, and it does.
         """
         if not self.enabled:
-            return None
+            return
+        try:
+            model, tokens_in, tokens_out, cache_read = _extract_usage(provider, response)
+            event = {
+                "provider": provider,
+                "model": model,
+                "tokens_in": int(tokens_in or 0),
+                "tokens_out": int(tokens_out or 0),
+                "feature_id": self.feature_id,
+                "latency_ms": int(latency_ms),
+                "occurred_at": _now_iso(),  # see record(): the month comes from this
+            }
+            if self.metadata:
+                event["metadata"] = dict(self.metadata)
+            extra: list = []
+            if self._optimizer is not None:
+                signal = self._optimizer.on_call(
+                    provider, model, request, tokens_in, tokens_out, cache_read
+                )
+                if signal:
+                    event["signal"] = signal
+                extra = self._optimizer.due_summaries()
+            self._send([event, *extra])
+        except Exception:
+            pass  # metering must never raise into the caller
 
-        def _work() -> None:
-            try:
-                model, tokens_in, tokens_out, cache_read = _extract_usage(provider, response)
-                event = {
-                    "provider": provider,
-                    "model": model,
-                    "tokens_in": int(tokens_in or 0),
-                    "tokens_out": int(tokens_out or 0),
-                    "feature_id": self.feature_id,
-                    "latency_ms": int(latency_ms),
-                }
-                if self.metadata:
-                    event["metadata"] = dict(self.metadata)
-                extra: list = []
-                if self._optimizer is not None:
-                    signal = self._optimizer.on_call(
-                        provider, model, request, tokens_in, tokens_out, cache_read
-                    )
-                    if signal:
-                        event["signal"] = signal
-                    extra = self._optimizer.due_summaries()
-                self._post_sync([event, *extra])
-            except Exception:
-                pass  # metering must never raise into the caller
 
-        return _spawn(_work)
+def _now_iso() -> str:
+    """UTC, ISO-8601 with a Z — the shape the ingest endpoint parses."""
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@atexit.register
+def _flush_all_meters() -> None:
+    """Give every live meter a brief chance to drain as the process winds down.
+
+    Workers are daemon threads, so without this whatever is queued at exit is
+    simply dropped. The deadline is short and shared: metering must never be the
+    reason a deploy or a restart takes noticeably longer.
+    """
+    deadline = time.monotonic() + SHUTDOWN_TIMEOUT
+    for meter in list(_METERS):
+        try:
+            meter.flush(timeout=max(0.0, deadline - time.monotonic()))
+        except Exception:
+            pass
 
 
 def _spawn(work) -> Optional[threading.Thread]:

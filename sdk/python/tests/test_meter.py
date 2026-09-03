@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import threading
 import time
@@ -21,8 +22,10 @@ class _Capture:
         self.calls.append({"url": url, "headers": headers, "events": json.loads(body)["events"]})
 
 
-def _meter(capture):
-    return Meter(ingest_url="https://app.test/api/hook/events", token="tok", transport=capture)
+def _meter(capture, **kw):
+    return Meter(
+        ingest_url="https://app.test/api/hook/events", token="tok", transport=capture, **kw
+    )
 
 
 def test_record_builds_event_and_authenticates():
@@ -34,7 +37,8 @@ def test_record_builds_event_and_authenticates():
         tokens_in=1200,
         tokens_out=300,
         feature_id="f1",
-    ).join()
+    )
+    m.flush()
 
     assert cap.calls[0]["headers"]["Authorization"] == "Bearer tok"
     event = cap.calls[0]["events"][0]
@@ -49,9 +53,10 @@ def test_record_anthropic_maps_usage():
     resp = type(
         "R", (), {"model": "claude-haiku-4-5", "usage": {"input_tokens": 50, "output_tokens": 7}}
     )()
-    m.record_anthropic(resp, feature_id="f2").join()
+    m.record_anthropic(resp, feature_id="f2")
+    m.flush()
     event = cap.calls[0]["events"][0]
-    assert event == {
+    assert _stamped(event) == {
         "provider": "anthropic",
         "model": "claude-haiku-4-5",
         "tokens_in": 50,
@@ -64,7 +69,8 @@ def test_record_openai_maps_usage():
     cap = _Capture()
     m = _meter(cap)
     resp = {"model": "gpt-4o", "usage": {"prompt_tokens": 80, "completion_tokens": 20}}
-    m.record_openai(resp, feature_id="f3").join()
+    m.record_openai(resp, feature_id="f3")
+    m.flush()
     event = cap.calls[0]["events"][0]
     assert event["provider"] == "openai"
     assert event["tokens_in"] == 80
@@ -82,9 +88,10 @@ def test_record_gemini_maps_usage_metadata():
             "usage_metadata": {"prompt_token_count": 800, "candidates_token_count": 120},
         },
     )()
-    m.record_gemini(resp, feature_id="f7").join()
+    m.record_gemini(resp, feature_id="f7")
+    m.flush()
     event = cap.calls[0]["events"][0]
-    assert event == {
+    assert _stamped(event) == {
         "provider": "google",
         "model": "gemini-2.5-flash",
         "tokens_in": 800,
@@ -101,9 +108,10 @@ def test_record_openai_compatible_tags_hosted_oss_provider():
         "model": "meta-llama-3.1-70b-instruct",
         "usage": {"prompt_tokens": 1200, "completion_tokens": 300},
     }
-    m.record_openai_compatible(resp, provider="together", feature_id="f9").join()
+    m.record_openai_compatible(resp, provider="together", feature_id="f9")
+    m.flush()
     event = cap.calls[0]["events"][0]
-    assert event == {
+    assert _stamped(event) == {
         "provider": "together",
         "model": "meta-llama-3.1-70b-instruct",
         "tokens_in": 1200,
@@ -157,11 +165,9 @@ def test_wrapped_call_still_returns_the_response_when_a_thread_cannot_start(monk
 # --- wrap() auto-instrumentation, latency, metadata ------------------------
 
 
-def _wait(cap, n=1, timeout=2.0):
-    """Recording posts on a background thread; wait for it to land."""
-    end = time.time() + timeout
-    while time.time() < end and len(cap.calls) < n:
-        time.sleep(0.01)
+def _flushed(meter, timeout=2.0):
+    """Delivery is batched on a worker; force it and wait for the queue to drain."""
+    assert meter.flush(timeout=timeout), "meter did not drain within the timeout"
 
 
 class _FakeMessages:
@@ -203,7 +209,7 @@ def test_wrap_records_completion_and_passes_through():
     assert wrapped.api_key == "sk-real"  # non-instrumented attribute passes through
     assert client.messages.calls  # the underlying call actually ran
 
-    _wait(cap)
+    _flushed(m)
     ev = cap.calls[0]["events"][0]
     assert ev["provider"] == "anthropic"
     assert ev["feature_id"] == "f1"
@@ -221,17 +227,18 @@ def test_wrap_merges_default_metadata():
     )
     wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
     wrapped.messages.create()
-    _wait(cap)
+    _flushed(m)
     assert cap.calls[0]["events"][0]["metadata"] == {"environment": "prod"}
 
 
 def test_wrap_skips_streaming_or_async_responses():
     cap = _Capture()
     stream = iter([])  # no usage attribute -> looks like a stream
-    wrapped = wrap(_FakeAnthropic(stream), provider="anthropic", meter=_meter(cap))
+    m = _meter(cap)
+    wrapped = wrap(_FakeAnthropic(stream), provider="anthropic", meter=m)
     out = wrapped.messages.create(stream=True)
     assert out is stream
-    _wait(cap, timeout=0.3)
+    _flushed(m, timeout=0.3)
     assert cap.calls == []  # nothing recorded for a non-usage response
 
 
@@ -262,6 +269,13 @@ def _opt_meter(capture, **kw):
     )
 
 
+def _stamped(event):
+    """Strip (and check) the delivery timestamp every event now carries."""
+    event = dict(event)
+    assert event.pop("occurred_at").endswith("Z"), "event was not timestamped"
+    return event
+
+
 def _all_events(cap):
     return [ev for call in cap.calls for ev in call["events"]]
 
@@ -272,7 +286,7 @@ def test_optimize_is_off_by_default():
     assert m._optimizer is None
     wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
     wrapped.messages.create(model="claude-sonnet-4-6", messages=[{"role": "user", "content": "hi"}])
-    _wait(cap)
+    _flushed(m)
     assert "signal" not in cap.calls[0]["events"][0]
 
 
@@ -283,9 +297,8 @@ def test_optimize_flags_a_duplicate_call():
     req = {"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "same"}]}
 
     wrapped.messages.create(**req)
-    _wait(cap, 1)  # first call lands before the second starts -> deterministic order
     wrapped.messages.create(**req)
-    _wait(cap, 2)
+    _flushed(m)  # both events ride one batch; queue order is preserved
 
     events = _all_events(cap)
     # The first call is novel (no signal); the repeat carries a duplicate signal.
@@ -297,14 +310,14 @@ def test_optimize_flags_a_duplicate_call():
 
 def test_optimize_emits_prefix_summaries_on_flush():
     cap = _Capture()
-    m = _opt_meter(cap, flush_interval=0.0)  # flush every call, for the test
+    m = _opt_meter(cap, optimize_flush_interval=0.0)  # flush every call, for the test
     wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
     wrapped.messages.create(
         model="claude-sonnet-4-6",
         system="You are a security triage assistant. " * 50,
         messages=[{"role": "user", "content": "alert 1"}],
     )
-    _wait(cap)
+    _flushed(m)
 
     events = _all_events(cap)
     prefixes = [e for e in events if e.get("signal", {}).get("kind") == "prefix"]
@@ -318,11 +331,143 @@ def test_optimize_emits_prefix_summaries_on_flush():
 def test_optimize_emits_nothing_without_a_salt():
     cap = _Capture()
     # An empty salt models a failed salt fetch — never emit unsalted fingerprints.
-    m = _opt_meter(cap, flush_interval=0.0, salt="")
+    m = _opt_meter(cap, optimize_flush_interval=0.0, salt="")
     wrapped = wrap(_FakeAnthropic(_anthropic_resp()), provider="anthropic", meter=m)
     req = {"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "x"}]}
     wrapped.messages.create(**req)
-    _wait(cap, 1)
     wrapped.messages.create(**req)
-    _wait(cap, 2)
+    _flushed(m)
     assert all("signal" not in e for e in _all_events(cap))
+
+
+# --- delivery: queue, batching, bounds, shutdown ---------------------------
+
+
+def test_events_are_batched_into_one_request():
+    """The point of the queue: many calls, few requests."""
+    cap = _Capture()
+    m = _meter(cap)
+    for i in range(20):
+        m.record(provider="openai", model="gpt-4o", tokens_in=i, tokens_out=1)
+    m.flush()
+
+    assert len(cap.calls) == 1, "20 events should not be 20 requests"
+    assert len(cap.calls[0]["events"]) == 20
+    # Order is preserved, so a duplicate signal still follows the call it repeats.
+    assert [e["tokens_in"] for e in cap.calls[0]["events"]] == list(range(20))
+
+
+def test_a_batch_is_capped_at_batch_size():
+    cap = _Capture()
+    m = _meter(cap, batch_size=5)
+    for _ in range(12):
+        m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.flush()
+
+    assert [len(c["events"]) for c in cap.calls] == [5, 5, 2]
+
+
+def test_recording_does_not_wait_on_the_network():
+    """The call path must not pay for a slow — or hung — ingest endpoint."""
+    releases = threading.Event()
+    m = Meter(
+        ingest_url="https://app.test/api/hook/events",
+        token="tok",
+        transport=lambda *a: releases.wait(5),  # a transport that will not return
+    )
+
+    start = time.monotonic()
+    for _ in range(100):
+        m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.5, f"recording blocked for {elapsed:.2f}s behind the transport"
+    releases.set()
+
+
+def test_a_full_queue_drops_oldest_and_counts_it():
+    """Bounded memory: a stalled endpoint can never grow the queue without limit."""
+    blocked = threading.Event()
+    cap = _Capture()
+
+    def _stall(url, headers, body):
+        blocked.wait(5)
+        cap(url, headers, body)
+
+    m = Meter(
+        ingest_url="https://app.test/api/hook/events",
+        token="tok",
+        transport=_stall,
+        queue_max=10,
+        batch_size=1,
+    )
+    for i in range(200):
+        m.record(provider="openai", model="gpt-4o", tokens_in=i, tokens_out=1)
+
+    assert m.dropped > 0
+    assert len(m._queue) <= 10  # noqa: SLF001  (the bound is the point)
+    blocked.set()
+
+
+def test_record_never_raises_even_when_delivery_is_broken(monkeypatch):
+    """Queueing is on the call path, so it must be as fail-safe as sending."""
+    m = _meter(_Capture())
+
+    def _boom(self):
+        raise RuntimeError("no threads left")
+
+    monkeypatch.setattr(threading.Thread, "start", _boom)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)  # must not raise
+    assert m.flush(timeout=0.1) is False  # nothing can drain it, and it says so
+
+
+def test_every_event_is_timestamped_when_it_happens_not_when_it_is_sent():
+    """Delivery is deferred, and the server bills by occurred_at.
+
+    Without a stamp at record time a call made at 23:59 on the last day of a
+    month could be posted seconds later and land in the following month.
+    """
+    cap = _Capture()
+    m = _meter(cap)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    recorded = time.time()
+    time.sleep(0.05)
+    m.flush()
+
+    stamp = cap.calls[0]["events"][0]["occurred_at"]
+    sent_at = dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    assert abs(sent_at.timestamp() - recorded) < 5
+
+    # An explicit occurred_at still wins — backfilling stays possible.
+    m.record(
+        provider="openai",
+        model="gpt-4o",
+        tokens_in=1,
+        tokens_out=1,
+        occurred_at="2026-01-15T10:00:00Z",
+    )
+    m.flush()
+    assert cap.calls[-1]["events"][-1]["occurred_at"] == "2026-01-15T10:00:00Z"
+
+
+def test_only_one_worker_thread_regardless_of_volume():
+    """SDK overhead is constant, not a function of the customer's traffic."""
+    cap = _Capture()
+    m = _meter(cap)
+    before = threading.active_count()
+    for _ in range(500):
+        m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.flush()
+
+    assert threading.active_count() - before <= 1
+
+
+def test_flush_returns_true_when_there_is_nothing_to_send():
+    assert _meter(_Capture()).flush() is True
+    assert Meter().flush() is True  # unconfigured -> no-op
+
+
+def test_unconfigured_meter_queues_nothing():
+    m = Meter()  # no url/token
+    assert m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1) is None
+    assert len(m._queue) == 0  # noqa: SLF001

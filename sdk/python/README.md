@@ -6,11 +6,32 @@ attributed **per feature**. Stdlib-only, no dependencies. Cost is computed
 server-side from Annapurna's pricing tables — the SDK never sees prices, and it
 never sends prompt or response content, only token counts and a `feature_id`.
 
-It is **fail-safe**: reporting is fire-and-forget on a background thread and can
-never raise into your request path — including when your application is already
-at its thread limit and no background thread can be started at all, in which case
-the event is dropped rather than surfaced as an error. With no ingest URL/token
-configured, every call is a no-op.
+It is **fail-safe**: recording appends to an in-memory queue and returns. A
+single background worker batches and posts; nothing on your call path blocks,
+raises, or touches the network. If Annapurna is down, misconfigured, or asleep,
+your application is unaffected. With no ingest URL/token configured, every call
+is a no-op.
+
+It is also **bounded**: one worker thread per meter whatever your traffic, and a
+capped queue (10,000 events). If the queue fills — a stalled endpoint, a burst —
+the oldest events are dropped and counted on `meter.dropped`. Metering degrades;
+your application does not.
+
+### Delivery and `flush()`
+
+Events are sent when a batch fills (50) or after `flush_interval` seconds (5),
+whichever comes first. An `atexit` hook flushes on normal shutdown with a short
+deadline, so a script that exits immediately still delivers.
+
+Call `meter.flush()` explicitly where the worker may not get scheduled — a
+serverless handler that freezes between invocations, or before a hard exit:
+
+```python
+meter.flush()          # returns True if the queue drained, False on timeout
+meter.flush(timeout=1) # never waits longer than you allow
+```
+
+Tunable per meter: `batch_size`, `flush_interval`, `queue_max`, `timeout`.
 
 ## Install
 
