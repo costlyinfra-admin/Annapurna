@@ -113,6 +113,27 @@ _ACTIVE_ENV = "(environment IS NULL OR environment <> 'ignore')"
 _CLASSIFICATION_BUCKETS = ("production", "development", "internal", "unclassified")
 
 
+def resolve_ai_kind(stored: Optional[str], source: Optional[str], has_inference: bool) -> tuple:
+    """Is this an AI feature? Returns (kind, source) — kind may be None (unknown).
+
+    Precedence, strongest evidence first:
+      1. 'user'      — somebody looked and decided. Nothing overrides a person.
+      2. 'inference' — the feature has inference cost against it, so it
+                       demonstrably calls models. That is a fact, not a guess,
+                       and it is resolved here rather than stored so it cannot
+                       go stale as spend arrives.
+      3. 'discovery' — the keyword read of its PR evidence (see discovery._ai_kind).
+    A feature with none of the three is honestly unknown, and says so.
+    """
+    if source == "user" and stored:
+        return stored, "user"
+    if has_inference:
+        return "ai", "inference"
+    if stored:
+        return stored, "discovery"
+    return None, None
+
+
 def _min_confidence(current: Optional[str], candidate: Optional[str]) -> Optional[str]:
     """Most conservative (lowest) of two confidences."""
     if candidate is None:
@@ -205,11 +226,21 @@ def dashboard(
 
         features = conn.execute(
             """
-            SELECT id, name, status, discovery_confidence
+            SELECT id, name, status, discovery_confidence, ai_kind, ai_kind_source
             FROM feature WHERE status IN ('proposed', 'confirmed')
             ORDER BY created_at
             """
         ).fetchall()
+        # Features that have EVER had inference cost against them — they call
+        # models, whatever a keyword guess said. All-time on purpose: a feature
+        # doesn't stop being an AI feature in a month it happened not to run.
+        with_inference = {
+            str(fid)
+            for (fid,) in conn.execute(
+                "SELECT DISTINCT feature_id FROM inference_cost "
+                "WHERE feature_id IS NOT NULL AND amount > 0"
+            ).fetchall()
+        }
 
         build = _rollup(conn, "build_cost", start, end)
         inference, inference_unattributed = _inference_rollup(conn, start, end)
@@ -271,8 +302,9 @@ def dashboard(
         facts = _insight_facts(conn, start, end)
 
     rows = []
-    for fid, name, _status, _disc in features:
+    for fid, name, _status, _disc, ai_kind, ai_kind_source in features:
         fid = str(fid)
+        kind, kind_source = resolve_ai_kind(ai_kind, ai_kind_source, fid in with_inference)
         b = build.get(fid, {"amount": 0.0, "confidence": None})
         i = inference.get(fid, {"amount": 0.0, "confidence": None, "requests": None})
         users = usage.get(fid)
@@ -288,6 +320,10 @@ def dashboard(
                 # Number of AI model calls this feature made (None when unknown —
                 # e.g. connector-only, no hook, since cost APIs don't report counts).
                 "requests": i.get("requests"),
+                # Is this an AI feature? 'ai' | 'non_ai' | None when nothing has
+                # determined it yet; kind_source says on what basis.
+                "ai_kind": kind,
+                "ai_kind_source": kind_source,
                 "worth_it": _worth_indicator(i["amount"], users),
                 "confidence": _min_confidence(b["confidence"], i["confidence"]),
             }
@@ -817,11 +853,19 @@ def feature_detail(
         start, end = _resolve_range(conn, range_token, start, end)
 
         feature = conn.execute(
-            "SELECT id, name, description, status, discovery_confidence FROM feature WHERE id = %s",
+            """
+            SELECT id, name, description, status, discovery_confidence,
+                   ai_kind, ai_kind_source,
+                   EXISTS (SELECT 1 FROM inference_cost c
+                           WHERE c.feature_id = feature.id AND c.amount > 0)
+            FROM feature WHERE id = %s
+            """,
             (feature_id,),
         ).fetchone()
         if feature is None:
             return None
+        # Resolved exactly as the Overview resolves it (user > evidence > guess).
+        ai_kind, ai_kind_source = resolve_ai_kind(feature[5], feature[6], feature[7])
 
         # Cost headlines are summed over the selected range (matching the Overview).
         build_total = conn.execute(
@@ -937,6 +981,8 @@ def feature_detail(
         "name": feature[1],
         "description": feature[2],
         "status": feature[3],
+        "ai_kind": ai_kind,
+        "ai_kind_source": ai_kind_source,
         "discovery_confidence": feature[4],
         "period": end.isoformat(),
         "start": start.isoformat(),

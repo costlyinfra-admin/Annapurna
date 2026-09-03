@@ -22,6 +22,8 @@ vi.mock("../api", async (importActual) => {
 const TRIAGE = {
   feature_id: "f1",
   name: "AI threat triage",
+  ai_kind: "ai",
+  ai_kind_source: "inference",
   build_cost: 181,
   inference_cost: 4200,
   active_users: 540,
@@ -134,6 +136,38 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText("Unattributed spend")).toBeInTheDocument();
     expect(screen.getByText("$790")).toBeInTheDocument(); // build 30 + inference 760
     expect(screen.getByText("Nothing flagged")).toBeInTheDocument();
+  });
+
+  it("shows whether each feature is an AI feature", async () => {
+    vi.mocked(api.dashboard).mockResolvedValue({
+      ...DATA,
+      features: [
+        TRIAGE,
+        {
+          ...TRIAGE,
+          feature_id: "f2",
+          name: "SSO login",
+          // Build cost, no model calls — the case the column exists for.
+          ai_kind: "non_ai",
+          ai_kind_source: "discovery",
+          inference_cost: 0,
+        },
+      ],
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+
+    // Scope to the By Feature table — the summary tiles name features too.
+    const table = screen.getByRole("table");
+    const triage = within(table).getByText("AI threat triage").closest("tr")!;
+    expect(within(triage).getByText("AI")).toBeInTheDocument();
+    const sso = within(table).getByText("SSO login").closest("tr")!;
+    expect(within(sso).getByText("Non-AI")).toBeInTheDocument();
+    // The basis is on hover, because a keyword guess isn't a billing fact.
+    expect(within(sso).getByText("Non-AI")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Guessed from AI keywords"),
+    );
   });
 
   it("renders auto-generated key insights", async () => {

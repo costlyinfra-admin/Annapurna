@@ -12,6 +12,7 @@ from typing import Optional
 
 import psycopg
 
+from . import dashboard
 from .db import app_dsn, connect, tenant_tx
 from .providers import month_start
 
@@ -50,19 +51,27 @@ def _signals(conn: psycopg.Connection, feature_id: str) -> list[dict]:
 def _feature(conn: psycopg.Connection, feature_id: str) -> Optional[dict]:
     row = conn.execute(
         """
-        SELECT id, name, description, status, discovery_confidence
+        SELECT id, name, description, status, discovery_confidence,
+               ai_kind, ai_kind_source,
+               EXISTS (SELECT 1 FROM inference_cost c
+                       WHERE c.feature_id = feature.id AND c.amount > 0)
         FROM feature WHERE id = %s
         """,
         (feature_id,),
     ).fetchone()
     if row is None:
         return None
+    # Resolved the same way the Overview resolves it, so the two never disagree.
+    ai_kind, ai_kind_source = dashboard.resolve_ai_kind(row[5], row[6], row[7])
     return {
         "id": str(row[0]),
         "name": row[1],
         "description": row[2],
         "status": row[3],
         "discovery_confidence": row[4],
+        # 'ai' | 'non_ai' | None (unknown); source says on what basis.
+        "ai_kind": ai_kind,
+        "ai_kind_source": ai_kind_source,
         "signals": _signals(conn, str(row[0])),
     }
 
@@ -108,6 +117,28 @@ def rename_feature(
                 description if description is not None else existing["description"],
                 feature_id,
             ),
+        )
+        return _feature(conn, feature_id)
+
+
+VALID_AI_KINDS = ("ai", "non_ai")
+
+
+def set_ai_kind(tenant_id: str, feature_id: str, ai_kind: Optional[str]) -> dict:
+    """Record a person's AI / non-AI decision for a feature.
+
+    Passing None clears it, handing the feature back to the evidence and the
+    discovery guess. A stored decision is never overwritten by a later discovery
+    run — see discovery._persist_proposals.
+    """
+    if ai_kind is not None and ai_kind not in VALID_AI_KINDS:
+        raise ValueError(f"ai_kind must be one of {VALID_AI_KINDS} or null")
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        if _feature(conn, feature_id) is None:
+            raise FeatureNotFound(feature_id)
+        conn.execute(
+            "UPDATE feature SET ai_kind = %s, ai_kind_source = %s WHERE id = %s",
+            (ai_kind, "user" if ai_kind else None, feature_id),
         )
         return _feature(conn, feature_id)
 

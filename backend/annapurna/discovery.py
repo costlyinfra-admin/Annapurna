@@ -49,6 +49,8 @@ class Proposal:
     pr_refs: list[str]
     branch_pattern: Optional[str]
     repos: list[str]
+    #: 'ai' | 'non_ai' — a keyword read of the PR evidence, never a certainty.
+    ai_kind: str = "non_ai"
 
 
 # --------------------------------------------------------------------------
@@ -251,6 +253,7 @@ def heuristic_cluster(prs: list[PullRequest]) -> list[Proposal]:
                 pr_refs=[p.ref for p in pr_list],
                 branch_pattern=_branch_pattern([p.branch for p in pr_list]),
                 repos=sorted({p.repo for p in pr_list}),
+                ai_kind=_ai_kind(pr_list),
             )
         )
 
@@ -263,6 +266,7 @@ def heuristic_cluster(prs: list[PullRequest]) -> list[Proposal]:
                 pr_refs=[p.ref for p in needs_review],
                 branch_pattern=None,
                 repos=sorted({p.repo for p in needs_review}),
+                ai_kind=_ai_kind(needs_review),
             )
         )
 
@@ -272,6 +276,73 @@ def heuristic_cluster(prs: list[PullRequest]) -> list[Proposal]:
         key=lambda p: (p.name == _NEEDS_REVIEW, order.get(p.confidence, 3), -len(p.pr_refs))
     )
     return proposals
+
+
+# --------------------------------------------------------------------------
+# AI / non-AI classification (heuristic, deterministic)
+# --------------------------------------------------------------------------
+# Most repositories contain a mix: some features call models, most don't. What
+# discovery can honestly do is read the PR evidence for unambiguous AI vocabulary
+# — provider and model names, the machinery of prompting and retrieval. It cannot
+# tell whether a feature calls a model at RUNTIME; only inference cost proves
+# that, and that check happens at read time (dashboard.resolve_ai_kind).
+#
+# So the terms below are deliberately narrow: each one is meaningless outside an
+# AI context. Broad words that AI shares with ordinary software — "model" (MVC),
+# "agent" (user agent), "token" (auth token), "train", "vision", "generate" —
+# are excluded on purpose, because a false "AI" label is worse than an absent
+# one: it silently attributes ordinary engineering to the AI bill.
+_AI_TERMS = frozenset(
+    """llm llms gpt chatgpt claude anthropic openai gemini bedrock mistral llama
+    embedding embeddings rag prompt prompts prompting inference completion completions
+    chatbot copilot genai generative summarization summarisation vectordb pinecone
+    weaviate langchain llamaindex finetune finetuning transformer huggingface
+    tokenizer hallucination sonnet haiku opus""".split()
+)
+
+#: Multi-word phrases worth matching whole ("ai" alone is far too noisy — it hits
+#: "said", "detail", "chain" as a substring and "AI" as an initialism elsewhere).
+_AI_PHRASES = (
+    "ai-powered",
+    "ai powered",
+    "ai assistant",
+    "ai-assistant",
+    "machine learning",
+    "language model",
+    "large language",
+    "vector store",
+    "vector search",
+    "semantic search",
+    "retrieval augmented",
+    "retrieval-augmented",
+    "fine-tune",
+    "fine-tuning",
+    "model call",
+    "system prompt",
+)
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _ai_kind(prs: list) -> str:
+    """'ai' when the PR evidence names AI machinery outright, else 'non_ai'.
+
+    Absence of AI vocabulary is weak evidence, which is why a 'non_ai' verdict is
+    always presented as changeable rather than as a finding.
+    """
+    haystack = " ".join(
+        str(part or "").lower()
+        for pr in prs
+        for part in (
+            getattr(pr, "title", ""),
+            getattr(pr, "branch", ""),
+            getattr(pr, "body", "")[:2000],  # a long body is mostly template text
+            " ".join(getattr(pr, "labels", []) or []),
+        )
+    )
+    if any(phrase in haystack for phrase in _AI_PHRASES):
+        return "ai"
+    return "ai" if _AI_TERMS & set(_WORD_RE.findall(haystack)) else "non_ai"
 
 
 def _branch_pattern(branches: list[str]) -> Optional[str]:
@@ -400,6 +471,7 @@ def _proposals_from_json(text: str, prs: list[PullRequest]) -> list[Proposal]:
 
     valid_refs = {p.ref for p in prs}
     repo_by_ref = {p.ref: p.repo for p in prs}
+    pr_by_ref = {p.ref: p for p in prs}
     proposals: list[Proposal] = []
     for item in items:
         refs = [r for r in item.get("pr_refs", []) if r in valid_refs]
@@ -416,6 +488,7 @@ def _proposals_from_json(text: str, prs: list[PullRequest]) -> list[Proposal]:
                 pr_refs=refs,
                 branch_pattern=item.get("branch_pattern") or None,
                 repos=sorted({repo_by_ref[r] for r in refs}),
+                ai_kind=_ai_kind([pr_by_ref[r] for r in refs]),
             )
         )
     return proposals
@@ -588,13 +661,20 @@ def _persist_proposals(
 
             if feature_id is not None:
                 stale.discard(feature_id)  # reused, so not deleted below
+                # A person's AI/non-AI decision outlives re-discovery: the guess
+                # is only written back where nobody has ruled on it (the same rule
+                # resource_classification follows for environment).
                 conn.execute(
                     """
                     UPDATE feature
-                    SET name = %s, description = %s, discovery_confidence = %s
+                    SET name = %s, description = %s, discovery_confidence = %s,
+                        ai_kind = CASE WHEN ai_kind_source = 'user'
+                                       THEN ai_kind ELSE %s END,
+                        ai_kind_source = CASE WHEN ai_kind_source = 'user'
+                                              THEN 'user' ELSE 'discovery' END
                     WHERE id = %s
                     """,
-                    (prop.name, prop.description, prop.confidence, feature_id),
+                    (prop.name, prop.description, prop.confidence, prop.ai_kind, feature_id),
                 )
                 # Signals are regenerated wholesale — the PR set may have changed.
                 conn.execute("DELETE FROM feature_signal WHERE feature_id = %s", (feature_id,))
@@ -602,11 +682,12 @@ def _persist_proposals(
                 feature_id = conn.execute(
                     """
                     INSERT INTO feature
-                        (tenant_id, name, description, status, discovery_confidence)
-                    VALUES (%s, %s, %s, 'proposed', %s)
+                        (tenant_id, name, description, status, discovery_confidence,
+                         ai_kind, ai_kind_source)
+                    VALUES (%s, %s, %s, 'proposed', %s, %s, 'discovery')
                     RETURNING id
                     """,
-                    (tenant_id, prop.name, prop.description, prop.confidence),
+                    (tenant_id, prop.name, prop.description, prop.confidence, prop.ai_kind),
                 ).fetchone()[0]
 
             if prop.branch_pattern:

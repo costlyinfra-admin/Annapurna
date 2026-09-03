@@ -131,3 +131,29 @@ def test_scope_is_empty_then_remembers_selection(client):
         "owner": "acme",
         "repos": ["acme/core"],
     }
+
+
+def test_feature_ai_kind_endpoint_records_a_user_decision(client):
+    feature = client.post("/api/features", json={"name": "Alert digest"}).json()
+    assert feature["ai_kind"] is None  # nothing has determined it yet
+
+    marked = client.put(f"/api/features/{feature['id']}/kind", json={"ai_kind": "non_ai"})
+    assert marked.status_code == 200
+    assert marked.json()["ai_kind"] == "non_ai"
+    assert marked.json()["ai_kind_source"] == "user"
+
+    # Clearing hands it back to the evidence and the discovery guess.
+    cleared = client.put(f"/api/features/{feature['id']}/kind", json={"ai_kind": None})
+    assert cleared.json()["ai_kind"] is None
+
+    # Only the two known kinds are accepted.
+    assert (
+        client.put(f"/api/features/{feature['id']}/kind", json={"ai_kind": "sort of"}).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/api/features/00000000-0000-0000-0000-000000000000/kind", json={"ai_kind": "ai"}
+        ).status_code
+        == 404
+    )

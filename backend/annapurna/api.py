@@ -13,7 +13,7 @@ import datetime as dt
 import logging
 import os
 import time
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -263,6 +263,11 @@ class UsageRequest(BaseModel):
     active_users: int = Field(ge=0)
     events: Optional[int] = Field(default=None, ge=0)
     period: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+
+
+class AiKindRequest(BaseModel):
+    # null clears the manual decision and hands the feature back to the evidence.
+    ai_kind: Optional[Literal["ai", "non_ai"]] = None
 
 
 class HookSignal(BaseModel):
@@ -1146,6 +1151,16 @@ def create_app() -> FastAPI:
             return features.set_usage(
                 user["tenant_id"], feature_id, body.active_users, body.events, period
             )
+        except features.FeatureNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found"
+            ) from exc
+
+    @app.put("/api/features/{feature_id}/kind")
+    def set_feature_ai_kind(feature_id: str, body: AiKindRequest, user: CurrentUser) -> dict:
+        """Mark a feature as an AI feature or an ordinary one (or clear the mark)."""
+        try:
+            return features.set_ai_kind(user["tenant_id"], feature_id, body.ai_kind)
         except features.FeatureNotFound as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Feature not found"

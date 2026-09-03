@@ -17,6 +17,7 @@ vi.mock("../../api", async (importActual) => {
       deleteFeature: vi.fn(),
       splitFeature: vi.fn(),
       mergeFeatures: vi.fn(),
+      setFeatureAiKind: vi.fn(),
     },
   };
 });
@@ -38,6 +39,8 @@ const THREAT: Feature = {
   description: "",
   status: "proposed",
   discovery_confidence: "high",
+  ai_kind: "ai",
+  ai_kind_source: "discovery",
   signals: [
     { id: "s1", signal_type: "pr", external_ref: "acme/core#1", confidence: "high" },
     { id: "s2", signal_type: "pr", external_ref: "acme/core#2", confidence: "high" },
@@ -157,5 +160,15 @@ describe("ReviewStep", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     await waitFor(() => expect(api.addFeature).toHaveBeenCalledWith("Manual"));
+  });
+
+  it("lets someone correct the AI / non-AI guess, and remembers it", async () => {
+    vi.mocked(api.listFeatures).mockResolvedValue([{ ...THREAT, ai_kind: "non_ai" }]);
+    vi.mocked(api.setFeatureAiKind).mockResolvedValue({ ...THREAT, ai_kind: "ai" });
+    render(<ReviewStep />);
+
+    expect(await screen.findByText("Non-AI")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("AI feature"));
+    await waitFor(() => expect(api.setFeatureAiKind).toHaveBeenCalledWith("f1", "ai"));
   });
 });

@@ -15,7 +15,7 @@ import {
   type RangeKind,
   type ReviewRange,
 } from "../api";
-import { ConfidenceBadge, WorthBadge } from "../components/badges";
+import { AiKindBadge, ConfidenceBadge, WorthBadge } from "../components/badges";
 import { CustomerBreakdown } from "../components/CustomerBreakdown";
 import { DeveloperBreakdown } from "../components/DeveloperBreakdown";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
@@ -274,6 +274,7 @@ export function Dashboard() {
           <thead>
             <tr>
               <th>Feature</th>
+              <th title="Does this feature call AI models at runtime?">Type</th>
               <th className="num">Build cost</th>
               <th className="num">{data.months > 1 ? "Inference" : "Inference / mo"}</th>
               <th className="num">Active users</th>
@@ -295,6 +296,9 @@ export function Dashboard() {
                     {f.name}
                   </Link>
                 </td>
+                <td>
+                  <AiKindBadge kind={f.ai_kind} source={f.ai_kind_source} />
+                </td>
                 <td className="num">{money(f.build_cost)}</td>
                 <td className="num">{money(f.inference_cost)}</td>
                 <td className="num">{num(f.active_users)}</td>
@@ -312,6 +316,7 @@ export function Dashboard() {
             ))}
             <tr className="unattributed-row">
               <td>Unattributed</td>
+              <td className="muted">—</td>
               <td className="num">{money(data.unattributed.build_cost)}</td>
               <td className="num">{money(data.unattributed.inference_cost)}</td>
               <td className="num">—</td>

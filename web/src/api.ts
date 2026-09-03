@@ -107,6 +107,10 @@ export interface Feature {
   description: string;
   status: string;
   discovery_confidence: string | null;
+  /** 'ai' | 'non_ai', or null when nothing has determined it yet. */
+  ai_kind: string | null;
+  /** 'user' | 'inference' | 'discovery' — the basis for ai_kind. */
+  ai_kind_source: string | null;
   signals: FeatureSignal[];
 }
 
@@ -261,6 +265,8 @@ export interface SourceDetail {
 export interface DashboardRow {
   feature_id: string;
   name: string;
+  ai_kind: string | null;
+  ai_kind_source: string | null;
   build_cost: number;
   inference_cost: number;
   active_users: number | null;
@@ -316,6 +322,8 @@ export interface FeatureDetail {
   period: string;
   start: string;
   end: string;
+  ai_kind: string | null;
+  ai_kind_source: string | null;
   headline: {
     build_cost: number;
     inference_cost: number;
@@ -796,6 +804,13 @@ export const api = {
 
   customerSpend: (range?: ReviewRange) =>
     request<CustomerSpend>(`/dashboard/customers${rangeQuery(range)}`),
+
+  /** Mark a feature as an AI feature or an ordinary one; null clears the mark. */
+  setFeatureAiKind: (id: string, aiKind: "ai" | "non_ai" | null) =>
+    request<Feature>(`/features/${id}/kind`, {
+      method: "PUT",
+      body: JSON.stringify({ ai_kind: aiKind }),
+    }),
 
   setUsage: (id: string, activeUsers: number, period?: string) =>
     request<Feature>(`/features/${id}/usage`, {

@@ -25,11 +25,11 @@ def test_seed_loads_extended_demo_tenant(postgresql, admin_conninfo, monkeypatch
         tenant = _tenant_id(conn, seed.DEMO_TENANT_NAME)
         assert tenant is not None, "demo tenant was not created"
 
-        # Extended demo: 4 base + 4 new + 1 hosted-OSS + 1 self-hosted feature.
+        # Extended demo: 4 base + 4 new + 1 hosted-OSS + 1 self-hosted + 3 non-AI.
         feature_count = conn.execute(
             "SELECT count(*) FROM feature WHERE tenant_id = %s", (tenant[0],)
         ).fetchone()[0]
-        assert feature_count == 10
+        assert feature_count == 13
 
         # ~2 years of monthly history -> many distinct periods, spanning 2024-2026.
         periods = conn.execute(
@@ -116,4 +116,4 @@ def test_seed_reset_rebuilds_demo_tenant(postgresql, admin_conninfo, monkeypatch
         features = conn.execute(
             "SELECT count(*) FROM feature WHERE tenant_id = %s", (rebuilt,)
         ).fetchone()[0]
-        assert features == 10
+        assert features == 13

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import pytest
 from annapurna import discovery, features
 from annapurna.github import PullRequest
 
@@ -270,3 +271,37 @@ def test_rerun_keeps_build_cost_attached_to_the_same_feature(tenant_id, monkeypa
 
     after = attribution()
     assert after == before  # same feature ids, same dollars — nothing orphaned
+
+
+@pytest.mark.parametrize(
+    "title,branch,expected",
+    [
+        ("Add LLM-powered alert summaries", "feature/llm-summary", "ai"),
+        ("Wire up Claude for triage", "feature/triage", "ai"),
+        ("Embeddings index for semantic search", "feature/search", "ai"),
+        ("Cache the system prompt between calls", "feature/prompt-cache", "ai"),
+        # Ordinary engineering — no AI vocabulary anywhere.
+        ("Add SAML single sign-on", "feature/sso", "non_ai"),
+        ("Fix pagination on the invoice list", "feature/invoices", "non_ai"),
+        # Words AI shares with ordinary software must NOT trigger a false positive:
+        # a false "AI" label silently moves normal work onto the AI bill.
+        ("Refactor the User model", "feature/user-model", "non_ai"),
+        ("Rotate the auth token on refresh", "feature/token-rotate", "non_ai"),
+        ("Parse the user agent string", "feature/user-agent", "non_ai"),
+        ("Train new staff on the runbook", "chore/runbook", "non_ai"),
+    ],
+)
+def test_ai_kind_reads_pr_evidence(title, branch, expected):
+    assert discovery._ai_kind([_pr(1, "acme/core", title, branch)]) == expected
+
+
+def test_ai_kind_reads_labels_and_body_too():
+    pr = _pr(
+        2,
+        "acme/core",
+        "Summaries for the incident feed",
+        "feature/incident-feed",
+        body="Uses the Anthropic API to condense the timeline.",
+        labels=["backend"],
+    )
+    assert discovery._ai_kind([pr]) == "ai"

@@ -909,3 +909,68 @@ def test_demo_seed_fills_the_developer_activity_table(tenant_id, app_env):
     # writes the most code, which is the whole caveat the section carries.
     assert max(rows, key=lambda r: r["prs"]) is not max(rows, key=lambda r: r["additions"])
     assert all(r["commits"] and r["additions"] for r in rows)
+
+
+def test_ai_kind_precedence_user_beats_evidence_beats_guess():
+    # The whole rule in one place: a person outranks billing evidence, which
+    # outranks a keyword guess, and nothing at all is honestly unknown.
+    assert dashboard.resolve_ai_kind("non_ai", "user", True) == ("non_ai", "user")
+    assert dashboard.resolve_ai_kind("ai", "user", False) == ("ai", "user")
+    # No user ruling: inference cost proves it calls models, whatever discovery said.
+    assert dashboard.resolve_ai_kind("non_ai", "discovery", True) == ("ai", "inference")
+    assert dashboard.resolve_ai_kind(None, None, True) == ("ai", "inference")
+    # No evidence either: fall back to the guess.
+    assert dashboard.resolve_ai_kind("non_ai", "discovery", False) == ("non_ai", "discovery")
+    assert dashboard.resolve_ai_kind(None, None, False) == (None, None)
+
+
+def test_dashboard_rows_carry_the_ai_kind(seeded, app_env):
+    # Features with inference cost read as AI on the billing evidence — no
+    # guessing required, and no discovery run needed for it to be right.
+    rows = {r["name"]: r for r in dashboard.dashboard(seeded, PERIOD)["features"]}
+    assert rows["AI threat triage"]["ai_kind"] == "ai"
+    assert rows["AI threat triage"]["ai_kind_source"] == "inference"
+    # The fixture's one feature with no cost and no discovery guess is honestly
+    # unknown — reported as such rather than defaulted to either answer.
+    assert rows["Vuln summarizer"]["ai_kind"] is None
+    assert rows["Vuln summarizer"]["ai_kind_source"] is None
+
+    # A feature with build cost and no model calls is the case the column exists
+    # for: it belongs on the dashboard, but it is not an AI feature.
+    fid = app_env.execute(
+        """
+        INSERT INTO feature (tenant_id, name, status, ai_kind, ai_kind_source)
+        VALUES (%s, 'SSO login', 'confirmed', 'non_ai', 'discovery') RETURNING id
+        """,
+        (seeded,),
+    ).fetchone()[0]
+    app_env.execute(
+        """
+        INSERT INTO build_cost (tenant_id, feature_id, developer_id, tool, amount,
+                                period, confidence, source)
+        VALUES (%s, %s, 'dave', 'cursor', 74, %s, 'high', 'github+tool_admin')
+        """,
+        (seeded, fid, PERIOD),
+    )
+    app_env.commit()
+
+    sso = next(
+        r for r in dashboard.dashboard(seeded, PERIOD)["features"] if r["name"] == "SSO login"
+    )
+    assert sso["ai_kind"] == "non_ai"
+    assert sso["build_cost"] == 74.0  # it still costs AI money to BUILD
+    assert sso["inference_cost"] == 0.0
+
+
+def test_demo_seed_has_both_kinds_of_feature(tenant_id, app_env):
+    # A demo where every feature is an AI feature can't show what the column is for.
+    insert_sample_data(app_env, tenant_id, extended=True)
+    app_env.commit()
+
+    rows = dashboard.dashboard(tenant_id, PERIOD)["features"]
+    kinds = {r["name"]: r["ai_kind"] for r in rows}
+    assert "non_ai" in kinds.values() and "ai" in kinds.values()
+    # The non-AI ones have build spend but no inference — the point of the split.
+    non_ai = [r for r in rows if r["ai_kind"] == "non_ai"]
+    assert all(r["inference_cost"] == 0.0 for r in non_ai)
+    assert any(r["build_cost"] > 0 for r in non_ai)

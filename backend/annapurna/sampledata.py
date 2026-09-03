@@ -959,13 +959,16 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
     # 4) Per-customer metered spend (what the SDK adds on top of the connectors).
     _add_customer_demo(conn, tenant_id)
 
-    # 5) A year of merged PRs, so "By Developer" can report activity per period.
+    # 5) Ordinary (non-AI) features: build cost, no model calls.
+    non_ai = _add_non_ai_demo(conn, tenant_id)
+
+    # 6) A year of merged PRs, so "By Developer" can report activity per period.
     all_features = conn.execute(
         "SELECT id FROM feature WHERE tenant_id = %s ORDER BY created_at", (tenant_id,)
     ).fetchall()
     _add_activity_demo(conn, tenant_id, [f[0] for f in all_features])
 
-    return len(_NEW_FEATURES) + 2
+    return len(_NEW_FEATURES) + 2 + non_ai
 
 
 #: Demo customers for the Overview's "By Customer" tab. Acme Security is a
@@ -1066,6 +1069,74 @@ def _add_activity_demo(conn, tenant_id, feature_ids: list) -> None:
                     deletions=dels,
                     merged_at=_dt.date(period.year, period.month, day),
                 )
+
+
+#: Ordinary engineering that cost real AI-tooling money to build but calls no
+#: model at runtime. Every customer has these, and they are the reason the
+#: Overview carries an AI / Non-AI column: they belong in the build-cost picture
+#: and would distort every per-feature inference comparison if counted as AI.
+#:   (name, description, branch, [(dev, tool, pr_ref, monthly $, commits, files)])
+_NON_AI_FEATURES = [
+    {
+        "name": "SSO and SCIM provisioning",
+        "desc": "SAML sign-in and directory-synced user provisioning for enterprise tenants.",
+        "branch": "feature/sso-*",
+        "build": [
+            ("dave", "cursor", "acme/core#1571", 74.00, 12, 31),
+            ("heidi", "copilot", "acme/core#1578", 41.00, 7, 18),
+        ],
+    },
+    {
+        "name": "Billing and invoice exports",
+        "desc": "Scheduled CSV/PDF exports of usage and invoices for finance teams.",
+        "branch": "feature/billing-export-*",
+        "build": [("bob", "cursor", "acme/core#1583", 52.00, 9, 22)],
+    },
+    {
+        "name": "Audit log viewer",
+        "desc": "Searchable, filterable audit trail of every action taken in the console.",
+        "branch": "feature/audit-log-*",
+        "build": [("grace", "claude_code", "acme/core#1590", 63.00, 8, 19)],
+    },
+]
+
+
+def _add_non_ai_demo(conn, tenant_id) -> int:
+    """Features with build cost and no inference cost — the non-AI half of the list.
+
+    ai_kind is stored as the discovery heuristic WOULD have set it (no AI
+    vocabulary in "SSO and SCIM provisioning"), rather than as a user decision,
+    so the demo shows the guess that a person can then confirm or correct.
+    """
+    periods = _months_ending(DEFAULT_PERIOD, 12)
+    for f in _NON_AI_FEATURES:
+        fid = conn.execute(
+            """
+            INSERT INTO feature (tenant_id, name, description, status, shipped_at,
+                                 discovery_confidence, ai_kind, ai_kind_source)
+            VALUES (%s, %s, %s, 'confirmed', %s, 'high', 'non_ai', 'discovery')
+            RETURNING id
+            """,
+            (tenant_id, f["name"], f["desc"], DEFAULT_PERIOD),
+        ).fetchone()[0]
+        _add_signal(conn, tenant_id, fid, "branch", f["branch"], "high")
+        for dev, tool, ref, amount, commits, files in f["build"]:
+            _add_signal(
+                conn,
+                tenant_id,
+                fid,
+                "pr",
+                ref,
+                "high",
+                actor=dev,
+                commits=commits,
+                files_changed=files,
+                additions=commits * 40,
+                deletions=commits * 12,
+                merged_at=_dt.date(2026, 5, 12),
+            )
+            _hist_build(conn, tenant_id, fid, dev, tool, ref, amount, periods, "high")
+    return len(_NON_AI_FEATURES)
 
 
 def _add_self_hosted_demo(conn, tenant_id) -> None:

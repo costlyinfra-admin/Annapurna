@@ -1032,6 +1032,37 @@ select {
   color: var(--warn);
 }
 
+/* AI / non-AI feature kind. Neutral by design — a non-AI feature is not a
+   problem, just a different thing, so neither reads as good or bad. */
+.badge.ai-yes {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  text-transform: none;
+}
+
+.badge.ai-no,
+.badge.ai-unknown {
+  background: var(--bg);
+  color: var(--muted);
+  text-transform: none;
+}
+
+/* The manual override sitting with the other per-feature actions. */
+.ai-kind-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ai-kind-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .badge.worth-watch {
   background: var(--error-bg);
   color: var(--error);

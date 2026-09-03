@@ -17,6 +17,7 @@ vi.mock("../api", async (importActual) => {
     api: {
       me: vi.fn(),
       featureDetail: vi.fn(),
+      setFeatureAiKind: vi.fn(),
       featureInference: vi.fn(),
       featureOpportunities: vi.fn(),
       applyOpportunity: vi.fn(),
@@ -96,6 +97,8 @@ const DETAIL = {
   description: "Classifies alerts.",
   status: "confirmed",
   discovery_confidence: "high",
+  ai_kind: "ai",
+  ai_kind_source: "inference",
   period: "2026-05-01",
   start: "2026-05-01",
   end: "2026-05-01",
@@ -372,5 +375,16 @@ describe("FeatureDetail", () => {
     );
     await screen.findByRole("heading", { name: "AI threat triage" });
     expect(api.featureDetail).toHaveBeenCalledWith("f1", { kind: "last_6_months" });
+  });
+
+  it("lets someone mark the feature as non-AI from its detail page", async () => {
+    // Most features are confirmed, and never appear on the Features review list —
+    // so the detail page has to carry the control too, or they can't be corrected.
+    vi.mocked(api.setFeatureAiKind).mockResolvedValue({} as never);
+    renderDetail();
+    expect(await screen.findByText("AI")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("AI feature"));
+    await waitFor(() => expect(api.setFeatureAiKind).toHaveBeenCalledWith("f1", "non_ai"));
   });
 });

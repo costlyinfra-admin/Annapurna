@@ -18,7 +18,7 @@ import {
   type RangeKind,
   type ReviewRange,
 } from "../api";
-import { ConfidenceBadge } from "../components/badges";
+import { AiKindBadge, ConfidenceBadge } from "../components/badges";
 import { PeriodSelector } from "../components/PeriodSelector";
 import { TrendChart } from "../components/TrendChart";
 import { compact, money, num } from "../format";
@@ -107,6 +107,21 @@ export function FeatureDetail() {
           {detail.description && <p className="muted">{detail.description}</p>}
           <p className="detail-meta">
             <span className="badge">{detail.status}</span>
+            <AiKindBadge kind={detail.ai_kind} source={detail.ai_kind_source} />
+            <label
+              className="ai-kind-toggle"
+              title="Does this feature call AI models at runtime? Your choice is kept — re-running discovery won't change it."
+            >
+              <input
+                type="checkbox"
+                checked={detail.ai_kind === "ai"}
+                onChange={async (e) => {
+                  await api.setFeatureAiKind(detail.feature_id, e.target.checked ? "ai" : "non_ai");
+                  await load();
+                }}
+              />
+              AI feature
+            </label>
             {detail.headline.active_users != null && (
               <span className="muted">
                 {num(detail.headline.active_users)} active users this period
