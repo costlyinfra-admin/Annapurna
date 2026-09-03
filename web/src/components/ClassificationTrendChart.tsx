@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { type ClassificationTrendPoint } from "../api";
 import { money, wholeMoney } from "../format";
+import { smoothArea, smoothLine } from "../chartCurve";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -211,8 +212,10 @@ function LineTrend({
   const y = (v: number) => PLOT_BOTTOM - (v / ceil) * (PLOT_BOTTOM - PLOT_TOP);
 
   const points = trend.map((t, i) => ({ px: x(i), py: y(t.total), t }));
-  const line = points.map((p) => `${p.px},${p.py}`).join(" ");
-  const area = `${x(0)},${PLOT_BOTTOM} ${line} ${x(n - 1)},${PLOT_BOTTOM}`;
+  // Monotone cubic: smooth, but it can never bow above a peak or below a
+  // trough, so the curve never draws spend that did not happen.
+  const line = smoothLine(points);
+  const area = smoothArea(points, PLOT_BOTTOM);
   const peakIdx = points.reduce((a, p, i) => (p.t.total > points[a].t.total ? i : a), 0);
   const active = hover ?? peakIdx; // the peak stays labelled until the user hovers
   const ap = points[active];
@@ -244,8 +247,8 @@ function LineTrend({
           </g>
         ))}
 
-        <polygon className="trend-line-area" points={area} />
-        <polyline className="trend-line-path" points={line} fill="none" />
+        <path className="trend-line-area" d={area} />
+        <path className="trend-line-path" d={line} fill="none" />
 
         {/* Vertical guide while hovering + a dot on the highlighted point. */}
         {hover !== null && (
