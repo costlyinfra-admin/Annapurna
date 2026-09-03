@@ -1,3 +1,27 @@
+/* The theme's two faces, matching costlyinfra.com — self-hosted, so the app
+   makes no third-party request and renders identically behind a firewall or a
+   strict CSP. Only the latin subsets are declared: this UI is English, and
+   pulling the full fontsource stylesheet would ship nine more subset files that
+   no browser here would ever download. Variable fonts, so one file per face
+   covers every weight the design uses. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2")
+    format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url("@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2")
+    format("woff2-variations");
+}
+
 /* Annapurna — the costlyinfra.com theme, applied.
    Visual layer only: every class name matches the components; no markup changes.
 
