@@ -62,6 +62,31 @@ describe("smoothLine", () => {
     expect(Math.max(...ys)).toBeLessThanOrEqual(floor + 1e-9);
   });
 
+  it("flows through a peak instead of cornering at it", () => {
+    // The reason this is not monotone cubic. Monotone flattens the tangent at
+    // every local extremum, so the control point beside a peak collapses onto
+    // the peak itself and the line turns a corner there. Catmull-Rom tangents
+    // aim each point at its neighbours, so the shoulder stays round.
+    const d = smoothLine(pts([100, 40, 90]));
+    const firstCurve = d.slice(d.indexOf("C") + 1).split("C")[0];
+    const [, , , c2y] = firstCurve
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    // A cornered curve would put this control exactly on the peak (40).
+    expect(c2y).toBeGreaterThan(40);
+    // ...but still inside the segment, so the peak is not overshot.
+    expect(c2y).toBeLessThanOrEqual(100);
+  });
+
+  it("is visibly curved between points, not a chord", () => {
+    // Sample the middle of a rising segment: a straight line would sit exactly
+    // on the chord, a curve noticeably off it.
+    const ys = sampleY(smoothLine(pts([100, 40, 90, 20])));
+    const mid = ys[Math.floor(ys.length * 0.125)]; // ~mid of the first segment
+    expect(Math.abs(mid - 70)).toBeGreaterThan(1); // chord midpoint is y=70
+  });
+
   it("handles the degenerate sizes a short range produces", () => {
     expect(smoothLine([])).toBe("");
     expect(smoothLine(pts([50]))).toBe("M0,50");

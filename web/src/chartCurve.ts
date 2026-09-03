@@ -1,58 +1,55 @@
 /**
- * Smooth curves for line charts, using MONOTONE cubic interpolation.
+ * Smooth curves for line charts — flowing, but incapable of inventing a value.
  *
- * The choice matters on a cost chart. The usual smoothing splines (Catmull-Rom,
- * cardinal) overshoot: run one through $0, $0, $900 and it dips below zero
- * before the climb, and run one through a peak and it arcs above the highest
- * point. On a spend trend that draws money that was never spent, which is
- * exactly the kind of invented number this product refuses to show.
+ * The tension here is between two things a cost chart needs at once:
  *
- * Monotone cubic (Fritsch–Carlson) fixes the tangents so each segment stays
- * within the two values it joins: the curve is smooth, but it never invents a
- * peak, a trough, or a negative. Same guarantee as d3's curveMonotoneX.
+ *   1. It should look like a curve, not a folded ribbon. That means Catmull-Rom
+ *      style tangents, which aim each point at its NEIGHBOURS, so the line
+ *      sweeps through a peak with a rounded shoulder.
+ *   2. It must never draw money that was not spent. Plain Catmull-Rom fails
+ *      this: it overshoots, arcing above a peak and dipping below a floor. On
+ *      $0, $0, $900 it renders a negative spend that never happened.
+ *
+ * The resolution is to take Catmull-Rom's flowing tangents and then CLAMP each
+ * segment's two control points into the y-range of the two points it joins. A
+ * cubic Bézier is contained in the convex hull of its control points, so once
+ * all four sit inside that range the drawn curve cannot leave it either. Where
+ * the spline would have overshot it is pulled back to exactly the data value;
+ * everywhere else it keeps its full curvature.
+ *
+ * Result: rounder than monotone cubic (which flattens the tangent at every
+ * local extremum, and so corners at each peak), with the same guarantee.
  */
 
 export type Pt = { px: number; py: number };
 
-/** Tangents at each point, limited so no segment can overshoot its endpoints. */
+/** Catmull-Rom tangents: each point's direction is set by its neighbours. */
 function tangents(pts: Pt[]): number[] {
   const n = pts.length;
-  const secant: number[] = [];
-  for (let i = 0; i < n - 1; i++) {
-    const dx = pts[i + 1].px - pts[i].px;
-    secant.push(dx === 0 ? 0 : (pts[i + 1].py - pts[i].py) / dx);
-  }
-
   const m: number[] = new Array(n);
-  m[0] = secant[0];
-  m[n - 1] = secant[n - 2];
-  for (let i = 1; i < n - 1; i++) {
-    // A sign change means this point is a local peak or trough: flatten the
-    // tangent so the curve turns AT the data point rather than sailing past it.
-    m[i] = secant[i - 1] * secant[i] <= 0 ? 0 : (secant[i - 1] + secant[i]) / 2;
-  }
-
-  // Fritsch–Carlson limiter: keep each tangent inside a circle of radius 3
-  // around its secant, which is the condition for monotonicity.
-  for (let i = 0; i < n - 1; i++) {
-    if (secant[i] === 0) {
-      m[i] = 0;
-      m[i + 1] = 0;
-      continue;
-    }
-    const a = m[i] / secant[i];
-    const b = m[i + 1] / secant[i];
-    const s = a * a + b * b;
-    if (s > 9) {
-      const t = 3 / Math.sqrt(s);
-      m[i] = t * a * secant[i];
-      m[i + 1] = t * b * secant[i];
-    }
+  for (let i = 0; i < n; i++) {
+    const prev = pts[Math.max(0, i - 1)];
+    const next = pts[Math.min(n - 1, i + 1)];
+    const dx = next.px - prev.px;
+    m[i] = dx === 0 ? 0 : (next.py - prev.py) / dx;
   }
   return m;
 }
 
-/** An SVG path through every point, smooth and free of overshoot. */
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/**
+ * How far along each segment the control points reach, as a fraction of its
+ * width. The textbook cubic Hermite uses 1/3; pushing it toward 1/2 makes the
+ * curve hold its tangent for longer, which widens the rounded apex at a peak
+ * from a couple of pixels into a visible shoulder. The no-overshoot guarantee is
+ * unaffected — it comes from clamping the control points' Y, and holds for any
+ * reach up to 1/2 (beyond that the controls would cross and the line could
+ * double back on itself).
+ */
+const REACH = 0.5;
+
+/** An SVG path through every point: smooth, and never outside the data. */
 export function smoothLine(pts: Pt[]): string {
   if (pts.length === 0) return "";
   if (pts.length === 1) return `M${pts[0].px},${pts[0].py}`;
@@ -61,13 +58,16 @@ export function smoothLine(pts: Pt[]): string {
   const m = tangents(pts);
   let d = `M${pts[0].px},${pts[0].py}`;
   for (let i = 0; i < pts.length - 1; i++) {
-    const dx = pts[i + 1].px - pts[i].px;
-    // Hermite tangents converted to the two cubic control points.
-    const c1x = pts[i].px + dx / 3;
-    const c1y = pts[i].py + (m[i] * dx) / 3;
-    const c2x = pts[i + 1].px - dx / 3;
-    const c2y = pts[i + 1].py - (m[i + 1] * dx) / 3;
-    d += `C${c1x},${c1y} ${c2x},${c2y} ${pts[i + 1].px},${pts[i + 1].py}`;
+    const a = pts[i];
+    const b = pts[i + 1];
+    const dx = b.px - a.px;
+    // The two values this segment joins are the ceiling and floor for it.
+    const lo = Math.min(a.py, b.py);
+    const hi = Math.max(a.py, b.py);
+    const reach = dx * REACH;
+    const c1y = clamp(a.py + m[i] * reach, lo, hi);
+    const c2y = clamp(b.py - m[i + 1] * reach, lo, hi);
+    d += `C${a.px + reach},${c1y} ${b.px - reach},${c2y} ${b.px},${b.py}`;
   }
   return d;
 }
