@@ -68,6 +68,20 @@
   --lime: #ddf859;
   --lime-tint: #eff9bd;
 
+  /* Data colours. Lime is the DATA colour on costlyinfra.com — its charts are
+     lime on white, with ink reserved for type and chrome. The rest of the ramp
+     is the site's declared brand palette (teal, gold, lavender, coral) plus ink
+     last; ordered so the first few stay distinguishable side by side and none
+     of them reads as an error state. --chart-none is the "no data" grey, the
+     same warm tone the site tracks its progress bars in. */
+  --chart-1: #ddf859;
+  --chart-2: #2b7264;
+  --chart-3: #92661c;
+  --chart-4: #857ab8;
+  --chart-5: #e76740;
+  --chart-6: #22241e;
+  --chart-none: #eae8e1;
+
   /* Links must still read as links in a dense dashboard, and near-black would
      not. This is the site's own --teal (168 44% 38%), darkened enough to clear
      4.5:1 against the cream background. */
@@ -597,7 +611,7 @@ select {
 
 .provider-bar-fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--chart-1);
   border-radius: var(--radius-pill);
 }
 
@@ -2387,10 +2401,8 @@ a.exec-value:hover {
   width: 100%;
   max-width: 46px;
   border-radius: 6px 6px 0 0;
-  /* Flat, like every fill in costlyinfra.com's data viz and like the stacked
-     segments and .provider-bar-fill beside it. The gradient here used to fade
-     into a mid-tone that belongs to no palette. */
-  background: var(--accent);
+  /* Lime on white, flat — the site's own bar charts. */
+  background: var(--chart-1);
   transition: opacity 0.12s ease-out;
 }
 
@@ -2418,19 +2430,19 @@ a.exec-value:hover {
 }
 
 .trend-seg-production {
-  background: var(--good);
+  background: var(--chart-1);
 }
 
 .trend-seg-development {
-  background: var(--warn);
+  background: var(--chart-3);
 }
 
 .trend-seg-internal {
-  background: var(--accent);
+  background: var(--chart-2);
 }
 
 .trend-seg-unclassified {
-  background: var(--surface-alt);
+  background: var(--chart-none);
 }
 
 /* Compact legend directly under the chart. */
@@ -2516,9 +2528,11 @@ a.exec-value:hover {
   stroke-linecap: round;
 }
 
+/* Ink line over a lime wash: a lime stroke at 1.75px is too light to read on
+   white, but the area beneath it is where the brand colour belongs. */
 .trend-line-area {
-  fill: var(--accent);
-  opacity: 0.07;
+  fill: var(--chart-1);
+  opacity: 0.35;
 }
 
 .trend-line-dot {

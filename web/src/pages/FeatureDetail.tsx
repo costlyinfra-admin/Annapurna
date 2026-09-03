@@ -24,10 +24,10 @@ import { PeriodSelector } from "../components/PeriodSelector";
 import { TrendChart } from "../components/TrendChart";
 import { compact, money, num } from "../format";
 
-/** Series colours, in costlyinfra.com's own chart ramp: ink, gold, teal, muted,
- *  coral, lavender, then lime. Ordered so the first few stay legible together on
- *  the cream background. */
-const MODEL_COLORS = ["#1a1c17", "#92661c", "#2b7264", "#686c60", "#e76740", "#857ab8", "#c2dd3c"];
+/** Series colours — the --chart-1..6 ramp from styles.css, led by lime because
+ *  lime is the data colour on costlyinfra.com. Kept in sync by hand: these are
+ *  inline SVG/style fills, which cannot read a CSS custom property. */
+const MODEL_COLORS = ["#ddf859", "#2b7264", "#92661c", "#857ab8", "#e76740", "#22241e", "#686c60"];
 
 const NAMED_KINDS: RangeKind[] = [
   "this_month",
