@@ -24,7 +24,10 @@ import { PeriodSelector } from "../components/PeriodSelector";
 import { TrendChart } from "../components/TrendChart";
 import { compact, money, num } from "../format";
 
-const MODEL_COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
+/** Series colours, in costlyinfra.com's own chart ramp: ink, gold, teal, muted,
+ *  coral, lavender, then lime. Ordered so the first few stay legible together on
+ *  the cream background. */
+const MODEL_COLORS = ["#1a1c17", "#92661c", "#2b7264", "#686c60", "#e76740", "#857ab8", "#c2dd3c"];
 
 const NAMED_KINDS: RangeKind[] = [
   "this_month",

@@ -1,43 +1,73 @@
-/* Annapurna — modern UI theme.
-   Visual layer only: every class name matches the components; no markup changes. */
+/* Annapurna — the costlyinfra.com theme, applied.
+   Visual layer only: every class name matches the components; no markup changes.
+
+   Colours, radii and shadows below are the site's own design tokens (its HSL
+   custom properties, converted to hex) so the app and the marketing site read as
+   one product:
+     background  45 33% 97%  -> #faf9f5      accent/lime  70 92% 66% -> #ddf859
+     foreground  80  8% 10%  -> #1a1c17      border    45 14% 88%    -> #e5e3dc
+     muted-fg    80  6% 40%  -> #686c60      surface   45 26% 95%    -> #f6f4ef
+   Primary actions are near-black with pale-lime text, exactly as on the site;
+   lime is a highlight, never a large fill (it is far too light to carry white
+   text). Charts use the site's own four-colour ramp: ink, gold, muted, lime. */
 
 :root {
-  /* Surfaces & ink */
-  --bg: #f4f5fb;
-  --bg-accent: #eef1fb;
+  /* Surfaces & ink — warm paper, not the cool blue-grey this app used before. */
+  --bg: #faf9f5;
+  --bg-accent: #f4f2ec;
   --card: #ffffff;
-  --ink: #0f172a;
-  --ink-soft: #334155;
-  --muted: #64748b;
-  --line: #e6e8f0;
-  --line-strong: #d3d8e6;
+  --ink: #1a1c17;
+  --ink-soft: #3f4239;
+  --muted: #686c60;
+  --line: #e5e3dc;
+  --line-strong: #d6d3c9;
+  --surface: #f6f4ef;
+  --surface-alt: #eae8e1;
 
-  /* Brand / accent */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-ink: #ffffff;
-  --accent-soft: #eef2ff;
-  --accent-ring: rgba(79, 70, 229, 0.28);
+  /* Brand. The site's primary button is near-black with pale-lime text. */
+  --accent: #22241e;
+  --accent-hover: #0f110d;
+  --accent-ink: #fbfeec;
+  --accent-soft: #f3fad1;
+  --accent-ring: rgba(26, 28, 23, 0.26);
 
-  /* Semantic */
-  --good: #15803d;
-  --good-bg: #e7f7ee;
-  --warn: #b45309;
-  --warn-bg: #fef3c7;
-  --error: #dc2626;
-  --error-bg: #fde8e8;
+  /* Lime is the site's signature highlight — small pills, active dots, the one
+     thing your eye lands on. Used sparingly here for the same reason. */
+  --lime: #ddf859;
+  --lime-tint: #eff9bd;
 
-  /* Shape & depth */
-  --radius: 14px;
-  --radius-sm: 10px;
+  /* Links must still read as links in a dense dashboard, and near-black would
+     not. This is the site's own --teal (168 44% 38%), darkened enough to clear
+     4.5:1 against the cream background. */
+  --link: #2b7264;
+  --link-hover: #1f574c;
+
+  /* Semantic, mapped onto the site's palette: teal for good, its gold for
+     caution, its --destructive for errors. */
+  --good: #2b7264;
+  --good-bg: #e9f2ef;
+  --warn: #92661c;
+  --warn-bg: #f8f2e2;
+  /* The site's --destructive is #dd442c, which is a fill colour there (white on
+     it is fine). As TEXT on its own tint it only reaches 3.6:1, so error text
+     uses a darker step of the same coral and clears 4.65:1. */
+  --error: #c4351e;
+  --error-bg: #fbeae6;
+  --error-fill: #dd442c;
+
+  /* Shape & depth — the site's 16px cards and its softer, warmer shadows. */
+  --radius: 16px;
+  --radius-sm: 12px;
   --radius-pill: 999px;
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 6px 20px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.05);
-  --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.14);
+  --shadow-xs: 0 1px 2px rgba(26, 28, 23, 0.05);
+  --shadow-sm: 0 1px 3px rgba(26, 28, 23, 0.07), 0 1px 2px rgba(26, 28, 23, 0.04);
+  --shadow-md: 0 20px 25px -5px rgba(26, 28, 23, 0.05), 0 8px 10px -6px rgba(26, 28, 23, 0.05);
+  --shadow-lg: 0 25px 50px -12px rgba(26, 28, 23, 0.12);
 
   --font:
     "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Display face for headings and headline numbers, as on the site. */
+  --font-display: "Space Grotesk", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
   color-scheme: light;
@@ -63,22 +93,28 @@ body {
   min-height: 100vh;
 }
 
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+}
+
 h1 {
   font-size: 1.6rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
   margin: 0 0 0.4rem;
 }
 
 h2 {
   font-size: 1.1rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.015em;
   margin: 0 0 0.6rem;
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
   font-weight: 550;
 }
@@ -99,7 +135,7 @@ button {
   background: var(--accent);
   color: var(--accent-ink);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   padding: 0.58rem 1.05rem;
   font-size: 0.92rem;
   font-weight: 600;
@@ -133,8 +169,8 @@ button.secondary {
 }
 
 button.secondary:hover {
-  background: var(--accent-soft);
-  color: var(--accent-hover);
+  background: var(--surface);
+  color: var(--ink);
   border-color: var(--accent);
 }
 
@@ -142,7 +178,7 @@ button.link {
   background: none;
   border: none;
   box-shadow: none;
-  color: var(--accent);
+  color: var(--link);
   padding: 0;
   font-weight: 600;
 }
@@ -174,7 +210,7 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
-  color: #9aa4b6;
+  color: #9c9a90;
 }
 
 input:focus,
@@ -205,7 +241,7 @@ select {
   width: 0.7rem;
   height: 0.7rem;
   border-radius: 4px;
-  background: linear-gradient(135deg, var(--accent), #7c75f0);
+  background: linear-gradient(135deg, var(--accent) 45%, var(--lime));
   box-shadow: 0 1px 4px var(--accent-ring);
 }
 
@@ -216,7 +252,7 @@ select {
 .error {
   color: var(--error);
   background: var(--error-bg);
-  border: 1px solid #f7c9c9;
+  border: 1px solid #f4c8bd;
   border-radius: var(--radius-sm);
   padding: 0.55rem 0.8rem;
   font-size: 0.9rem;
@@ -1071,7 +1107,7 @@ select {
 
 .badge.conf-low,
 .badge.worth-unknown {
-  background: #eef1f6;
+  background: var(--surface);
   color: var(--muted);
 }
 
@@ -1086,7 +1122,7 @@ select {
   padding: 2.5rem 1rem;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, #fbfcfe, var(--card));
+  background: linear-gradient(180deg, var(--surface), var(--card));
   margin: 0.5rem 0 1rem;
 }
 
@@ -1113,7 +1149,7 @@ select {
 
 .summary {
   background: var(--accent-soft);
-  border: 1px solid #d8def9;
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.85rem;
   font-size: 0.9rem;
@@ -1223,7 +1259,7 @@ select {
 .feature-card.needs-review {
   border-style: dashed;
   border-color: var(--line-strong);
-  background: linear-gradient(180deg, #fdfbfb, var(--card));
+  background: linear-gradient(180deg, #fbf9f4, var(--card));
 }
 
 .pr-evidence {
@@ -1251,7 +1287,7 @@ select {
 }
 
 a.pr-ref {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
 }
 
@@ -1490,17 +1526,17 @@ a.pr-ref:hover {
 
 .exec-item--neutral {
   --seg-accent: var(--accent);
-  --seg-tint: linear-gradient(180deg, #f6f7ff, var(--card) 60%);
+  --seg-tint: linear-gradient(180deg, var(--surface), var(--card) 60%);
 }
 
 .exec-item--warn {
   --seg-accent: var(--warn);
-  --seg-tint: linear-gradient(180deg, #fff7e9, var(--card) 60%);
+  --seg-tint: linear-gradient(180deg, var(--warn-bg), var(--card) 60%);
 }
 
 .exec-item--good {
   --seg-accent: var(--good);
-  --seg-tint: linear-gradient(180deg, #eef9f1, var(--card) 60%);
+  --seg-tint: linear-gradient(180deg, var(--good-bg), var(--card) 60%);
 }
 
 .exec-item:last-child {
@@ -1633,7 +1669,7 @@ a.exec-value:hover {
   letter-spacing: 0.05em;
   color: var(--muted);
   font-weight: 650;
-  background: #fbfbfe;
+  background: #fbfaf6;
   text-align: left;
   padding: 0.7rem 0.9rem;
   border-bottom: 1px solid var(--line);
@@ -1669,7 +1705,7 @@ a.exec-value:hover {
 }
 
 .unattributed-row td {
-  background: #fbfbfd;
+  background: #fbfaf6;
   color: var(--muted);
   font-style: italic;
 }
@@ -1758,7 +1794,7 @@ a.exec-value:hover {
 .method-toggle {
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--link);
   white-space: nowrap;
 }
 
@@ -1810,11 +1846,11 @@ a.exec-value:hover {
 
 .hint {
   background: var(--warn-bg);
-  border: 1px solid #f3e2b3;
+  border: 1px solid #ecdcb8;
   border-radius: var(--radius-sm);
   padding: 0.7rem 0.95rem;
   font-size: 0.9rem;
-  color: #7a5310;
+  color: var(--warn);
   margin-bottom: 1.1rem;
 }
 
@@ -1923,7 +1959,7 @@ a.exec-value:hover {
 .savings-month {
   font-size: 1.35rem;
   font-weight: 700;
-  color: var(--success, #15803d);
+  color: var(--success, var(--good));
   font-variant-numeric: tabular-nums;
 }
 
@@ -1953,10 +1989,10 @@ a.exec-value:hover {
 }
 
 .copilot-kpi.kpi-measured {
-  border-left-color: var(--success, #15803d);
+  border-left-color: var(--success, var(--good));
 }
 .copilot-kpi.kpi-ceiling {
-  border-left-color: #b45309;
+  border-left-color: var(--warn);
 }
 .copilot-kpi.kpi-verified {
   border-left-color: var(--accent);
@@ -2029,7 +2065,7 @@ a.exec-value:hover {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
-  background: var(--bg, #f1f5f9);
+  background: var(--bg, #f6f4ef);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
@@ -2088,7 +2124,7 @@ a.exec-value:hover {
 
 .opt-item-savings {
   font-weight: 700;
-  color: var(--success, #15803d);
+  color: var(--success, var(--good));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -2117,7 +2153,7 @@ a.exec-value:hover {
 .opt-trail summary {
   cursor: pointer;
   font-size: 0.82rem;
-  color: var(--accent);
+  color: var(--link);
 }
 
 .opt-trail summary:hover {
@@ -2134,7 +2170,7 @@ a.exec-value:hover {
 .opt-apply-btn {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--link);
   background: var(--card);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
@@ -2155,8 +2191,8 @@ a.exec-value:hover {
 .opt-applied-chip {
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--success, #15803d);
-  background: rgba(21, 128, 61, 0.1);
+  color: var(--success, var(--good));
+  background: rgba(43, 114, 100, 0.1);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
 }
@@ -2170,21 +2206,21 @@ a.exec-value:hover {
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   color: var(--muted);
-  background: var(--bg, #f1f5f9);
+  background: var(--bg, #f6f4ef);
   border: 1px solid var(--line);
 }
 
 .opt-effort.effort-very_low,
 .opt-effort.effort-low {
-  color: #15803d;
-  background: rgba(21, 128, 61, 0.1);
-  border-color: rgba(21, 128, 61, 0.2);
+  color: var(--good);
+  background: rgba(43, 114, 100, 0.1);
+  border-color: rgba(43, 114, 100, 0.2);
 }
 
 .opt-effort.effort-high {
-  color: #b45309;
-  background: rgba(180, 83, 9, 0.1);
-  border-color: rgba(180, 83, 9, 0.2);
+  color: var(--warn);
+  background: rgba(146, 102, 28, 0.1);
+  border-color: rgba(146, 102, 28, 0.2);
 }
 
 .opt-applied {
@@ -2201,7 +2237,7 @@ a.exec-value:hover {
 }
 
 .opt-realized {
-  color: var(--success, #15803d);
+  color: var(--success, var(--good));
   font-variant-numeric: tabular-nums;
 }
 
@@ -2209,8 +2245,8 @@ a.exec-value:hover {
   margin-left: 0.4rem;
   font-size: 0.68rem;
   font-weight: 600;
-  color: var(--success, #15803d);
-  background: rgba(21, 128, 61, 0.1);
+  color: var(--success, var(--good));
+  background: rgba(43, 114, 100, 0.1);
   border-radius: 999px;
   padding: 0.1rem 0.45rem;
   white-space: nowrap;
@@ -2316,7 +2352,7 @@ a.exec-value:hover {
   width: 100%;
   max-width: 46px;
   border-radius: 6px 6px 0 0;
-  background: linear-gradient(180deg, var(--accent), #7c75f0);
+  background: linear-gradient(180deg, var(--accent), #4a4d42);
   transition: opacity 0.12s;
 }
 
@@ -2360,7 +2396,7 @@ a.exec-value:hover {
 }
 
 .trend-seg-unclassified {
-  background: #c3cad8;
+  background: var(--surface-alt);
 }
 
 /* Compact legend directly under the chart. */
@@ -2689,8 +2725,8 @@ a.exec-value:hover {
 }
 
 .snippet {
-  background: #0b1020;
-  color: #dbe4ff;
+  background: #1a1c17;
+  color: #e6ecd6;
   border-radius: var(--radius-sm);
   padding: 0.95rem 1.1rem;
   font-family: var(--mono);
@@ -2704,7 +2740,7 @@ a.exec-value:hover {
 .snippet.token {
   background: var(--accent-soft);
   color: var(--ink);
-  border: 1px solid #d8def9;
+  border: 1px solid var(--line-strong);
 }
 
 /* ---- Demo affordances ---- */
@@ -2730,7 +2766,7 @@ a.exec-value:hover {
   gap: 1rem;
   flex-wrap: wrap;
   background: var(--accent-soft);
-  border: 1px solid #d8def9;
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   padding: 0.85rem 1.1rem;
   margin: 1.25rem 0 0;
@@ -2750,7 +2786,7 @@ a.exec-value:hover {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  background: #b45309;
+  background: var(--warn);
   color: #fff;
   padding: 0.5rem 1.3rem;
   font-size: 0.9rem;
@@ -3049,7 +3085,7 @@ a.exec-value:hover {
   font-weight: 700;
   padding: 0.15rem 0.55rem;
   border-radius: var(--radius-pill);
-  background: #eef1f6;
+  background: var(--surface);
   color: var(--muted);
   white-space: nowrap;
 }
@@ -3180,7 +3216,7 @@ a.exec-value:hover {
   font-weight: 700;
   padding: 0.12rem 0.5rem;
   border-radius: var(--radius-pill);
-  background: #eef1f6;
+  background: var(--surface);
   color: var(--muted);
   white-space: nowrap;
 }
