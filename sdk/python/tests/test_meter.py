@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 from annapurna_meter import (
@@ -117,6 +118,40 @@ def test_unconfigured_meter_is_a_noop():
     assert m.enabled is False
     assert m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1) is None
     assert cap.calls == []
+
+
+def test_record_does_not_raise_when_a_thread_cannot_start(monkeypatch):
+    """An app at its thread limit must still be able to call record().
+
+    Metering spawns a thread per call, so it helps push a busy application to
+    the limit — and Thread.start() then raises. That must never reach the
+    caller's request path: the event is dropped, and record() returns None.
+    """
+    cap = _Capture()
+    m = _meter(cap)
+
+    def _refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", _refuse)
+
+    assert m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1) is None
+    assert m.record_anthropic(_anthropic_resp(), feature_id="f1") is None
+    assert cap.calls == []  # nothing sent, but nothing raised either
+
+
+def test_wrapped_call_still_returns_the_response_when_a_thread_cannot_start(monkeypatch):
+    """The wrapped client keeps working even when metering cannot run at all."""
+    cap = _Capture()
+    resp = _anthropic_resp()
+    client = wrap(_FakeAnthropic(resp), provider="anthropic", meter=_meter(cap))
+
+    def _refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", _refuse)
+
+    assert client.messages.create(model="claude-sonnet-4-6", messages=[]) is resp
 
 
 # --- wrap() auto-instrumentation, latency, metadata ------------------------

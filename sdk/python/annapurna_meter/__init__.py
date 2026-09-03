@@ -194,9 +194,7 @@ class Meter:
     def _send(self, events: list) -> Optional[threading.Thread]:
         if not self.enabled:
             return None  # not configured -> no-op
-        thread = threading.Thread(target=lambda: self._post_sync(events), daemon=True)
-        thread.start()
-        return thread
+        return _spawn(lambda: self._post_sync(events))
 
     def _post_sync(self, events: list) -> None:
         """POST events on the CURRENT thread. Callers run this off the request path."""
@@ -276,9 +274,26 @@ class Meter:
             except Exception:
                 pass  # metering must never raise into the caller
 
-        thread = threading.Thread(target=_work, daemon=True)
+        return _spawn(_work)
+
+
+def _spawn(work) -> Optional[threading.Thread]:
+    """Run `work` on a daemon thread, or give up quietly if one can't be started.
+
+    Thread creation is itself a failure point: an application already at its
+    thread limit — which metering, at one thread per call, helps it reach — makes
+    Thread.start() raise RuntimeError. Unguarded, that propagated out of
+    Meter.record() and into the caller's request path, so the SDK could break the
+    very application it promises never to affect. Losing a metering event is the
+    correct trade against raising here; the bill stays right either way, because
+    reconciliation routes anything the hook misses to Unattributed.
+    """
+    try:
+        thread = threading.Thread(target=work, daemon=True)
         thread.start()
         return thread
+    except Exception:
+        return None
 
 
 def _attr(obj: Any, name: str, default: Any = None) -> Any:

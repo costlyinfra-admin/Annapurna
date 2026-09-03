@@ -23,6 +23,10 @@ export class Meter {
     // is merged on top. Optional — omit for the simplest setup.
     this.metadata = opts.metadata ?? {};
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    // Every request is bounded. Without this a fetch has no timeout of its own,
+    // so a hung or sleeping ingest endpoint leaves requests pending forever and
+    // they pile up in the caller's process. Mirrors the Python SDK's 5s default.
+    this.timeoutMs = opts.timeoutMs ?? 5000;
     // Optimize mode (opt spec §4): measure traffic SHAPE — salted-hash
     // fingerprints and counts, never prompt text — to find duplicate calls and
     // uncached repeated prefixes. Off by default; work is off the call path,
@@ -100,10 +104,20 @@ export class Meter {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ events }),
+          signal: this._deadline(),
         }),
       )
       .then(() => true)
       .catch(() => false);
+  }
+
+  /** An abort signal that fires at the timeout, or undefined if unsupported. */
+  _deadline() {
+    try {
+      return AbortSignal.timeout(this.timeoutMs);
+    } catch {
+      return undefined; // very old runtime: unbounded, as before, but never throws
+    }
   }
 
   _saltUrl() {
@@ -121,7 +135,13 @@ export class Meter {
       return this._saltPromise;
     }
     this._saltPromise = Promise.resolve()
-      .then(() => this.fetchImpl(this._saltUrl(), { method: "GET", headers: { Authorization: `Bearer ${this.token}` } }))
+      .then(() =>
+        this.fetchImpl(this._saltUrl(), {
+          method: "GET",
+          headers: { Authorization: `Bearer ${this.token}` },
+          signal: this._deadline(),
+        }),
+      )
       .then((r) => r.json())
       .then((d) => (this.salt = d && d.salt ? d.salt : null))
       .catch(() => (this.salt = null));

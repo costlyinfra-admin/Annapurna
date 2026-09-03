@@ -44,6 +44,10 @@ meter.recordOpenAI(resp);        // <- the whole hook
 Helpers: `recordAnthropic`, `recordOpenAI`, plus the generic
 `record({ provider, model, tokensIn, tokensOut, featureId })`.
 
+Every request is bounded by a timeout (5s by default, `{ timeoutMs }` to change
+it), so an unreachable or sleeping ingest endpoint can never leave requests
+pending in your process.
+
 ### Optimize mode (opt-in)
 
 `new Meter(featureId, { optimize: true })` additionally emits **privacy-safe**

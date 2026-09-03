@@ -195,3 +195,36 @@ test("optimize emits nothing without a salt", async () => {
   await settle();
   assert.ok(allEvents(calls).every((e) => !("signal" in e)));
 });
+
+test("every request carries an abort deadline", async () => {
+  // Without a signal a fetch has no timeout of its own, so a sleeping ingest
+  // endpoint leaves requests pending in the caller's process indefinitely.
+  const calls = [];
+  await meterWithCapture(calls).record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 });
+  assert.ok(calls[0].opts.signal, "no abort signal on the POST");
+  assert.equal(typeof calls[0].opts.signal.aborted, "boolean");
+});
+
+test("a hung endpoint aborts instead of pending forever", async () => {
+  // A fetch that never settles on its own must still settle, via the signal.
+  const m = new Meter("f", {
+    ingestUrl: "https://app.test/api/hook/events",
+    token: "tok",
+    timeoutMs: 40,
+    fetchImpl: (url, opts) =>
+      new Promise((_resolve, reject) => {
+        opts.signal.addEventListener("abort", () => reject(opts.signal.reason));
+        // never resolves otherwise — this is the sleeping-Render case
+      }),
+  });
+
+  const started = Date.now();
+  const ok = await m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 });
+  assert.equal(ok, false); // reported as a failed send, never thrown
+  assert.ok(Date.now() - started < 2000, "request did not abort");
+});
+
+test("the timeout is configurable and defaults to 5s", () => {
+  assert.equal(new Meter("f", { ingestUrl: "u", token: "t" }).timeoutMs, 5000);
+  assert.equal(new Meter("f", { ingestUrl: "u", token: "t", timeoutMs: 250 }).timeoutMs, 250);
+});

@@ -7,8 +7,10 @@ server-side from Annapurna's pricing tables — the SDK never sees prices, and i
 never sends prompt or response content, only token counts and a `feature_id`.
 
 It is **fail-safe**: reporting is fire-and-forget on a background thread and can
-never raise into your request path. With no ingest URL/token configured, every
-call is a no-op.
+never raise into your request path — including when your application is already
+at its thread limit and no background thread can be started at all, in which case
+the event is dropped rather than surfaced as an error. With no ingest URL/token
+configured, every call is a no-op.
 
 ## Install
 
