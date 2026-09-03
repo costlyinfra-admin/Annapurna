@@ -47,12 +47,13 @@
   --line-strong: #d6d3c9;
   --surface: #f6f4ef;
   --surface-alt: #eae8e1;
-  /* The site's dot grid: a 1px ink dot every 22px. costlyinfra.com draws it as
-     rgba(26,28,23,0.14) under a 0.5 opacity layer; the two are multiplied here
-     into one alpha so it can be a plain background layer with nothing stacked
-     over the page. Deliberately at the edge of visibility — it should give the
-     background texture, never compete with a number. */
-  --dots: radial-gradient(rgba(26, 28, 23, 0.07) 1px, transparent 1px);
+  /* The site's dot grid: a 1px ink dot every 22px, kept as one plain background
+     layer so nothing is stacked over the page. costlyinfra.com declares the dot
+     as rgba(26,28,23,0.14) and then dims it with a 0.5-opacity overlay; this
+     uses that declared colour at full strength, because the app's background
+     shows only in narrow gutters where the dimmed version all but disappears.
+     Texture, not pattern — it should never compete with a number. */
+  --dots: radial-gradient(rgba(26, 28, 23, 0.14) 1px, transparent 1px);
   --dots-size: 22px 22px;
 
   /* Brand. The site's primary button is near-black with pale-lime text. */
