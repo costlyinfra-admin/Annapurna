@@ -47,6 +47,13 @@
   --line-strong: #d6d3c9;
   --surface: #f6f4ef;
   --surface-alt: #eae8e1;
+  /* The site's dot grid: a 1px ink dot every 22px. costlyinfra.com draws it as
+     rgba(26,28,23,0.14) under a 0.5 opacity layer; the two are multiplied here
+     into one alpha so it can be a plain background layer with nothing stacked
+     over the page. Deliberately at the edge of visibility — it should give the
+     background texture, never compete with a number. */
+  --dots: radial-gradient(rgba(26, 28, 23, 0.07) 1px, transparent 1px);
+  --dots-size: 22px 22px;
 
   /* Brand. The site's primary button is near-black with pale-lime text. */
   --accent: #22241e;
@@ -113,7 +120,9 @@ body {
   font-size: 15px;
   line-height: 1.55;
   background:
-    radial-gradient(1100px 520px at 100% -10%, var(--bg-accent), transparent 60%), var(--bg);
+    var(--dots) 0 0 / var(--dots-size),
+    radial-gradient(1100px 520px at 100% -10%, var(--bg-accent), transparent 60%),
+    var(--bg);
   min-height: 100vh;
 }
 
