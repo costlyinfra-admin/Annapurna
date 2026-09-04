@@ -110,10 +110,12 @@ def test_dashboard_generates_executive_insights(seeded):
     assert "AI threat triage represents 54% of all AI spend ($4,381)." in texts
     # Governance: unattributed (790) is 9.7% of total AI costs.
     assert "Unattributed spend represents 9.7% of total AI costs ($790)." in texts
-    # Trend: May's 8131.75 against April's 4499.75 in the base fixture.
-    assert (
-        "AI spend is up 81% ($3,632) vs the previous month, mostly inference (run) cost." in texts
-    )
+    # Trend: May's 8131.75 against April's 4499.75 in the base fixture. The
+    # finding leads; what drove it is the second line, so the card can be
+    # skimmed on the first.
+    trend = next(i for i in insights if i["kind"] == "trend")
+    assert trend["text"] == "AI spend is up 81% ($3,632) vs the previous month."
+    assert trend["detail"] == "Mostly inference (run) cost."
     # The card stays readable: ranked candidates, capped.
     assert len(insights) <= 5
 
@@ -962,3 +964,111 @@ def test_demo_seed_tags_features_across_several_categories(tenant_id, app_env):
     tagged = {r["category"] for r in rows if r["category"]}
     assert len(tagged) >= 4
     assert "auth" in tagged and "reporting" in tagged
+
+
+# ---------------------------------------------------------------------------
+# Overview additions: the monthly trend, the provider list, open actions.
+# ---------------------------------------------------------------------------
+def test_the_trend_has_a_row_for_every_month_including_empty_ones(app_env, tenant_id):
+    _daily(app_env, tenant_id, dt.date(2026, 3, 4), 30)
+    _monthly(app_env, tenant_id, dt.date(2026, 3, 1), 30)
+    _monthly(app_env, tenant_id, dt.date(2026, 5, 1), 70)
+    app_env.commit()
+
+    trend = dashboard.dashboard(tenant_id, range_token="last_3_months")["trend"]
+    # April had no spend; the chart must show a gap, not close it up.
+    assert [t["period"] for t in trend] == ["2026-03-01", "2026-04-01", "2026-05-01"]
+    assert [t["inference_cost"] for t in trend] == [30.0, 0.0, 70.0]
+
+
+def test_the_trend_keeps_build_and_inference_apart(app_env, tenant_id):
+    _monthly(app_env, tenant_id, dt.date(2026, 5, 1), 70)
+    app_env.execute(
+        "INSERT INTO build_cost (tenant_id, tool, amount, period, confidence) "
+        "VALUES (%s, 'claude_code', 25, %s, 'high')",
+        (tenant_id, dt.date(2026, 5, 1)),
+    )
+    app_env.commit()
+
+    [month] = dashboard.dashboard(tenant_id)["trend"]
+    assert month["build_cost"] == 25.0
+    assert month["inference_cost"] == 70.0
+    assert "total" not in month  # never blended into one number
+
+
+def test_provider_spend_ranks_vendors_and_keeps_each_ones_split(app_env, tenant_id):
+    _monthly(app_env, tenant_id, dt.date(2026, 5, 1), 70)  # anthropic
+    app_env.execute(
+        "INSERT INTO inference_cost (tenant_id, provider, model, amount, period, source, "
+        "confidence) VALUES (%s, 'openai', 'gpt', 20, %s, 'cost_api', 'high')",
+        (tenant_id, dt.date(2026, 5, 1)),
+    )
+    app_env.execute(
+        "INSERT INTO build_cost (tenant_id, tool, amount, period, confidence) "
+        "VALUES (%s, 'copilot', 10, %s, 'high')",
+        (tenant_id, dt.date(2026, 5, 1)),
+    )
+    app_env.commit()
+
+    providers = dashboard.dashboard(tenant_id)["providers"]
+    assert [p["provider"] for p in providers] == ["anthropic", "openai", "copilot"]
+    assert providers[0]["amount"] == 70.0
+    assert providers[0]["share"] == pytest.approx(70 / 100 * 100)
+    # A vendor's own split survives, even though the list ranks on the sum.
+    assert providers[2] == pytest.approx(
+        {
+            "provider": "copilot",
+            "build_cost": 10.0,
+            "inference_cost": 0.0,
+            "amount": 10.0,
+            "share": 10.0,
+        },
+        abs=0.001,
+    )
+
+
+def test_provider_shares_add_up(app_env, tenant_id):
+    _monthly(app_env, tenant_id, dt.date(2026, 5, 1), 70)
+    app_env.execute(
+        "INSERT INTO build_cost (tenant_id, tool, amount, period, confidence) "
+        "VALUES (%s, 'copilot', 30, %s, 'high')",
+        (tenant_id, dt.date(2026, 5, 1)),
+    )
+    app_env.commit()
+    providers = dashboard.dashboard(tenant_id)["providers"]
+    assert sum(p["share"] for p in providers) == pytest.approx(100.0)
+
+
+def test_open_actions_appear_only_when_there_is_something_to_do(app_env, tenant_id):
+    # Everything attributed and classified: no actions, which is a real answer.
+    feature = app_env.execute(
+        "INSERT INTO feature (tenant_id, name, status) VALUES (%s, 'Chat', 'confirmed') "
+        "RETURNING id",
+        (tenant_id,),
+    ).fetchone()[0]
+    app_env.execute(
+        "INSERT INTO inference_cost (tenant_id, feature_id, provider, model, amount, period, "
+        "source, confidence, environment) VALUES (%s, %s, 'anthropic', 'c', 100, %s, 'cost_api', "
+        "'high', 'production')",
+        (tenant_id, feature, dt.date(2026, 5, 1)),
+    )
+    app_env.execute(
+        "INSERT INTO inference_cost_daily (tenant_id, feature_id, provider, model, amount, day, "
+        "source, confidence, environment) VALUES (%s, %s, 'anthropic', 'c', 100, %s, 'cost_api', "
+        "'high', 'production')",
+        (tenant_id, feature, dt.date(2026, 5, 4)),
+    )
+    app_env.commit()
+    assert dashboard.dashboard(tenant_id)["actions"] == []
+
+
+def test_unattributed_spend_becomes_an_action_that_says_where_to_go(app_env, tenant_id):
+    _daily(app_env, tenant_id, dt.date(2026, 5, 4), 100)
+    _monthly(app_env, tenant_id, dt.date(2026, 5, 1), 100)  # no feature_id
+    app_env.commit()
+
+    actions = dashboard.dashboard(tenant_id)["actions"]
+    unattributed = [a for a in actions if a["kind"] == "unattributed"]
+    assert len(unattributed) == 1
+    assert "$100" in unattributed[0]["title"]
+    assert unattributed[0]["href"] == "/cost-sources"

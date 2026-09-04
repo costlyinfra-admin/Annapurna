@@ -284,6 +284,10 @@ def dashboard(
         # Extra aggregates the Key insights narrative reads (anomaly, pace,
         # environment split, key concentration, cache coverage).
         facts = _insight_facts(conn, start, end)
+        # The Overview's trend chart and provider list, read in the same
+        # transaction so they describe the same instant as everything else.
+        trend = _monthly_trend(conn, start, end)
+        providers = _provider_spend(conn, start, end)
 
     rows = []
     for fid, name, _status, _disc, category, category_source in features:
@@ -336,6 +340,9 @@ def dashboard(
         "unattributed": unattributed,
         "highlights": _highlights(rows),
         "insights": _insights(rows, unattributed, totals, facts, end),
+        "actions": _open_actions(unattributed, totals, facts),
+        "trend": trend,
+        "providers": providers,
         "totals": totals,
         # Data freshness: when inference / build cost were last ingested. The max
         # of the two is what the Overview shows; both are exposed for detail.
@@ -492,8 +499,11 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
         return []
     candidates: list[tuple[int, dict]] = []
 
-    def add(rank: int, kind: str, text: str) -> None:
-        candidates.append((rank, {"kind": kind, "text": text}))
+    def add(rank: int, kind: str, text: str, detail: str = "") -> None:
+        """One insight. `text` is the finding; `detail` is the qualifier that
+        would otherwise trail it in the same sentence, split out so the card can
+        lead with the finding and let the reader stop there."""
+        candidates.append((rank, {"kind": kind, "text": text, "detail": detail}))
 
     # 1. Anomaly — one day far above the period's typical day.
     daily = [(d, a) for d, a in facts["daily"] if a > 0]
@@ -555,14 +565,15 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
             d_build = totals["build_cost"] - totals["prev_build_cost"]
             driver = ""
             if abs(d_run) >= abs(delta) * 0.6:
-                driver = ", mostly inference (run) cost"
+                driver = "Mostly inference (run) cost."
             elif abs(d_build) >= abs(delta) * 0.6:
-                driver = ", mostly build cost"
+                driver = "Mostly build cost."
             add(
                 2,
                 "trend" if delta > 0 else "trend-down",
                 f"AI spend is {'up' if delta > 0 else 'down'} {_fmt_pct(pct)} "
-                f"({_fmt_money(abs(delta))}) vs the previous {window}{driver}.",
+                f"({_fmt_money(abs(delta))}) vs the previous {window}.",
+                driver,
             )
 
     # 3. Non-production spend — the clearest cost-cutting angle billing data supports.
@@ -582,7 +593,7 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
                 add(
                     3,
                     "waste",
-                    f"{label} keys are {_fmt_pct(share)} of inference spend — "
+                    f"{label} keys are {_fmt_pct(share)} of inference spend.",
                     f"{_fmt_money(nonprod_total)} this period.",
                 )
             else:
@@ -686,6 +697,119 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
 
     candidates.sort(key=lambda c: c[0])
     return [ins for _, ins in candidates[:_MAX_INSIGHTS]]
+
+
+def _monthly_trend(conn, start: dt.date, end: dt.date) -> list[dict]:
+    """Build and inference cost per month across the range, kept apart.
+
+    One row per month in the range, including months with no spend, so the chart
+    shows a gap as a gap rather than closing it up. The two costs are never
+    summed here — the chart stacks them, which is a drawing decision, not a
+    claim that they are the same kind of money.
+    """
+    build = dict(
+        conn.execute(
+            "SELECT period, COALESCE(SUM(amount), 0) FROM build_cost "
+            "WHERE period BETWEEN %s AND %s GROUP BY period",
+            (start, end),
+        ).fetchall()
+    )
+    inference = dict(
+        conn.execute(
+            "SELECT period, COALESCE(SUM(amount), 0) FROM inference_cost "
+            f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} GROUP BY period",  # noqa: S608
+            (start, end),
+        ).fetchall()
+    )
+    out, month = [], start
+    while month <= end:
+        out.append(
+            {
+                "period": month.isoformat(),
+                "build_cost": float(build.get(month, 0)),
+                "inference_cost": float(inference.get(month, 0)),
+            }
+        )
+        month = dt.date(month.year + (month.month // 12), (month.month % 12) + 1, 1)
+    return out
+
+
+def _provider_spend(conn, start: dt.date, end: dt.date) -> list[dict]:
+    """Total spend per provider over the range — build and inference together.
+
+    This is the one place the two are added, and only to answer "who do we pay":
+    a vendor invoices for both, so a vendor list that split them would be
+    answering a question nobody asked. Each row still carries the split.
+    """
+    rows: dict = {}
+
+    def add(name: str, key: str, amount: float) -> None:
+        if amount <= 0:
+            return
+        entry = rows.setdefault(name, {"provider": name, "build_cost": 0.0, "inference_cost": 0.0})
+        entry[key] += amount
+
+    for provider, amount in conn.execute(
+        "SELECT provider, COALESCE(SUM(amount), 0) FROM inference_cost "
+        f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} GROUP BY provider",  # noqa: S608
+        (start, end),
+    ).fetchall():
+        add(provider or "unknown", "inference_cost", float(amount))
+
+    # Build cost is grouped by `tool`, not `source`: the tool IS the vendor here
+    # (Claude Code, Cursor, Copilot), which is what a "who do we pay" list means.
+    for tool, amount in conn.execute(
+        "SELECT tool, COALESCE(SUM(amount), 0) FROM build_cost "
+        "WHERE period BETWEEN %s AND %s GROUP BY tool",
+        (start, end),
+    ).fetchall():
+        add(str(tool), "build_cost", float(amount))
+
+    out = sorted(rows.values(), key=lambda r: r["build_cost"] + r["inference_cost"], reverse=True)
+    total = sum(r["build_cost"] + r["inference_cost"] for r in out)
+    for row in out:
+        row["amount"] = row["build_cost"] + row["inference_cost"]
+        row["share"] = (row["amount"] / total * 100) if total else 0.0
+    return out
+
+
+def _open_actions(unattributed: dict, totals: dict, facts: dict) -> list[dict]:
+    """Things a person could go and fix, each with where to fix it.
+
+    Only conditions that are actually actionable, and only when they are true:
+    an empty list means there is nothing to do, which is a real answer and is
+    shown as one.
+    """
+    actions: list[dict] = []
+    total_ai = totals["build_cost"] + totals["inference_cost"]
+    unattributed_total = unattributed["build_cost"] + unattributed["inference_cost"]
+
+    if unattributed_total > 0 and total_ai > 0:
+        actions.append(
+            {
+                "kind": "unattributed",
+                "title": f"Resolve {_fmt_money(unattributed_total)} unattributed spend",
+                "detail": f"{_fmt_pct(unattributed_total / total_ai * 100)} of AI spend is not "
+                "tied to a feature.",
+                "href": "/cost-sources",
+                "tone": "warn",
+            }
+        )
+
+    unset = facts.get("env", {}).get("unclassified", 0.0)
+    if unset > 0 and totals["inference_cost"] > 0:
+        actions.append(
+            {
+                "kind": "environment",
+                "title": "Classify keys by environment",
+                "detail": f"{_fmt_money(unset)} of inference spend has no environment set, so "
+                "the production split is incomplete.",
+                "href": "/cost-sources",
+                "tone": "info",
+            }
+        )
+
+    return actions
 
 
 def _highlights(rows: list) -> dict:

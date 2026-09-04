@@ -5,13 +5,12 @@
  * Each cost number links to the feature's drill-down, where its evidence trail
  * lives. An Unattributed row carries spend not yet mapped to a feature.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   api,
   ApiError,
   type Dashboard as DashboardData,
-  type DashboardRow,
   type RangeKind,
   type ReviewRange,
 } from "../api";
@@ -20,6 +19,19 @@ import { CustomerBreakdown } from "../components/CustomerBreakdown";
 import { DeveloperBreakdown } from "../components/DeveloperBreakdown";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import { PeriodSelector } from "../components/PeriodSelector";
+import {
+  KeyInsights,
+  KpiRow,
+  OpenActions,
+  ProviderSpendPanel,
+  SpendTrend,
+  type SavingsSummary,
+} from "../components/OverviewPanels";
+
+interface SavingsState extends SavingsSummary {
+  /** feature id -> potential monthly savings, for the table's column. */
+  byFeature: Record<string, number>;
+}
 import { ProviderBreakdown } from "../components/ProviderBreakdown";
 import { compact, money, num } from "../format";
 
@@ -60,6 +72,10 @@ export function Dashboard() {
   const [tab, setTab] = useState<OverviewTab>("features");
   const [range, setRange] = useState<ReviewRange>({ kind: "this_month" });
   const [data, setData] = useState<DashboardData | null>(null);
+  // Loaded by its own request; see the effect below.
+  const [savings, setSavings] = useState<SavingsState | null>(null);
+  const [savingsFailed, setSavingsFailed] = useState(false);
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -107,6 +123,48 @@ export function Dashboard() {
     }
   };
 
+  // Savings come from the Optimize engine, which computes per feature. It is
+  // fetched on its own so a slow or failing calculation there can never delay
+  // or break the Overview — the cards say "calculating" and the page is fine.
+  useEffect(() => {
+    let live = true;
+    setSavings(null);
+    setSavingsFailed(false);
+    (async () => {
+      try {
+        // The endpoint takes a month (YYYY-MM); data.end is a full date.
+        const overview = await api.copilotOverview(data?.end?.slice(0, 7));
+        if (!live) return;
+        setSavings({
+          // Measured and modelled are both real opportunities; directional ones
+          // are excluded because they carry no defensible number.
+          potentialMonthly: overview.totals.measured + overview.totals.modeled_ceiling,
+          realizedMonthly: overview.verified_monthly_savings,
+          realizedAnnual: overview.verified_annual_savings,
+          byFeature: Object.fromEntries(
+            overview.by_feature.map((f) => [f.feature_id, f.measured + f.modeled_ceiling]),
+          ),
+        });
+      } catch {
+        // Wrapped rather than only .catch()'d: a synchronous throw would take
+        // the Overview down with it, and the savings cards are the one part of
+        // this page that depends on another subsystem.
+        if (live) setSavingsFailed(true);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [data?.end]);
+
+  // Filtering is on the name alone: it is what someone types a search box for,
+  // and matching on numbers would make a stray digit hide rows without saying so.
+  const visibleFeatures = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const rows = data?.features ?? [];
+    return needle ? rows.filter((f) => f.name.toLowerCase().includes(needle)) : rows;
+  }, [data, query]);
+
   const hasFeatures = !!data && data.features.length > 0;
   const hasBuild = !!data && data.totals.build_cost > 0;
   const hasInference = !!data && data.totals.inference_cost > 0;
@@ -116,8 +174,22 @@ export function Dashboard() {
   return (
     <div className="content">
       <div className="dash-head">
-        <h1>Overview</h1>
+        <div>
+          <h1>Overview</h1>
+          <p className="muted dash-sub">AI cost observability and optimization</p>
+        </div>
         <div className="last-updated">
+          {/* The period governs everything below it, so it sits with the title
+              rather than between the summary and the breakdown. */}
+          <PeriodSelector
+            value={range}
+            onChange={setRange}
+            // What is actually on screen, which is the server's answer and not
+            // always the selection's: a range can run past the months with data.
+            resolved={
+              data ? { start: data.start.slice(0, 7), end: data.end.slice(0, 7) } : undefined
+            }
+          />
           {data?.data_updated_at && (
             <span
               className="muted last-updated-text"
@@ -161,58 +233,25 @@ export function Dashboard() {
 
       {data === null && !error && <p className="muted">Loading…</p>}
 
-      {data && <ExecutiveSummary data={data} />}
-
-      {data && <KeyInsights insights={data.insights} />}
+      {data && (
+        <KpiRow
+          data={data}
+          savings={savings}
+          savingsFailed={savingsFailed}
+          deltaLabel={deltaLabel}
+        />
+      )}
 
       {data && (
-        <div className="totals-strip">
-          <div className="total-card">
-            <span className="total-label">Build cost</span>
-            <span className="total-value">{money(data.totals.build_cost)}</span>
-            <MonthDelta
-              current={data.totals.build_cost}
-              prev={data.totals.prev_build_cost}
-              label={deltaLabel}
-            />
-          </div>
-          <div className="total-card">
-            <span className="total-label">Inference cost</span>
-            <span className="total-value">{money(data.totals.inference_cost)}</span>
-            {data.totals.estimated_inference > 0 && (
-              <span className="muted" title="Recent usage not yet on the provider's bill">
-                incl. ~{money(data.totals.estimated_inference)} estimated
-              </span>
-            )}
-            <MonthDelta
-              current={data.totals.inference_cost}
-              prev={data.totals.prev_inference_cost}
-              label={deltaLabel}
-            />
-          </div>
-          <div className="total-card">
-            <span className="total-label">Total tokens</span>
-            <span className="total-value">
-              {compact(data.totals.tokens_in + data.totals.tokens_out)}
-            </span>
-            <span className="muted">
-              {compact(data.totals.tokens_in)} in · {compact(data.totals.tokens_out)} out
-            </span>
+        <div className="overview-grid">
+          <KeyInsights insights={data.insights} />
+          <SpendTrend trend={data.trend} />
+          <div className="overview-side">
+            <ProviderSpendPanel providers={data.providers} />
+            <OpenActions actions={data.actions} />
           </div>
         </div>
       )}
-
-      {/* Review-period selector, right-justified beneath the cost/token tiles.
-          Always rendered so it doesn't flicker away while a range change reloads. */}
-      <div className="period-controls period-controls-below">
-        <PeriodSelector
-          value={range}
-          onChange={setRange}
-          // What is actually on screen, which is the server's answer and not
-          // always the selection's: a range can run past the months with data.
-          resolved={data ? { start: data.start.slice(0, 7), end: data.end.slice(0, 7) } : undefined}
-        />
-      </div>
 
       {/* Tabs switch only the detailed breakdown below; the summary, insights,
           and totals above stay put no matter which tab is active. */}
@@ -254,6 +293,16 @@ export function Dashboard() {
           >
             By Customer
           </button>
+          {tab === "features" && (
+            <input
+              type="search"
+              className="tab-search"
+              value={query}
+              placeholder="Search features…"
+              aria-label="Search features"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          )}
         </div>
       )}
 
@@ -275,12 +324,15 @@ export function Dashboard() {
               <th className="num">Active users</th>
               <th className="num">Cost / user</th>
               <th className="num">Requests</th>
-              <th>Worth it?</th>
+              <th className="num" title="Monthly savings the Optimize engine can defend">
+                Potential savings
+              </th>
+              <th title="Cost per active user, relative to your other features">Cost health</th>
               <th>Confidence</th>
             </tr>
           </thead>
           <tbody>
-            {data.features.map((f) => (
+            {visibleFeatures.map((f) => (
               <tr
                 key={f.feature_id}
                 className="feature-row"
@@ -301,6 +353,11 @@ export function Dashboard() {
                 <td className="num" title="AI model calls this feature made">
                   {compact(f.requests)}
                 </td>
+                <td className="num savings-cell">
+                  {/* Loaded separately; a dash means not yet known, which is not
+                      the same answer as nothing to save. */}
+                  {savings ? money(savings.byFeature[f.feature_id] ?? 0) : "—"}
+                </td>
                 <td>
                   <WorthBadge value={f.worth_it} />
                 </td>
@@ -317,6 +374,7 @@ export function Dashboard() {
               <td className="num">—</td>
               <td className="num">—</td>
               <td className="num">—</td>
+              <td className="num">—</td>
               <td colSpan={2} className="muted">
                 spend not yet mapped to a feature
               </td>
@@ -327,7 +385,7 @@ export function Dashboard() {
 
       {data && tab === "features" && (
         <p className="muted legend">
-          "Worth it?" is directional (cost per active user), not a revenue-based ROI.
+          "Cost health" is directional (cost per active user), not a revenue-based ROI.
         </p>
       )}
 
@@ -357,130 +415,5 @@ function RefreshIcon() {
       <path d="M21 12a9 9 0 1 1-2.64-6.36" />
       <polyline points="21 3 21 9 15 9" />
     </svg>
-  );
-}
-
-/** Change vs the prior equal-length window. Up = more spend (shown as a
- *  caution), down = less (good). No prior data -> a neutral note. */
-function MonthDelta({ current, prev, label }: { current: number; prev: number; label: string }) {
-  if (prev <= 0) {
-    return <span className="muted">no prior period</span>;
-  }
-  const pct = ((current - prev) / prev) * 100;
-  const up = current >= prev;
-  return (
-    <span className={`delta ${up ? "delta-up" : "delta-down"}`}>
-      {up ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}% {label}
-    </span>
-  );
-}
-
-/** Executive summary — one compact card; the headlines a CTO/CFO scans first. */
-function ExecutiveSummary({ data }: { data: DashboardData }) {
-  const { most_expensive, optimization, highest_cost_per_user } = data.highlights;
-  const unattributedTotal = data.unattributed.build_cost + data.unattributed.inference_cost;
-
-  return (
-    <section className="exec-summary" aria-label="Executive summary">
-      <ExecItem label="Most expensive" tone="neutral">
-        {most_expensive ? (
-          <>
-            <FeatureValue feature={most_expensive} />
-            {/* build and inference stay separate — never one blended number */}
-            <span className="exec-sub">
-              {money(most_expensive.build_cost)} build · {money(most_expensive.inference_cost)}/mo
-            </span>
-          </>
-        ) : (
-          <ExecEmpty note="No cost yet" />
-        )}
-      </ExecItem>
-
-      <ExecItem label="Optimization" tone={optimization ? "warn" : "good"}>
-        {optimization ? (
-          <>
-            <FeatureValue feature={optimization} />
-            <span className="exec-sub">
-              {money(optimization.inference_cost)}/mo · {money(optimization.cost_per_user)}/user
-            </span>
-          </>
-        ) : (
-          <ExecEmpty note="Nothing flagged" />
-        )}
-      </ExecItem>
-
-      <ExecItem label="Highest cost / user" tone={highest_cost_per_user ? "warn" : "neutral"}>
-        {highest_cost_per_user ? (
-          <>
-            <FeatureValue feature={highest_cost_per_user} />
-            <span className="exec-sub">
-              {money(highest_cost_per_user.cost_per_user)}/user ·{" "}
-              {num(highest_cost_per_user.active_users)} users
-            </span>
-          </>
-        ) : (
-          <ExecEmpty note="No usage data" />
-        )}
-      </ExecItem>
-
-      <ExecItem label="Unattributed spend" tone={unattributedTotal > 0 ? "warn" : "good"}>
-        <span className="exec-value num">{money(unattributedTotal)}</span>
-        <span className="exec-sub">
-          {money(data.unattributed.inference_cost)} inf · {money(data.unattributed.build_cost)}{" "}
-          build
-        </span>
-      </ExecItem>
-    </section>
-  );
-}
-
-/** Auto-generated plain-language insights — the story behind the numbers. */
-function KeyInsights({ insights }: { insights: DashboardData["insights"] }) {
-  if (insights.length === 0) return null;
-  return (
-    <section className="insights" aria-label="Key insights">
-      <span className="insights-title">Key insights</span>
-      <ul className="insight-list">
-        {insights.map((ins, i) => (
-          <li key={i} className={`insight-item insight--${ins.kind}`}>
-            {ins.text}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function ExecItem({
-  label,
-  tone = "neutral",
-  children,
-}: {
-  label: string;
-  tone?: "neutral" | "warn" | "good";
-  children: ReactNode;
-}) {
-  return (
-    <div className={`exec-item exec-item--${tone}`}>
-      <span className="exec-label">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function FeatureValue({ feature }: { feature: DashboardRow }) {
-  return (
-    <Link to={`/features/${feature.feature_id}`} className="exec-value" title={feature.name}>
-      {feature.name}
-    </Link>
-  );
-}
-
-function ExecEmpty({ note }: { note: string }) {
-  return (
-    <>
-      <span className="exec-value muted">—</span>
-      <span className="exec-sub">{note}</span>
-    </>
   );
 }

@@ -4872,3 +4872,424 @@ a.exec-value:hover {
 .button-link:hover {
   text-decoration: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Overview — the KPI row and the summary panels beneath it.
+   --------------------------------------------------------------------------- */
+.dash-sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+}
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-xs);
+}
+
+.kpi-label {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.kpi-main {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 2.2rem;
+}
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-unit {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Shape only — the figures are beside it, so this needs no axis. */
+.kpi-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 2rem;
+  flex: 0 0 auto;
+}
+
+.kpi-spark span {
+  width: 5px;
+  border-radius: 2px 2px 0 0;
+  background: var(--chart-1);
+}
+
+.kpi-delta {
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-delta.up {
+  color: var(--warn);
+}
+
+.kpi-delta.down {
+  color: var(--good);
+}
+
+.kpi-note {
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.kpi-bar {
+  display: block;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  overflow: hidden;
+}
+
+.kpi-bar span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--good);
+}
+
+.kpi-link {
+  margin-top: auto;
+  padding-top: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* The three panels: insights wide, trend beside it, the two small cards stacked
+   on the right. Collapses to one column before the panels get too narrow to
+   read a number in. */
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(16rem, 0.85fr);
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1.25rem;
+}
+
+.overview-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (max-width: 1180px) {
+  .overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.panel {
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-xs);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.panel-link {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* ---- key insights ---- */
+.insight-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+}
+
+.insight-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+/* The dot carries the tone, so the sentence does not have to shout it. */
+.insight-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 0.45rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+}
+
+.insight-item.tone-warn .insight-dot {
+  background: var(--warn);
+}
+
+.insight-item.tone-good .insight-dot {
+  background: var(--good);
+}
+
+.insight-item.tone-info .insight-dot {
+  background: var(--chart-2);
+}
+
+.insight-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.insight-detail {
+  font-size: 0.8rem;
+}
+
+/* ---- spend trend ---- */
+.trend-key {
+  display: inline-flex;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.trend-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.trend-key-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.trend-key-swatch.build {
+  background: var(--chart-4);
+}
+
+.trend-key-swatch.run {
+  background: var(--chart-1);
+}
+
+.trend-cols {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  height: 9rem;
+}
+
+.trend-col {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 0.3rem;
+}
+
+.trend-stack {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 2.5rem;
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+}
+
+.trend-seg {
+  display: block;
+  width: 100%;
+  flex-basis: 0;
+}
+
+.trend-seg.run {
+  background: var(--chart-1);
+}
+
+.trend-seg.build {
+  background: var(--chart-4);
+}
+
+.trend-col-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* ---- provider spend ---- */
+.provider-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+}
+
+.provider-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.86rem;
+}
+
+.provider-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.provider-share {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.2rem;
+  text-align: right;
+}
+
+.provider-bar {
+  grid-column: 2 / -1;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  overflow: hidden;
+}
+
+.provider-bar span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--chart-1);
+}
+
+/* The overflow row's marker is a count, not a logo. */
+.provider-list .connector-mark {
+  font-size: 0.7rem;
+}
+
+/* ---- open actions ---- */
+.action-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+}
+
+.action-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.action-item:hover {
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.action-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 0.4rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--chart-2);
+}
+
+.action-item.tone-warn .action-dot {
+  background: var(--warn);
+}
+
+.action-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.action-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.action-detail {
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.action-chevron {
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* ---- feature table: the search box on the tab row ---- */
+.tab-search {
+  margin-left: auto;
+  align-self: center;
+  min-width: 12rem;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.savings-cell {
+  color: var(--good);
+  font-weight: 600;
+}

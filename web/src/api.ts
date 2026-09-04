@@ -303,7 +303,37 @@ export interface DashboardHighlights {
 
 export interface Insight {
   kind: string;
+  /** The finding, on its own. */
   text: string;
+  /** The qualifier that would otherwise trail it in the same sentence. */
+  detail: string;
+}
+
+/** Something a person could go and fix, with where to fix it. */
+export interface OpenAction {
+  kind: string;
+  title: string;
+  detail: string;
+  href: string;
+  tone: "warn" | "info";
+}
+
+/** One month of the Overview's trend. Build and inference stay apart. */
+export interface TrendMonth {
+  period: string;
+  build_cost: number;
+  inference_cost: number;
+}
+
+/** Total spend per vendor over the period, with each one's own split.
+ *  Named apart from ProviderSpend below, which is the By-provider tab's much
+ *  larger payload. */
+export interface ProviderTotal {
+  provider: string;
+  build_cost: number;
+  inference_cost: number;
+  amount: number;
+  share: number;
 }
 
 export interface Dashboard {
@@ -315,6 +345,9 @@ export interface Dashboard {
   unattributed: { build_cost: number; inference_cost: number };
   highlights: DashboardHighlights;
   insights: Insight[];
+  actions: OpenAction[];
+  trend: TrendMonth[];
+  providers: ProviderTotal[];
   // When cost data was last ingested (NOT when the page loaded). Null before any
   // sync/import has run.
   data_updated_at: string | null;

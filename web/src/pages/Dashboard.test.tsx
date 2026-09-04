@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { AuthProvider } from "../auth/AuthContext";
 import { Dashboard } from "./Dashboard";
 
@@ -10,6 +10,7 @@ vi.mock("../api", async (importActual) => {
   return {
     ...actual,
     api: {
+      copilotOverview: vi.fn(),
       me: vi.fn(),
       dashboard: vi.fn(),
       providerSpend: vi.fn(),
@@ -66,9 +67,35 @@ const DATA = {
     {
       kind: "spike",
       text: "May 9 was the costliest day at $300 — 15x the $20.00 median day this period.",
+      detail: "",
     },
-    { kind: "concentration", text: "AI threat triage represents 54% of all AI spend ($4,381)." },
-    { kind: "governance", text: "Unattributed spend represents 9.7% of total AI costs ($790)." },
+    {
+      kind: "concentration",
+      text: "AI threat triage represents 54% of all AI spend ($4,381).",
+      detail: "",
+    },
+    {
+      kind: "governance",
+      text: "Unattributed spend represents 9.7% of total AI costs ($790).",
+      detail: "",
+    },
+  ],
+  actions: [
+    {
+      kind: "unattributed",
+      title: "Resolve $790 unattributed spend",
+      detail: "9.7% of AI spend is not tied to a feature.",
+      href: "/cost-sources",
+      tone: "warn" as const,
+    },
+  ],
+  trend: [
+    { period: "2026-04-01", build_cost: 100, inference_cost: 2000 },
+    { period: "2026-05-01", build_cost: 211, inference_cost: 4960 },
+  ],
+  providers: [
+    { provider: "anthropic", build_cost: 0, inference_cost: 4000, amount: 4000, share: 77.4 },
+    { provider: "copilot", build_cost: 211, inference_cost: 0, amount: 211, share: 4.1 },
   ],
   // When cost was last INGESTED (not when the page loaded).
   data_updated_at: "2026-08-20T16:07:00Z",
@@ -105,6 +132,20 @@ describe("Dashboard (Overview)", () => {
       org_name: "Transilience AI",
     });
     vi.mocked(api.dashboard).mockResolvedValue(DATA);
+    vi.mocked(api.copilotOverview).mockResolvedValue({
+      totals: { measured: 1200, modeled_ceiling: 640, directional: 999 },
+      verified_monthly_savings: 300,
+      verified_annual_savings: 3600,
+      by_feature: [
+        {
+          feature_id: "f1",
+          name: "AI threat triage",
+          measured: 1200,
+          modeled_ceiling: 640,
+          directional: 0,
+        },
+      ],
+    } as never);
     vi.mocked(api.refreshInference).mockResolvedValue({
       providers: 1,
       synced: [{ provider: "anthropic", total: 4960 }],
@@ -113,29 +154,59 @@ describe("Dashboard (Overview)", () => {
     });
   });
 
-  it("shows build and inference as separate columns, plus the Unattributed row", async () => {
+  it("leads with the four headline figures", async () => {
     renderDashboard();
+    await screen.findByText("Key insights");
 
-    const links = await screen.findAllByRole("link", { name: "AI threat triage" });
-    expect(links[0]).toHaveAttribute("href", "/features/f1");
+    // Total AI spend is the one place build and inference are added together.
+    const spend = screen.getByRole("heading", { name: "Total AI spend" }).closest("article")!;
+    expect(within(spend).getByText("$5,171")).toBeInTheDocument(); // 211 + 4960
+    // …and the split is still shown, because they answer different questions.
+    expect(within(spend).getByText(/\$211 build · \$4,960 run/)).toBeInTheDocument();
 
-    // Build and inference appear as distinct values (never one blended number).
-    expect(screen.getByText("$181")).toBeInTheDocument();
-    expect(screen.getByText("$4,200")).toBeInTheDocument();
-
-    expect(screen.getByText("Unattributed")).toBeInTheDocument();
-    expect(screen.getByText("$760")).toBeInTheDocument();
-    expect(screen.getByText("Healthy")).toBeInTheDocument();
+    // Coverage is derived from what is unattributed, not asserted separately.
+    const coverage = screen
+      .getByRole("heading", { name: "Attribution coverage" })
+      .closest("article")!;
+    expect(within(coverage).getByText("84.7%")).toBeInTheDocument();
+    expect(within(coverage).getByText(/\$790 unattributed/)).toBeInTheDocument();
   });
 
-  it("renders the executive summary", async () => {
+  it("shows savings as unknown until the Optimize engine answers", async () => {
+    vi.mocked(api.copilotOverview).mockImplementation(() => new Promise(() => {}));
     renderDashboard();
-    expect(await screen.findByText("Most expensive")).toBeInTheDocument();
-    expect(screen.getByText("Optimization")).toBeInTheDocument();
-    expect(screen.getByText("Highest cost / user")).toBeInTheDocument();
-    expect(screen.getByText("Unattributed spend")).toBeInTheDocument();
-    expect(screen.getByText("$790")).toBeInTheDocument(); // build 30 + inference 760
-    expect(screen.getByText("Nothing flagged")).toBeInTheDocument();
+    await screen.findByText("Key insights");
+
+    // Not zero: an unknown figure and a figure of nothing are different answers.
+    const potential = screen
+      .getByRole("heading", { name: "Potential savings" })
+      .closest("article")!;
+    expect(within(potential).getByText("Calculating…")).toBeInTheDocument();
+    expect(within(potential).queryByText("$0.00")).not.toBeInTheDocument();
+  });
+
+  it("fills the savings cards in once it does", async () => {
+    renderDashboard();
+
+    const potential = (await screen.findByRole("heading", { name: "Potential savings" })).closest(
+      "article",
+    )!;
+    expect(await within(potential).findByText("$1,840")).toBeInTheDocument();
+    const realized = screen.getByRole("heading", { name: "Savings realized" }).closest("article")!;
+    expect(within(realized).getByText("$300")).toBeInTheDocument();
+    expect(within(realized).getByText(/\$3,600 annualized/)).toBeInTheDocument();
+  });
+
+  it("keeps the Overview standing when Optimize fails", async () => {
+    // The savings pair is the only part of this page that depends on another
+    // subsystem, so its failure must stay in its own two cards.
+    vi.mocked(api.copilotOverview).mockRejectedValue(new ApiError(500, "boom"));
+    renderDashboard();
+
+    // The failure lands in its own two cards and nowhere else.
+    expect(await screen.findAllByText("Unavailable")).toHaveLength(2);
+    expect(screen.getByText("Key insights")).toBeInTheDocument();
+    expect(screen.getByText("$5,171")).toBeInTheDocument();
   });
 
   it("shows which part of the product each feature belongs to", async () => {
@@ -173,26 +244,12 @@ describe("Dashboard (Overview)", () => {
     );
   });
 
-  it("renders auto-generated key insights", async () => {
-    renderDashboard();
-    expect(await screen.findByText("Key insights")).toBeInTheDocument();
-    expect(
-      screen.getByText("AI threat triage represents 54% of all AI spend ($4,381)."),
-    ).toBeInTheDocument();
-    // The kind drives the bullet's tone (anomalies read red, context reads accent).
-    expect(screen.getByText(/costliest day at \$300/).className).toContain("insight--spike");
-  });
-
-  it("shows month-over-month deltas and a token split", async () => {
+  it("shows one period-over-period delta on total spend", async () => {
     renderDashboard();
     await screen.findByText("Key insights");
-    // Build up (211 vs 180), inference down (4960 vs 5200) vs last month.
-    expect(screen.getByText(/▲ 17% vs last month/)).toBeInTheDocument();
-    expect(screen.getByText(/▼ 5% vs last month/)).toBeInTheDocument();
-    // New Total tokens card with the input/output split.
-    expect(screen.getByText("Total tokens")).toBeInTheDocument();
-    expect(screen.getByText("1.5M")).toBeInTheDocument();
-    expect(screen.getByText(/1\.2M in · 300K out/)).toBeInTheDocument();
+    // 5171 against 5380 the month before: down 4%.
+    expect(screen.getByText(/vs last month/)).toBeInTheDocument();
+    expect(screen.getByText(/▼ 3\.9%/)).toBeInTheDocument();
   });
 
   it("labels the estimated (not-yet-billed) portion of inference cost", async () => {
