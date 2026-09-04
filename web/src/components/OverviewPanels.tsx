@@ -11,7 +11,7 @@
  * data does not support: a card with no history shows no sparkline rather than
  * a flat line implying one.
  */
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Dashboard, Insight, OpenAction, ProviderTotal, TrendMonth } from "../api";
 import { GRID_LEVELS, niceCeil } from "./chartAxis";
@@ -288,7 +288,9 @@ export function KeyInsights({ insights }: { insights: Insight[] }) {
       <div className="panel-head">
         <h2>Key insights</h2>
       </div>
-      <ul className="insight-list">
+      {/* Four is where spreading the rows down the panel reads as a roomy list
+          rather than as two items adrift in a tall box. */}
+      <ul className={`insight-list ${insights.length >= 4 ? "spread" : ""}`}>
         {insights.map((insight, i) => (
           <li key={i} className={`insight-item tone-${INSIGHT_TONE[insight.kind] ?? "info"}`}>
             <InsightIcon kind={insight.kind} />
@@ -309,10 +311,10 @@ export function KeyInsights({ insights }: { insights: Insight[] }) {
 // A fixed viewBox: the panel is fluid, so drawing to a constant grid keeps the
 // bars and the axis in step at any width.
 const VB_W = 320;
-const VB_H = 150;
+const VB_H = 172;
 const AXIS_W = 40; // room for the dollar labels
 const PLOT_TOP = 8;
-const PLOT_BOTTOM = 118; // baseline; month labels sit below it
+const PLOT_BOTTOM = 150; // baseline; month labels sit below it
 
 export function SpendTrend({ trend }: { trend: TrendMonth[] }) {
   const max = Math.max(...trend.map((m) => m.build_cost + m.inference_cost), 0);
@@ -442,11 +444,18 @@ export function TokenEfficiency({ trend }: { trend: TrendMonth[] }) {
     { key: "tokens_out" as const, label: "Output", className: "out" },
   ];
 
+  // The rate is stated once for the period rather than once per month: twelve
+  // columns leave about fifteen pixels each, which is narrower than "0.0%".
+  // Per-month rates are on the Cached bars, where the pointer can reach them.
+  const totalIn = trend.reduce((sum, m) => sum + m.tokens_in, 0);
+  const totalCached = trend.reduce((sum, m) => sum + m.cached_tokens_in, 0);
+  const periodRate = totalIn > 0 ? (totalCached / totalIn) * 100 : null;
+
   return (
     <section className="panel tokens-panel" aria-label="Token efficiency">
       <div className="panel-head">
         <h2>Token efficiency</h2>
-        <span className="muted panel-note">Cached input bills at a fraction</span>
+        <span className="muted panel-note">Cached input is part of input</span>
       </div>
       <div
         className="token-grid"
@@ -466,7 +475,12 @@ export function TokenEfficiency({ trend }: { trend: TrendMonth[] }) {
               <span
                 key={month.period}
                 className="token-bar"
-                title={`${row.label} ${monthLabel(month.period)}: ${compact(month[row.key])}`}
+                title={
+                  `${row.label} ${monthLabel(month.period)}: ${compact(month[row.key])}` +
+                  (row.key === "cached_tokens_in" && month.tokens_in > 0
+                    ? ` (${month.cache_rate.toFixed(1)}% of input)`
+                    : "")
+                }
               >
                 <span
                   className={`token-fill ${row.className}`}
@@ -476,14 +490,13 @@ export function TokenEfficiency({ trend }: { trend: TrendMonth[] }) {
             ))}
           </Fragment>
         ))}
-
-        <span className="token-label token-rate-label">Cache rate</span>
-        {trend.map((month) => (
-          <span key={month.period} className="token-rate">
-            {month.tokens_in > 0 ? `${month.cache_rate.toFixed(1)}%` : "—"}
-          </span>
-        ))}
       </div>
+      <p className="muted token-foot">
+        {periodRate === null
+          ? "No input tokens in this period."
+          : `Cache rate ${periodRate.toFixed(1)}% — that share of input tokens was read` +
+            " from cache, and billed at a fraction of the standard rate."}
+      </p>
     </section>
   );
 }
@@ -491,9 +504,28 @@ export function TokenEfficiency({ trend }: { trend: TrendMonth[] }) {
 // ---------------------------------------------------------------------------
 // Provider spend
 // ---------------------------------------------------------------------------
+/** How many vendors the panel shows before it asks to be opened. Three answers
+ *  "who are we mostly paying"; the rest is a follow-up question. */
+const PROVIDERS_SHOWN = 3;
+
+function ProviderRow({ provider }: { provider: ProviderTotal }) {
+  return (
+    <li>
+      <ConnectorMark type={provider.provider} name={provider.provider} />
+      <span className="provider-name">{providerLabel(provider.provider)}</span>
+      <span className="provider-amount">{money(provider.amount)}</span>
+      <span className="muted provider-share">{Math.round(provider.share)}%</span>
+      <span className="provider-bar" aria-hidden>
+        <span style={{ width: `${provider.share}%` }} />
+      </span>
+    </li>
+  );
+}
+
 export function ProviderSpendPanel({ providers }: { providers: ProviderTotal[] }) {
-  const shown = providers.slice(0, 4);
-  const rest = providers.slice(4);
+  const [open, setOpen] = useState(false);
+  const shown = providers.slice(0, PROVIDERS_SHOWN);
+  const rest = providers.slice(PROVIDERS_SHOWN);
   const restTotal = rest.reduce((sum, p) => sum + p.amount, 0);
   const restShare = rest.reduce((sum, p) => sum + p.share, 0);
 
@@ -508,30 +540,39 @@ export function ProviderSpendPanel({ providers }: { providers: ProviderTotal[] }
       {providers.length === 0 ? (
         <p className="muted">No provider spend in this period.</p>
       ) : (
-        <ul className="provider-list">
-          {shown.map((provider) => (
-            <li key={provider.provider}>
-              <ConnectorMark type={provider.provider} name={provider.provider} />
-              <span className="provider-name">{providerLabel(provider.provider)}</span>
-              <span className="provider-amount">{money(provider.amount)}</span>
-              <span className="muted provider-share">{Math.round(provider.share)}%</span>
-              <span className="provider-bar" aria-hidden>
-                <span style={{ width: `${provider.share}%` }} />
-              </span>
-            </li>
-          ))}
+        <>
+          <ul className="provider-list">
+            {shown.map((provider) => (
+              <ProviderRow key={provider.provider} provider={provider} />
+            ))}
+          </ul>
           {rest.length > 0 && (
-            <li>
-              <span className="connector-mark">+{rest.length}</span>
-              <span className="provider-name muted">Others</span>
-              <span className="provider-amount">{money(restTotal)}</span>
-              <span className="muted provider-share">{Math.round(restShare)}%</span>
-              <span className="provider-bar" aria-hidden>
-                <span style={{ width: `${restShare}%` }} />
-              </span>
-            </li>
+            <>
+              {/* Rendered whether open or not, so the browser has something to
+                  animate down and a page search still finds a vendor in it. */}
+              <div className={`provider-more ${open ? "open" : ""}`}>
+                <ul className="provider-list">
+                  {rest.map((provider) => (
+                    <ProviderRow key={provider.provider} provider={provider} />
+                  ))}
+                </ul>
+              </div>
+              <button
+                type="button"
+                className="provider-toggle"
+                aria-expanded={open}
+                onClick={() => setOpen((was) => !was)}
+              >
+                <span className="provider-toggle-chevron" aria-hidden>
+                  ›
+                </span>
+                {open
+                  ? "Show fewer"
+                  : `${rest.length} more · ${money(restTotal)} (${Math.round(restShare)}%)`}
+              </button>
+            </>
           )}
-        </ul>
+        </>
       )}
     </section>
   );

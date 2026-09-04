@@ -294,9 +294,56 @@ describe("Dashboard (Overview)", () => {
     expect(within(panel).getByText("Input")).toBeInTheDocument();
     expect(within(panel).getByText("Cached")).toBeInTheDocument();
     expect(within(panel).getByText("Output")).toBeInTheDocument();
-    // The cache rate is per month, from the server, not recomputed here.
-    expect(within(panel).getByText("10.0%")).toBeInTheDocument();
-    expect(within(panel).getByText("15.0%")).toBeInTheDocument();
+    // One rate for the period, not one per month: a dozen columns are narrower
+    // than the text. 230k cache reads against 1.7M input tokens.
+    expect(within(panel).getByText(/Cache rate 13\.5%/)).toBeInTheDocument();
+    // The month's own rate is on the bar, where a pointer can reach it.
+    expect(within(panel).getByTitle(/Cached Apr: 50K \(10\.0% of input\)/)).toBeInTheDocument();
+  });
+
+  it("states no cache rate at all when nothing was sent to be cached", async () => {
+    vi.mocked(api.dashboard).mockResolvedValue({
+      ...DATA,
+      trend: DATA.trend.map((m) => ({ ...m, tokens_in: 0, cached_tokens_in: 0, cache_rate: 0 })),
+    });
+    renderDashboard();
+    const panel = (await screen.findByText("Token efficiency")).closest("section")!;
+    // Output tokens remain, so the panel still draws — but 0/0 is not 0%.
+    expect(within(panel).getByText("No input tokens in this period.")).toBeInTheDocument();
+    expect(within(panel).queryByText(/Cache rate/)).not.toBeInTheDocument();
+  });
+
+  it("shows the top three providers, and folds the rest behind a disclosure", async () => {
+    const many = [
+      { provider: "anthropic", build_cost: 0, inference_cost: 4000, amount: 4000, share: 50 },
+      { provider: "openai", build_cost: 0, inference_cost: 2000, amount: 2000, share: 25 },
+      { provider: "self_hosted", build_cost: 0, inference_cost: 1000, amount: 1000, share: 12 },
+      { provider: "cursor", build_cost: 600, inference_cost: 0, amount: 600, share: 8 },
+      { provider: "copilot", build_cost: 400, inference_cost: 0, amount: 400, share: 5 },
+    ];
+    vi.mocked(api.dashboard).mockResolvedValue({ ...DATA, providers: many });
+    renderDashboard();
+    const panel = (await screen.findByText("Provider spend")).closest("section")!;
+
+    expect(within(panel).getByText("Anthropic")).toBeInTheDocument();
+    expect(within(panel).getByText("Self hosted")).toBeInTheDocument();
+    // The remainder is summed on the button, so the panel still accounts for
+    // every dollar without listing every vendor.
+    const toggle = within(panel).getByRole("button", { name: /2 more · \$1,000 \(13%\)/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    expect(within(panel).getByRole("button", { name: /Show fewer/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("offers no disclosure when there is nothing folded away", async () => {
+    renderDashboard();
+    const panel = (await screen.findByText("Provider spend")).closest("section")!;
+    // The fixture has two providers, which is fewer than the three shown.
+    expect(within(panel).queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("says so when there are no token counts, rather than drawing nothing", async () => {

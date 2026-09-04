@@ -4866,17 +4866,22 @@ a.exec-value:hover {
   color: var(--muted);
 }
 
-/* Shape only — the figures are beside it, so this needs no axis. */
+/* Shape only — the figures are beside it, so this needs no axis. Twelve months
+   of bars at a fixed width are wider than the space left beside the figure, so
+   the bars give way instead: the number is the thing that must not be clipped. */
 .kpi-spark {
   display: flex;
   align-items: flex-end;
   gap: 2px;
   height: 2rem;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .kpi-spark span {
-  width: 5px;
+  flex: 0 1 5px;
+  min-width: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--chart-1);
 }
@@ -4928,12 +4933,22 @@ a.exec-value:hover {
    read a number in. */
 .overview-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(16rem, 0.85fr);
+  /* The chart column is the widest: twelve months of bars need the room more
+     than a paragraph of insight text does. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(15rem, 0.8fr);
   gap: 1rem;
   /* Stretch, not start: the three columns share one top and one bottom edge, so
      the row reads as a row rather than as three cards of assorted heights. */
   align-items: stretch;
   margin-bottom: 1.25rem;
+}
+
+/* Stretching the cards is only half of it — the content inside has to take the
+   slack too, or a card that is tall by decree ends in a pool of white. Every
+   panel here is a column, and the list or chart inside it grows. */
+.overview-grid .panel {
+  display: flex;
+  flex-direction: column;
 }
 
 .overview-middle,
@@ -4943,8 +4958,9 @@ a.exec-value:hover {
   gap: 1rem;
 }
 
-/* Token efficiency takes the slack under the trend, which is what was empty
-   space before it existed. */
+/* The chart and the token grid share the column's slack rather than the chart
+   keeping a fixed height and the grid absorbing all of it. */
+.overview-middle .trend-panel,
 .overview-middle .tokens-panel {
   flex: 1;
 }
@@ -4996,6 +5012,24 @@ a.exec-value:hover {
   gap: 0.7rem;
   margin: 0;
   padding: 0;
+  flex: 1;
+}
+
+/* Spread the rows over the panel's full height instead of leaving the slack in
+   one lump at the bottom. Only applied once there are enough rows for the extra
+   space to read as breathing room rather than as drift — see KeyInsights.
+
+   A rule between rows comes with it, because how far apart the rows land is not
+   ours to control: the column is as tall as the tallest of the three, and the
+   provider panel can be opened. Ruled rows read as a list at any spacing; bare
+   ones start to read as items adrift once the gaps grow. */
+.insight-list.spread {
+  justify-content: space-between;
+}
+
+.insight-list.spread .insight-item:not(:last-child) {
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--line);
 }
 
 .insight-item {
@@ -5072,6 +5106,17 @@ a.exec-value:hover {
   height: auto;
   display: block;
   overflow: visible;
+  /* The chart keeps its aspect ratio, so when the column is taller than the
+     chart needs — someone opened the provider list — the slack sits evenly
+     above and below it rather than all under the month labels. */
+  margin-block: auto;
+}
+
+/* The classification chart draws to a grid near its rendered size; this one
+   draws to a 320-unit grid stretched over ~400-500px, which magnifies anything
+   sized for the other. Sized in viewBox units to land around 10px on screen. */
+.trend-svg .trend-axis-label {
+  font-size: 9px;
 }
 
 .trend-bar-run {
@@ -5087,20 +5132,24 @@ a.exec-value:hover {
   font-size: 0.72rem;
 }
 
+/* Head, grid, footnote — the slack goes between them, so the footnote sits on
+   the bottom edge and the bars keep a spacing that does not depend on how tall
+   the neighbouring columns happen to be. */
+.tokens-panel {
+  justify-content: space-between;
+}
+
 .token-grid {
   display: grid;
   align-items: center;
-  gap: 0.45rem 0.6rem;
-}
-
-.token-month,
-.token-rate {
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
+  gap: 0.5rem 0.6rem;
+  flex: 0 0 auto;
 }
 
 .token-month {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
   color: var(--muted);
 }
 
@@ -5113,7 +5162,7 @@ a.exec-value:hover {
 /* A track per cell, so a short bar still shows where the month is. */
 .token-bar {
   display: block;
-  height: 9px;
+  height: 12px;
   border-radius: 3px;
   background: var(--surface-alt);
   overflow: hidden;
@@ -5141,11 +5190,11 @@ a.exec-value:hover {
   background: var(--chart-4);
 }
 
-.token-rate-label,
-.token-rate {
-  padding-top: 0.35rem;
+.token-foot {
+  margin: 0.9rem 0 0;
+  padding-top: 0.7rem;
   border-top: 1px solid var(--line);
-  font-weight: 600;
+  font-size: 0.78rem;
 }
 
 /* ---- provider spend ---- */
@@ -5199,9 +5248,64 @@ a.exec-value:hover {
   background: var(--chart-1);
 }
 
-/* The overflow row's marker is a count, not a logo. */
-.provider-list .connector-mark {
-  font-size: 0.7rem;
+/* The vendors past the top three. Collapsed is a zero-height row of a grid, so
+   the browser has two lengths to animate between — max-height guesswork would
+   either clip a long list or coast through empty space on a short one. */
+.provider-more {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.provider-more > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.provider-more.open {
+  grid-template-rows: 1fr;
+}
+
+.provider-more .provider-list {
+  padding-top: 0.6rem;
+}
+
+.provider-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-toggle:hover {
+  color: var(--ink);
+}
+
+.provider-toggle-chevron {
+  display: inline-block;
+  transform: rotate(90deg);
+  transition: transform 0.22s ease;
+  line-height: 1;
+}
+
+.provider-toggle[aria-expanded="true"] .provider-toggle-chevron {
+  transform: rotate(270deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .provider-more,
+  .provider-toggle-chevron {
+    transition: none;
+  }
 }
 
 /* ---- open actions ---- */
