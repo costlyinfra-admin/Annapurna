@@ -14,7 +14,7 @@
 import { Link } from "react-router-dom";
 import type { Dashboard, Insight, OpenAction, ProviderTotal, TrendMonth } from "../api";
 import { ConnectorMark } from "./ConnectorMark";
-import { money } from "../format";
+import { compact, money } from "../format";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -157,6 +157,18 @@ export function KpiRow({
         <Link className="kpi-link" to="/optimize">
           View savings →
         </Link>
+      </article>
+
+      <article className="kpi-card">
+        <h2 className="kpi-label">Total tokens</h2>
+        <div className="kpi-main">
+          <span className="kpi-value">
+            {compact(data.totals.tokens_in + data.totals.tokens_out)}
+          </span>
+        </div>
+        <span className="muted kpi-note">
+          {compact(data.totals.tokens_in)} in · {compact(data.totals.tokens_out)} out
+        </span>
       </article>
 
       <article className="kpi-card">

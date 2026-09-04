@@ -4881,9 +4881,11 @@ a.exec-value:hover {
   font-size: 0.9rem;
 }
 
+/* Five cards where the row is wide enough, wrapping to whole rows rather than
+   leaving one stranded. */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
   gap: 1rem;
   margin: 1.25rem 0;
 }

@@ -164,6 +164,11 @@ describe("Dashboard (Overview)", () => {
     // …and the split is still shown, because they answer different questions.
     expect(within(spend).getByText(/\$211 build · \$4,960 run/)).toBeInTheDocument();
 
+    // Tokens keep their own card and their own split.
+    const tokens = screen.getByRole("heading", { name: "Total tokens" }).closest("article")!;
+    expect(within(tokens).getByText("1.5M")).toBeInTheDocument();
+    expect(within(tokens).getByText(/1\.2M in · 300K out/)).toBeInTheDocument();
+
     // Coverage is derived from what is unattributed, not asserted separately.
     const coverage = screen
       .getByRole("heading", { name: "Attribution coverage" })
