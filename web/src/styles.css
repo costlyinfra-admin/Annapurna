@@ -1391,24 +1391,37 @@ select {
   align-items: flex-start;
 }
 
-/* A monogram tile in the provider's colour. White on every tile: these are all
-   mid-to-dark tones, chosen so one rule holds rather than each needing its own
-   ink. The inset ring gives the darkest brands an edge on a dark background,
-   where an almost-black tile would otherwise dissolve into the card. */
+/* The provider's logo, on a tile of its own. The tile stays light in both
+   themes: most of these marks are black or near-black, and a brand logo is not
+   ours to recolour, so it gets a light ground to sit on rather than being
+   inverted. */
 .connector-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   border-radius: 8px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-  color: #fff;
+  /* The monogram fallback: this app's own surface, since it is our lettering
+     and not a brand's mark. */
+  background: var(--surface-alt);
+  color: var(--ink-soft);
   font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1;
+}
+
+.connector-mark.logo {
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+.connector-mark img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
 }
 
 /* The name/category is a click target that toggles the inline panel. */
