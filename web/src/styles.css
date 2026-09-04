@@ -348,9 +348,33 @@ select {
   gap: 0.15rem;
 }
 
+/* Sections of the nav. The gap above each heading is what does the grouping —
+   the label only names a group the spacing has already made visible. */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.nav-group + .nav-group {
+  margin-top: 0.85rem;
+}
+
+.nav-group-label {
+  padding: 0 0.7rem 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .nav-link {
-  display: block;
-  padding: 0.55rem 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
   border-radius: var(--radius-sm);
   color: var(--ink-soft);
   font-weight: 550;
@@ -748,6 +772,16 @@ select {
   .sidebar-nav {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  /* Laid out as one wrapped row, the sections have nothing to separate, so the
+     items flatten out and the headings step aside. */
+  .nav-group {
+    display: contents;
+  }
+
+  .nav-group-label {
+    display: none;
   }
 
   .sidebar-foot {
@@ -3014,9 +3048,19 @@ a.exec-value:hover {
   gap: 0.5rem;
 }
 
+/* The icon is a landmark, not a second label: it sits a step back from the
+   text until the item is the one you are on. */
 .nav-icon {
-  color: currentColor;
   flex-shrink: 0;
+  color: var(--muted);
+}
+
+.nav-link:hover .nav-icon {
+  color: var(--ink-soft);
+}
+
+.nav-link.active .nav-icon {
+  color: currentColor;
 }
 
 .nav-badge {

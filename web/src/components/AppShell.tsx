@@ -14,24 +14,125 @@ import { REFRESH_ALERTS_EVENT } from "../pages/Dashboard";
 import { Assistant } from "./Assistant";
 import { BrandMark } from "./BrandMark";
 
-const NAV = [
-  { to: "/", label: "Overview", end: true },
-  { to: "/optimize", label: "Optimize", end: false },
-  { to: "/cost-sources", label: "Cost sources", end: false },
-  { to: "/features", label: "Features", end: false },
-  { to: "/install-sdk", label: "Install SDK", end: false },
-  { to: "/alerts", label: "Alerts", end: false, icon: "bell" },
-  { to: "/settings", label: "Settings", end: false },
-  { to: "/help", label: "Knowledge base", end: false },
+type IconName =
+  | "overview"
+  | "sources"
+  | "features"
+  | "optimize"
+  | "alerts"
+  | "sdk"
+  | "settings"
+  | "help";
+
+interface NavItem {
+  to: string;
+  label: string;
+  end: boolean;
+  icon: IconName;
+}
+
+/** The nav in sections, in the order the product is actually used: read the
+ *  numbers, see where they come from, act on them, then set up and look things
+ *  up. The first section has no heading — Overview is the front door of the
+ *  product, not a member of a group. */
+const NAV: { section?: string; items: NavItem[] }[] = [
+  { items: [{ to: "/", label: "Overview", end: true, icon: "overview" }] },
+  {
+    section: "Analyze",
+    items: [
+      { to: "/cost-sources", label: "Cost sources", end: false, icon: "sources" },
+      { to: "/features", label: "Features", end: false, icon: "features" },
+    ],
+  },
+  {
+    section: "Act",
+    items: [
+      { to: "/optimize", label: "Optimize", end: false, icon: "optimize" },
+      { to: "/alerts", label: "Alerts", end: false, icon: "alerts" },
+    ],
+  },
+  {
+    section: "Set up",
+    items: [
+      { to: "/install-sdk", label: "Install SDK", end: false, icon: "sdk" },
+      { to: "/settings", label: "Settings", end: false, icon: "settings" },
+    ],
+  },
+  {
+    section: "Learn",
+    items: [{ to: "/help", label: "Knowledge base", end: false, icon: "help" }],
+  },
 ];
 
-function BellIcon() {
+/** One family of line icons, all drawn on the same 20x20 grid at the same
+ *  weight, so the column reads as a set rather than as eight borrowed glyphs. */
+function NavIcon({ name }: { name: IconName }) {
   return (
-    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden className="nav-icon">
-      <path
-        fill="currentColor"
-        d="M10 2a5 5 0 0 0-5 5v2.6l-1.2 2.4A1 1 0 0 0 4.7 13.5h10.6a1 1 0 0 0 .9-1.5L15 9.6V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z"
-      />
+    <svg
+      viewBox="0 0 20 20"
+      width="17"
+      height="17"
+      aria-hidden
+      className="nav-icon"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {name === "overview" && (
+        <>
+          <rect x="2.75" y="2.75" width="6" height="6" rx="1.5" />
+          <rect x="11.25" y="2.75" width="6" height="6" rx="1.5" />
+          <rect x="2.75" y="11.25" width="6" height="6" rx="1.5" />
+          <rect x="11.25" y="11.25" width="6" height="6" rx="1.5" />
+        </>
+      )}
+      {name === "sources" && (
+        <>
+          <path d="M10 2.5 17.5 6.5 10 10.5 2.5 6.5Z" />
+          <path d="M2.5 10 10 14l7.5-4" />
+          <path d="M2.5 13.5 10 17.5l7.5-4" />
+        </>
+      )}
+      {name === "features" && (
+        <>
+          <path d="M9.4 2.75H16A1.25 1.25 0 0 1 17.25 4v6.6c0 .33-.13.65-.37.89l-5.4 5.4a1.25 1.25 0 0 1-1.76 0l-6.6-6.6a1.25 1.25 0 0 1 0-1.76l5.4-5.4c.23-.24.55-.38.88-.38Z" />
+          <circle cx="13.35" cy="6.65" r="1.1" />
+        </>
+      )}
+      {name === "optimize" && (
+        <>
+          <path d="M2.75 5.5 7.5 10.25 11 6.75l6.25 6.25" />
+          <path d="M13 13h4.25V8.75" />
+        </>
+      )}
+      {name === "alerts" && (
+        <>
+          <path d="M6 8.25a4 4 0 0 1 8 0c0 3.4 1.1 4.4 1.45 4.9a.4.4 0 0 1-.33.6H4.88a.4.4 0 0 1-.33-.6c.35-.5 1.45-1.5 1.45-4.9Z" />
+          <path d="M8.6 16.1a1.9 1.9 0 0 0 2.8 0" />
+        </>
+      )}
+      {name === "sdk" && (
+        <>
+          <path d="M7.25 6.5 3.75 10l3.5 3.5" />
+          <path d="M12.75 6.5 16.25 10l-3.5 3.5" />
+        </>
+      )}
+      {name === "settings" && (
+        <>
+          <path d="M2.75 6.75h3.5M10.75 6.75h6.5" />
+          <circle cx="8.5" cy="6.75" r="1.6" />
+          <path d="M2.75 13.25h7.5M14.75 13.25h2.5" />
+          <circle cx="12.5" cy="13.25" r="1.6" />
+        </>
+      )}
+      {name === "help" && (
+        <>
+          <path d="M10 5.6S8.4 3.4 3 3.4v10.9c5.4 0 7 2.2 7 2.2s1.6-2.2 7-2.2V3.4c-5.4 0-7 2.2-7 2.2Z" />
+          <path d="M10 5.6v10.9" />
+        </>
+      )}
     </svg>
   );
 }
@@ -77,23 +178,28 @@ export function AppShell() {
           </span>
         </div>
         <nav className="sidebar-nav">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
-            >
-              <span className="nav-link-label">
-                {item.icon === "bell" && <BellIcon />}
-                {item.label}
-              </span>
-              {item.to === "/alerts" && alertBadge > 0 && (
-                <span className="nav-badge" aria-label={`${alertBadge} unread alerts`}>
-                  {alertBadge > 99 ? "99+" : alertBadge}
-                </span>
-              )}
-            </NavLink>
+          {NAV.map((group, i) => (
+            <div key={group.section ?? i} className="nav-group">
+              {group.section && <span className="nav-group-label">{group.section}</span>}
+              {group.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+                >
+                  <span className="nav-link-label">
+                    <NavIcon name={item.icon} />
+                    {item.label}
+                  </span>
+                  {item.to === "/alerts" && alertBadge > 0 && (
+                    <span className="nav-badge" aria-label={`${alertBadge} unread alerts`}>
+                      {alertBadge > 99 ? "99+" : alertBadge}
+                    </span>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-bottom">
