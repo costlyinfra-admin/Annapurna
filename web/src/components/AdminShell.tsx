@@ -6,6 +6,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { BrandMark } from "./BrandMark";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
   { to: "/admin", label: "Dashboard", end: true },
@@ -55,9 +56,12 @@ export function AdminShell() {
             ← Customer app
           </Link>
           <span className="sidebar-email muted">{user?.email}</span>
-          <button className="link" onClick={() => logout().then(() => navigate("/login"))}>
-            Sign out
-          </button>
+          <div className="sidebar-actions">
+            <button className="link" onClick={() => logout().then(() => navigate("/login"))}>
+              Sign out
+            </button>
+            <ThemeToggle />
+          </div>
         </div>
       </aside>
       <main className="app-main">
