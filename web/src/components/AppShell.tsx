@@ -23,7 +23,8 @@ type IconName =
   | "alerts"
   | "sdk"
   | "settings"
-  | "help";
+  | "help"
+  | "reconciliation";
 
 interface NavItem {
   to: string;
@@ -128,6 +129,13 @@ function NavIcon({ name }: { name: IconName }) {
           <circle cx="12.5" cy="13.25" r="1.6" />
         </>
       )}
+      {name === "reconciliation" && (
+        <>
+          <path d="M4.5 2.75h7.2l3.8 3.8v10.7a.75.75 0 0 1-.75.75H4.5a.75.75 0 0 1-.75-.75V3.5a.75.75 0 0 1 .75-.75Z" />
+          <path d="M11.5 2.9v3.9h3.9" />
+          <path d="m6.6 12.4 1.8 1.8 3.5-3.5" />
+        </>
+      )}
       {name === "help" && (
         <>
           <path d="M10 5.6S8.4 3.4 3 3.4v10.9c5.4 0 7 2.2 7 2.2s1.6-2.2 7-2.2V3.4c-5.4 0-7 2.2-7 2.2Z" />
@@ -143,6 +151,28 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const [alertBadge, setAlertBadge] = useState(0);
+  // Reconciliation is an opt-in module. This is the only thing the shell knows
+  // about it: whether to offer it. The request is independent and its failure
+  // is swallowed, so the module can never delay or break the navigation.
+  const [reconciliation, setReconciliation] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    // Wrapped, not just .catch()'d: a synchronous throw here would take the
+    // whole navigation down with it, and an opt-in module must not be able to
+    // do that to the shell that merely asks whether to show it.
+    (async () => {
+      try {
+        const s = await api.reconSettings();
+        if (live) setReconciliation(Boolean(s?.enabled));
+      } catch {
+        if (live) setReconciliation(false);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const refreshBadge = useCallback(() => {
     api
@@ -163,6 +193,27 @@ export function AppShell() {
     return () => window.removeEventListener(REFRESH_ALERTS_EVENT, refreshBadge);
   }, [refreshBadge]);
 
+  // The Analyze section gains one entry when the module is on, and is the
+  // untouched constant otherwise.
+  const sections = reconciliation
+    ? NAV.map((group) =>
+        group.section === "Analyze"
+          ? {
+              ...group,
+              items: [
+                ...group.items,
+                {
+                  to: "/reconciliation",
+                  label: "Reconciliation",
+                  end: false,
+                  icon: "reconciliation" as IconName,
+                },
+              ],
+            }
+          : group,
+      )
+    : NAV;
+
   const exitImpersonation = async () => {
     await api.stopImpersonate();
     await refresh();
@@ -179,7 +230,7 @@ export function AppShell() {
           </span>
         </div>
         <nav className="sidebar-nav">
-          {NAV.map((group, i) => (
+          {sections.map((group, i) => (
             <div key={group.section ?? i} className="nav-group">
               {group.section && <span className="nav-group-label">{group.section}</span>}
               {group.items.map((item) => (

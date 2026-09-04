@@ -18,6 +18,7 @@ vi.mock("./api", async (importActual) => {
       listFeatures: vi.fn(),
       dashboard: vi.fn(),
       alertsSummary: vi.fn(),
+      reconSettings: vi.fn(),
     },
   };
 });
@@ -45,6 +46,13 @@ describe("App routing", () => {
 
   it("sends authenticated users into the app shell on the Overview", async () => {
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
+    // Reconciliation is opt-in; the shell asks and this organization has it off.
+    vi.mocked(api.reconSettings).mockResolvedValue({
+      available: true,
+      enabled: false,
+      tolerance_abs: 1,
+      tolerance_pct: 0.5,
+    });
     vi.mocked(api.alertsSummary).mockResolvedValue({
       triggered: 0,
       healthy: 0,

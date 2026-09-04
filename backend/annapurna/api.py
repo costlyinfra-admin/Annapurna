@@ -48,6 +48,7 @@ from . import (
 )
 from .github import GitHubError
 from .providers import ProviderError
+from .reconciliation import api as reconciliation_api
 
 logger = logging.getLogger("annapurna.api")
 
@@ -1242,6 +1243,12 @@ def create_app() -> FastAPI:
     def delete_discovery_llm(user: CurrentUser) -> dict:
         """Delete the configuration and its stored key."""
         return discovery_llm.remove(user["tenant_id"])
+
+    # ---- Provider invoice reconciliation (opt-in, isolated module) -------
+    # The whole feature lives in annapurna/reconciliation and is off unless a
+    # tenant turns it on. This line is the only place the rest of the app knows
+    # it exists; removing it removes the feature's entire HTTP surface.
+    app.include_router(reconciliation_api.build_router(_current_user))
 
     # ---- Support assistant (knowledge-base grounded) --------------------
     @app.get("/api/assistant/meta")

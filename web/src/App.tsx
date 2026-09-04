@@ -12,6 +12,7 @@ import { AlertFormPage } from "./pages/AlertFormPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { CopilotPage } from "./pages/CopilotPage";
 import { CostSourcesPage } from "./pages/CostSourcesPage";
+import { ReconciliationPage } from "./pages/ReconciliationPage";
 import { Dashboard } from "./pages/Dashboard";
 import { FeatureDetail } from "./pages/FeatureDetail";
 import { FeaturesPage } from "./pages/FeaturesPage";
@@ -78,6 +79,12 @@ export function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/optimize" element={<CopilotPage />} />
         <Route path="/cost-sources" element={<CostSourcesPage />} />
+        {/* Provider invoice reconciliation — an opt-in module. The routes exist
+            always; every request they make is refused unless the organization
+            has enabled it, and the nav entry only appears when it has. */}
+        <Route path="/reconciliation" element={<ReconciliationPage />} />
+        <Route path="/reconciliation/:view" element={<ReconciliationPage />} />
+        <Route path="/reconciliation/runs/:runId" element={<ReconciliationPage />} />
         <Route path="/features" element={<FeaturesPage />} />
         <Route path="/features/:id" element={<FeatureDetail />} />
         <Route path="/install-sdk" element={<InstallSdkPage />} />

@@ -4638,3 +4638,237 @@ a.exec-value:hover {
     bottom: 16px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Provider invoice reconciliation — the opt-in module's own styles. Nothing
+   here is used by any other screen, so removing the module means removing this
+   block and nothing else.
+   --------------------------------------------------------------------------- */
+.recon-intro {
+  max-width: 46rem;
+  margin-bottom: 1rem;
+}
+
+.recon-empty {
+  max-width: 42rem;
+}
+
+.recon-empty h2 {
+  margin-top: 0;
+}
+
+.recon-table td,
+.recon-table th {
+  vertical-align: top;
+}
+
+.recon-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A superseded or removed import, or a row that could not be read: present in
+   the list, visibly not counted. */
+.recon-rejected {
+  opacity: 0.55;
+}
+
+.recon-status.recon-good {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.recon-status.recon-warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.recon-status.recon-error {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+/* Confidence is deliberately quieter than status: it qualifies an explanation
+   rather than announcing a result. */
+.recon-confidence {
+  font-size: 0.68rem;
+  background: var(--surface-alt);
+  color: var(--ink-soft);
+}
+
+.recon-confidence.recon-confirmed {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.recon-evidence {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.recon-upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 1rem 0;
+}
+
+.recon-upload label,
+.recon-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.recon-mapping {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.9rem;
+  margin: 0.75rem 0 1.25rem;
+}
+
+.recon-mapping label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* A required field with nothing mapped to it — the one thing that stops an
+   import, so it is marked rather than merely mentioned. */
+.recon-mapping label.missing select {
+  border-color: var(--error);
+}
+
+.recon-field {
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.recon-help {
+  font-size: 0.72rem;
+}
+
+.recon-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.recon-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.recon-figure-label {
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.recon-figure-value {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.recon-note {
+  max-width: 46rem;
+  font-size: 0.85rem;
+}
+
+.recon-breakdowns {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+.recon-breakdown ul {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.recon-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.recon-breakdown .num {
+  font-variant-numeric: tabular-nums;
+}
+
+.recon-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.recon-detail-head h2 {
+  margin: 0 0 0.25rem;
+}
+
+.recon-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1rem 0 0;
+}
+
+.recon-errors {
+  margin: 0.4rem 0 1rem;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--error);
+}
+
+.recon-filter {
+  margin: 1.25rem 0 0.5rem;
+}
+
+/* An <a> that should read as a button (the report download, the empty-state
+   call to action). */
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.button-link.secondary {
+  background: var(--card);
+  color: var(--ink-soft);
+  border: 1px solid var(--line-strong);
+}
+
+.button-link:hover {
+  text-decoration: none;
+}

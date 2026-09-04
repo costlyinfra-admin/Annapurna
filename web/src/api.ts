@@ -663,6 +663,121 @@ export interface AssistantMeta {
   support_email: string;
 }
 
+/** Provider invoice reconciliation. The whole module is opt-in per organization;
+ *  `available` is false when the operator has disabled it for the installation. */
+export interface ReconSettings {
+  available: boolean;
+  enabled: boolean;
+  tolerance_abs: number;
+  tolerance_pct: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+  providers?: string[];
+}
+
+export interface ReconPreviewRow {
+  row_number: number;
+  service_date: string | null;
+  provider_account: string;
+  api_key_ref: string;
+  model: string;
+  usage_category: string;
+  quantity: number | null;
+  usage_subtotal: number;
+  credit: number;
+  tax: number;
+  fee: number;
+  adjustment: number;
+  billed_amount: number;
+  currency: string;
+  status: string;
+  errors: string[];
+}
+
+export interface ReconPreview {
+  headers: string[];
+  suggested_mapping: Record<string, string | null>;
+  mapping: Record<string, string | null>;
+  missing_required: string[];
+  field_help: Record<string, string>;
+  row_count: number;
+  accepted_count: number;
+  rejected_count: number;
+  currencies: string[];
+  period_start: string | null;
+  period_end: string | null;
+  usage_subtotal: number;
+  credits: number;
+  tax: number;
+  fees: number;
+  billed_total: number;
+  rows: ReconPreviewRow[];
+  rejected_rows: ReconPreviewRow[];
+  checksum: string;
+}
+
+export interface ReconImport {
+  id: string;
+  provider: string;
+  provider_account: string | null;
+  filename: string;
+  checksum: string;
+  status: "committed" | "superseded" | "removed";
+  currency: string;
+  period_start: string | null;
+  period_end: string | null;
+  imported_by: string | null;
+  imported_at: string | null;
+  row_count: number;
+  rejected_count: number;
+  validation_errors: { row: number; errors: string[] }[];
+  removed_at: string | null;
+  run_count: number;
+  duplicate?: boolean;
+}
+
+export interface ReconMatch {
+  strategy: string;
+  dimensions: Record<string, unknown>;
+  provider_amount: number;
+  tracked_amount: number;
+  difference: number;
+  difference_pct: number | null;
+  classification: string;
+  explanation: string;
+  confidence: "confirmed" | "possible" | "unknown";
+  evidence: string[];
+}
+
+export interface ReconRun {
+  id: string;
+  import_id: string | null;
+  provider: string;
+  provider_account: string | null;
+  period_start: string;
+  period_end: string;
+  currency: string;
+  status: "pending" | "matched" | "within_tolerance" | "discrepancy" | "incomplete_data" | "failed";
+  tolerance_abs: number;
+  tolerance_pct: number;
+  provider_usage: number;
+  provider_credits: number;
+  provider_tax: number;
+  provider_fees: number;
+  provider_total: number;
+  tracked_usage: number;
+  usage_difference: number;
+  usage_difference_pct: number | null;
+  unmatched_provider_count: number;
+  unmatched_tracked_count: number;
+  created_by: string | null;
+  created_at: string | null;
+  completed_at: string | null;
+  failure_reason: string | null;
+  matches?: ReconMatch[];
+  breakdown?: Record<string, { key: string; usage: number; lines: number }[]>;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -703,6 +818,54 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
   me: () => request<User>("/auth/me"),
+
+  // ---- Provider invoice reconciliation (opt-in module) ----
+  reconSettings: () => request<ReconSettings>("/reconciliation/settings"),
+
+  saveReconSettings: (body: {
+    enabled?: boolean;
+    tolerance_abs?: number;
+    tolerance_pct?: number;
+  }) =>
+    request<ReconSettings>("/reconciliation/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  reconPreview: (content: string, mapping?: Record<string, string | null>) =>
+    request<ReconPreview>("/reconciliation/preview", {
+      method: "POST",
+      body: JSON.stringify({ content, mapping }),
+    }),
+
+  reconImport: (body: {
+    provider: string;
+    filename: string;
+    content: string;
+    mapping?: Record<string, string | null>;
+    replace_import_id?: string;
+  }) =>
+    request<ReconImport>("/reconciliation/imports", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  reconImports: () => request<ReconImport[]>("/reconciliation/imports"),
+
+  removeReconImport: (id: string) =>
+    request<ReconImport>(`/reconciliation/imports/${id}`, { method: "DELETE" }),
+
+  reconRuns: () => request<ReconRun[]>("/reconciliation/runs"),
+
+  reconRun: (id: string) => request<ReconRun>(`/reconciliation/runs/${id}`),
+
+  runReconciliation: (importId: string) =>
+    request<ReconRun>("/reconciliation/runs", {
+      method: "POST",
+      body: JSON.stringify({ import_id: importId }),
+    }),
+
+  reconReportUrl: (id: string) => `/api/reconciliation/runs/${id}/report.csv`,
 
   assistantMeta: () => request<AssistantMeta>("/assistant/meta"),
 
