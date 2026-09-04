@@ -216,8 +216,68 @@ const INSIGHT_TONE: Record<string, string> = {
   "pace-down": "good",
   waste: "warn",
   governance: "warn",
+  coverage: "warn",
+  resource: "warn",
   concentration: "info",
+  efficiency: "info",
+  split: "info",
+  cache: "info",
 };
+
+/** A mark per kind of finding, so the list can be read by shape before it is
+ *  read by word. Same family as the navigation icons: one 20x20 grid, one
+ *  stroke weight, currentColor — the tone comes from the row. */
+const INSIGHT_PATHS: Record<string, string> = {
+  // A jagged peak: one day far above the rest.
+  spike: "M2.5 13.5 6 8l3 3.5L12.5 4l5 9.5",
+  // Arrows for direction of travel.
+  trend: "M2.5 14 8 8.5l3 3 6.5-6.5 M13 5h4.5v4.5",
+  "trend-down": "M2.5 6 8 11.5l3-3 6.5 6.5 M13 15h4.5v-4.5",
+  // A clock: a projection, which is about time not size.
+  pace: "M10 4.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z M10 7v3.2l2.2 1.3",
+  "pace-down": "M10 4.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z M10 7v3.2l2.2 1.3",
+  // A warning: spend to look at.
+  waste: "M10 3.6 17.5 16.4H2.5L10 3.6Z M10 8.3v3.1 M10 13.6h.01",
+  // A tag with no string: spend not tied to a feature.
+  governance: "M9.4 3.5H16v6.6L10.6 16.5 3.5 9.4 9.4 3.5Z M12.9 6.9h.01",
+  coverage: "M9.4 3.5H16v6.6L10.6 16.5 3.5 9.4 9.4 3.5Z M12.9 6.9h.01",
+  // A key: this is about API keys and workspaces.
+  resource: "M12.8 4.5a3.2 3.2 0 1 1-2.9 4.5L4 15v2.5h2.5v-2h2v-2h2l1.4-1.4a3.2 3.2 0 0 1 .9-7.6Z",
+  // Bars, one taller: one feature dominating.
+  concentration: "M4 16.5v-4 M8 16.5v-9 M12 16.5v-6 M16 16.5v-11",
+  // Two people: cost per active user.
+  efficiency:
+    "M7.5 9.5a2.4 2.4 0 1 1 0-4.8 2.4 2.4 0 0 1 0 4.8Z M3 16.2c0-2.2 2-3.6 4.5-3.6" +
+    "s4.5 1.4 4.5 3.6 M13.5 5.1a2.4 2.4 0 0 1 0 4.4 M14.5 12.9c1.6.5 2.5 1.7 2.5 3.3",
+  // A circle with a wedge: two shares of one whole.
+  split: "M10 3.5a6.5 6.5 0 1 0 6.5 6.5H10V3.5Z",
+  // Stacked discs: cached reads.
+  cache:
+    "M10 3.5c3.6 0 6.5 1 6.5 2.2S13.6 8 10 8 3.5 6.9 3.5 5.7 6.4 3.5 10 3.5Z" +
+    " M3.5 5.7v8.6c0 1.2 2.9 2.2 6.5 2.2s6.5-1 6.5-2.2V5.7 M3.5 10c0 1.2 2.9 2.2 6.5 2.2" +
+    "s6.5-1 6.5-2.2",
+};
+
+const FALLBACK_PATH = "M10 4.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z M10 7.2v3.4 M10 13h.01";
+
+function InsightIcon({ kind }: { kind: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      width="16"
+      height="16"
+      aria-hidden
+      className="insight-icon"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d={INSIGHT_PATHS[kind] ?? FALLBACK_PATH} />
+    </svg>
+  );
+}
 
 export function KeyInsights({ insights }: { insights: Insight[] }) {
   if (insights.length === 0) return null;
@@ -229,7 +289,7 @@ export function KeyInsights({ insights }: { insights: Insight[] }) {
       <ul className="insight-list">
         {insights.map((insight, i) => (
           <li key={i} className={`insight-item tone-${INSIGHT_TONE[insight.kind] ?? "info"}`}>
-            <span className="insight-dot" aria-hidden />
+            <InsightIcon kind={insight.kind} />
             <span className="insight-body">
               <span className="insight-text">{insight.text}</span>
               {insight.detail && <span className="muted insight-detail">{insight.detail}</span>}

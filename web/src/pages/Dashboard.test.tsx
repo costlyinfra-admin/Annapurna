@@ -249,11 +249,20 @@ describe("Dashboard (Overview)", () => {
     );
   });
 
+  it("opens on the last three months", async () => {
+    // One month has no shape: the trend is a lone bar and the only comparison
+    // is the delta. Three is the shortest window where the charts say anything.
+    renderDashboard();
+    await waitFor(() => expect(api.dashboard).toHaveBeenCalledWith({ kind: "last_3_months" }));
+    expect(await screen.findByRole("button", { name: /2026/ })).toBeInTheDocument();
+  });
+
   it("shows one period-over-period delta on total spend", async () => {
     renderDashboard();
     await screen.findByText("Key insights");
-    // 5171 against 5380 the month before: down 4%.
-    expect(screen.getByText(/vs last month/)).toBeInTheDocument();
+    // 5171 against 5380 in the window before: down 3.9%. The label names the
+    // window being compared, which is three months by default.
+    expect(screen.getByText(/vs prev 3 months/)).toBeInTheDocument();
     expect(screen.getByText(/▼ 3\.9%/)).toBeInTheDocument();
   });
 
@@ -394,7 +403,7 @@ describe("Dashboard (Overview)", () => {
     // Four stacked segments render for the single month (production/dev/internal/unclassified).
     expect(document.querySelectorAll(".trend-seg-fill").length).toBe(4);
     // The provider tab follows the Overview's selected period (default this month).
-    await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "this_month" }));
+    await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "last_3_months" }));
     expect(screen.getByText("openai")).toBeInTheDocument();
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
     // Token-type split sits between the provider and workspace breakdowns, and is
@@ -430,7 +439,7 @@ describe("Dashboard (Overview)", () => {
   it("refetches with the chosen review period", async () => {
     renderDashboard();
     await screen.findByText("Key insights");
-    expect(api.dashboard).toHaveBeenCalledWith({ kind: "this_month" });
+    expect(api.dashboard).toHaveBeenCalledWith({ kind: "last_3_months" });
 
     fireEvent.click(screen.getByRole("button", { name: /Sep 2026|2026/ }));
     fireEvent.click(screen.getByRole("button", { name: "Last 3 months" }));

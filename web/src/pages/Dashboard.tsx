@@ -70,7 +70,10 @@ function freshnessDetail(inferenceAt: string | null, buildAt: string | null): st
 export function Dashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<OverviewTab>("features");
-  const [range, setRange] = useState<ReviewRange>({ kind: "this_month" });
+  // Three months rather than one: a single month has no shape to it — the trend
+  // is a lone bar and a period-over-period delta is the only comparison there
+  // is. Three is the shortest window where the charts say something.
+  const [range, setRange] = useState<ReviewRange>({ kind: "last_3_months" });
   const [data, setData] = useState<DashboardData | null>(null);
   // Loaded by its own request; see the effect below.
   const [savings, setSavings] = useState<SavingsState | null>(null);

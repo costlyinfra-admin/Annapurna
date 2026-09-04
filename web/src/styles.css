@@ -2092,72 +2092,6 @@ a.pr-ref:hover {
   overflow: hidden;
 }
 
-/* Key insights — auto-generated narrative under the exec summary */
-.insights {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-  padding: 0.9rem 1.2rem 1rem;
-  margin: 0 0 1.25rem;
-}
-
-.insights-title {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-}
-
-.insight-list {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.insight-item {
-  position: relative;
-  padding-left: 1rem;
-  font-size: 0.95rem;
-  line-height: 1.4;
-  color: var(--ink);
-}
-
-.insight-item::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0.5em;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-/* Dot colour carries the tone: red for an anomaly, amber for something to look
-   at, green when the news is good, accent for plain context. */
-.insight--spike::before {
-  background: var(--error);
-}
-
-.insight--governance::before,
-.insight--coverage::before,
-.insight--pace::before,
-.insight--trend::before,
-.insight--waste::before {
-  background: var(--warn);
-}
-
-.insight--efficiency::before,
-.insight--pace-down::before,
-.insight--trend-down::before {
-  background: var(--good);
-}
-
 .exec-item {
   flex: 1 1 190px;
   min-width: 170px;
@@ -4996,7 +4930,9 @@ a.exec-value:hover {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(16rem, 0.85fr);
   gap: 1rem;
-  align-items: start;
+  /* Stretch, not start: the three columns share one top and one bottom edge, so
+     the row reads as a row rather than as three cards of assorted heights. */
+  align-items: stretch;
   margin-bottom: 1.25rem;
 }
 
@@ -5004,6 +4940,12 @@ a.exec-value:hover {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+/* The right column holds two cards in the height of one, so the taller of the
+   two takes the slack rather than leaving a gap under both. */
+.overview-side .actions-panel {
+  flex: 1;
 }
 
 @media (max-width: 1180px) {
@@ -5057,26 +4999,24 @@ a.exec-value:hover {
   line-height: 1.45;
 }
 
-/* The dot carries the tone, so the sentence does not have to shout it. */
-.insight-dot {
-  width: 7px;
-  height: 7px;
-  margin-top: 0.45rem;
+/* The icon says what kind of finding this is; its colour says how it reads.
+   Both, so the list can be scanned without being read. */
+.insight-icon {
+  margin-top: 0.1rem;
   flex-shrink: 0;
-  border-radius: var(--radius-pill);
-  background: var(--muted);
+  color: var(--muted);
 }
 
-.insight-item.tone-warn .insight-dot {
-  background: var(--warn);
+.insight-item.tone-warn .insight-icon {
+  color: var(--warn);
 }
 
-.insight-item.tone-good .insight-dot {
-  background: var(--good);
+.insight-item.tone-good .insight-icon {
+  color: var(--good);
 }
 
-.insight-item.tone-info .insight-dot {
-  background: var(--chart-2);
+.insight-item.tone-info .insight-icon {
+  color: var(--chart-2);
 }
 
 .insight-body {
