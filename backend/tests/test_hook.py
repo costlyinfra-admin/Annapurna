@@ -273,3 +273,88 @@ def test_usage_signal_is_tenant_isolated(tenant_id, app_env):
         assert conn.execute("SELECT count(*) FROM usage_signal").fetchone()[0] == 1
     with connect(app_dsn()) as conn, tenant_tx(conn, other):
         assert conn.execute("SELECT count(*) FROM usage_signal").fetchone()[0] == 0
+
+
+# --- Idempotent ingest: retries must not become double charges -------------
+
+
+def _event(feature_id, tokens_in=1_000_000):
+    return {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "tokens_in": tokens_in,
+        "tokens_out": 0,
+        "feature_id": feature_id,
+        "occurred_at": f"{PERIOD:%Y-%m-%d}T10:00:00Z",
+    }
+
+
+def _hook_total(tenant_id, feature_id):
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        row = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM inference_cost "
+            "WHERE source = 'hook' AND feature_id = %s",
+            (feature_id,),
+        ).fetchone()
+    return Decimal(row[0])
+
+
+def test_replaying_a_batch_costs_nothing_extra(tenant_id):
+    """The whole reason the batch id exists.
+
+    Costing is additive (_upsert_hook_row does amount = amount + ...), so a retry
+    of a batch whose response was lost would charge a feature twice. And
+    reconciliation only routes a POSITIVE gap to Unattributed, so over-counting
+    is the one direction nothing downstream catches.
+    """
+    feature = features.add_feature(tenant_id, "Triage")["id"]
+    batch = [_event(feature), _event(feature)]
+
+    first = hook.ingest_events(tenant_id, batch, batch_id="b-abc-123")
+    once = _hook_total(tenant_id, feature)
+    assert first["accepted"] == 2
+    assert once > 0
+
+    # The same batch again — a client retrying after a timeout it could not
+    # distinguish from a failure.
+    again = hook.ingest_events(tenant_id, batch, batch_id="b-abc-123")
+    assert _hook_total(tenant_id, feature) == once, "a retry double-charged the feature"
+    # ...and it is told what the first delivery did, not a silent zero.
+    assert again["accepted"] == first["accepted"]
+    assert again["cost"] == first["cost"]
+    assert again["duplicate"] is True
+
+
+def test_a_different_batch_id_is_a_different_batch(tenant_id):
+    """Idempotency must key on the batch, not collapse genuinely new events."""
+    feature = features.add_feature(tenant_id, "Triage")["id"]
+    hook.ingest_events(tenant_id, [_event(feature)], batch_id="b-1")
+    once = _hook_total(tenant_id, feature)
+    hook.ingest_events(tenant_id, [_event(feature)], batch_id="b-2")
+    assert _hook_total(tenant_id, feature) == once * 2
+
+
+def test_ingest_without_a_batch_id_still_applies(tenant_id):
+    """Pre-0.4 SDKs send no batch id and must keep working exactly as before."""
+    feature = features.add_feature(tenant_id, "Triage")["id"]
+    hook.ingest_events(tenant_id, [_event(feature)])
+    once = _hook_total(tenant_id, feature)
+    hook.ingest_events(tenant_id, [_event(feature)])
+    assert _hook_total(tenant_id, feature) == once * 2
+
+
+def test_batch_ids_are_tenant_scoped(tenant_id, app_env):
+    """One tenant's batch id must never suppress another's ingest."""
+    other = str(
+        app_env.execute("INSERT INTO tenant (name) VALUES ('Other Co') RETURNING id").fetchone()[0]
+    )
+    app_env.commit()
+
+    mine = features.add_feature(tenant_id, "Triage")["id"]
+    theirs = features.add_feature(other, "Triage")["id"]
+
+    hook.ingest_events(tenant_id, [_event(mine)], batch_id="same-id")
+    result = hook.ingest_events(other, [_event(theirs)], batch_id="same-id")
+
+    assert result.get("duplicate") is None  # not treated as a replay
+    assert _hook_total(other, theirs) > 0

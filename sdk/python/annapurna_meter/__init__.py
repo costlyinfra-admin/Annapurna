@@ -35,9 +35,12 @@ import datetime as dt
 import hashlib
 import json
 import os
+import random
 import threading
 import time
+import urllib.error
 import urllib.request
+import uuid
 import weakref
 from collections import OrderedDict, deque
 from typing import Any, Optional
@@ -49,6 +52,12 @@ __version__ = "0.4.0"
 BATCH_SIZE = 50
 FLUSH_INTERVAL = 5.0
 QUEUE_MAX = 10_000
+#: Delivery is retried on failures that might clear: a timeout, a refused
+#: connection, a 5xx — or a Render free instance waking from sleep, which takes
+#: 30-60s and is the case this exists for. Seconds, jittered per attempt.
+RETRY_BACKOFF = (1.0, 4.0, 15.0)
+MAX_ATTEMPTS = 3
+
 #: How long atexit waits for the queue to drain. Deliberately short: metering
 #: must never noticeably delay a deploy, restart or scale-down.
 SHUTDOWN_TIMEOUT = 2.0
@@ -71,6 +80,8 @@ class Meter:
         flush_interval: float = FLUSH_INTERVAL,
         batch_size: int = BATCH_SIZE,
         queue_max: int = QUEUE_MAX,
+        max_attempts: int = MAX_ATTEMPTS,
+        retry_backoff: tuple = RETRY_BACKOFF,
         optimize_flush_interval: float = 60.0,
         salt: Optional[str] = None,
         transport: Optional[Any] = None,
@@ -99,6 +110,8 @@ class Meter:
         self._batch_size = max(1, int(batch_size))
         self._flush_interval = max(0.0, float(flush_interval))
         self._queue_max = max(1, int(queue_max))
+        self._max_attempts = max(1, int(max_attempts))
+        self._retry_backoff = tuple(retry_backoff) or (1.0,)
         self._queue: deque = deque()
         # One condition guards the queue and every flag below it.
         self._cv = threading.Condition()
@@ -306,7 +319,7 @@ class Meter:
                 ]
                 self._sending = True
             try:
-                self._post_sync(batch)
+                self._deliver(batch)
             finally:
                 with self._cv:
                     self._sending = False
@@ -343,11 +356,36 @@ class Meter:
         except Exception:
             return False
 
-    def _post_sync(self, events: list) -> None:
-        """POST events on the CURRENT thread. Callers run this off the request path."""
+    def _deliver(self, events: list) -> None:
+        """Deliver one batch, retrying transient failures. Never raises.
+
+        The batch id is generated ONCE and reused for every attempt, which is
+        what makes retrying safe: the server applies the first delivery and
+        recognises the rest as replays. Without it a retry after an ambiguous
+        timeout — server committed, response lost — would silently double a
+        feature's cost.
+        """
         if not self.enabled or not events:
             return
-        body = json.dumps({"events": events}).encode("utf-8")
+        batch_id = uuid.uuid4().hex
+        for attempt in range(self._max_attempts):
+            outcome = self._post_once(events, batch_id)
+            if outcome != "retry":
+                if outcome == "drop":
+                    self.dropped += len(events)
+                return
+            if attempt + 1 >= self._max_attempts:
+                break
+            # Backoff with jitter, so many processes recovering from the same
+            # outage don't return in lockstep.
+            delay = self._retry_backoff[min(attempt, len(self._retry_backoff) - 1)]
+            time.sleep(delay * (0.5 + random.random()))
+        self.dropped += len(events)
+
+    def _post_once(self, events: list, batch_id: str) -> str:
+        """One delivery attempt -> "ok" | "retry" | "drop". Never raises."""
+        payload = {"events": events, "batch_id": batch_id}
+        body = json.dumps(payload).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
@@ -355,11 +393,19 @@ class Meter:
         try:
             if self._transport is not None:
                 self._transport(self.ingest_url, headers, body)
-                return
+                return "ok"
             req = urllib.request.Request(self.ingest_url, data=body, headers=headers, method="POST")
             urllib.request.urlopen(req, timeout=self.timeout).read()
+            return "ok"
+        except urllib.error.HTTPError as exc:
+            # 4xx is our fault and will fail identically forever: a bad token, a
+            # malformed event. Retrying only hammers the endpoint. 429 is the
+            # exception — it is explicitly an invitation to come back later.
+            if 400 <= exc.code < 500 and exc.code != 429:
+                return "drop"
+            return "retry"
         except Exception:
-            pass  # metering must never raise into the caller's request path
+            return "retry"  # timeout, DNS, refused, TLS: the endpoint may return
 
     def _salt_url(self) -> Optional[str]:
         if not self.ingest_url:

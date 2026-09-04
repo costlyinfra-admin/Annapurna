@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import threading
 import time
+import urllib.error
 
 from annapurna_meter import (
     Meter,
@@ -19,10 +20,20 @@ class _Capture:
         self.calls = []
 
     def __call__(self, url, headers, body):
-        self.calls.append({"url": url, "headers": headers, "events": json.loads(body)["events"]})
+        payload = json.loads(body)
+        self.calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "events": payload["events"],
+                "batch_id": payload.get("batch_id"),
+            }
+        )
 
 
-def _meter(capture, **kw):
+def _meter(capture, *, retry_backoff=None, **kw):
+    if retry_backoff is not None:
+        kw["retry_backoff"] = (retry_backoff,)  # keep retry tests instant
     return Meter(
         ingest_url="https://app.test/api/hook/events", token="tok", transport=capture, **kw
     )
@@ -471,3 +482,115 @@ def test_unconfigured_meter_queues_nothing():
     m = Meter()  # no url/token
     assert m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1) is None
     assert len(m._queue) == 0  # noqa: SLF001
+
+
+# --- retries: safe because every attempt carries the same batch id ---------
+
+
+def _http_error(code):
+    return urllib.error.HTTPError("https://app.test", code, "boom", {}, None)
+
+
+def test_every_batch_carries_an_id_and_retries_reuse_it():
+    """The property that makes retrying safe at all.
+
+    The server applies the first delivery of a batch id and recognises the rest
+    as replays. If a retry invented a new id it would be applied again, and
+    because costing is additive that silently doubles a feature's spend.
+    """
+    seen = []
+
+    def _fail_twice(url, headers, body):
+        payload = json.loads(body)
+        seen.append(payload["batch_id"])
+        if len(seen) < 3:
+            raise TimeoutError("ingest is waking up")
+
+    m = _meter(_fail_twice, retry_backoff=0.0)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.flush(timeout=5)
+
+    assert len(seen) == 3, "did not retry"
+    assert len(set(seen)) == 1, f"retries invented new batch ids: {set(seen)}"
+    assert len(seen[0]) >= 8
+
+
+def test_separate_batches_get_separate_ids():
+    cap = _Capture()
+    m = _meter(cap, batch_size=1)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.record(provider="openai", model="gpt-4o", tokens_in=2, tokens_out=1)
+    m.flush(timeout=5)
+
+    ids = {json.loads(json.dumps(c))["events"] and c["batch_id"] for c in cap.calls}
+    assert len(ids) == 2, "distinct batches must not share an id"
+
+
+def test_a_transient_failure_is_retried_and_then_delivered():
+    """The Render-sleep case: the first attempts time out, a later one lands."""
+    attempts = []
+
+    def _wake_up(url, headers, body):
+        attempts.append(1)
+        if len(attempts) < 2:
+            raise TimeoutError("service is asleep")
+
+    m = _meter(_wake_up, retry_backoff=0.0)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.flush(timeout=5)
+
+    assert len(attempts) == 2
+    assert m.dropped == 0  # delivered, not lost
+
+
+def test_a_client_error_is_not_retried():
+    """A bad token or a malformed event fails identically forever."""
+    attempts = []
+
+    def _reject(url, headers, body):
+        attempts.append(1)
+        raise _http_error(401)
+
+    m = _meter(_reject, retry_backoff=0.0)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.flush(timeout=5)
+
+    assert len(attempts) == 1, "retried a permanent failure"
+    assert m.dropped == 1  # counted, not silently forgotten
+
+
+def test_rate_limiting_is_retried():
+    """429 is the one 4xx that explicitly invites coming back."""
+    attempts = []
+
+    def _throttle(url, headers, body):
+        attempts.append(1)
+        raise _http_error(429)
+
+    m = _meter(_throttle, retry_backoff=0.0)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.flush(timeout=5)
+    assert len(attempts) == 3
+
+
+def test_giving_up_counts_the_loss_and_keeps_serving():
+    """After the last attempt the batch is dropped — and the meter carries on."""
+    cap = _Capture()
+    calls = {"n": 0}
+
+    def _down_then_up(url, headers, body):
+        calls["n"] += 1
+        if calls["n"] <= 3:  # the whole first batch's attempts fail
+            raise TimeoutError("down")
+        cap(url, headers, body)
+
+    m = _meter(_down_then_up, retry_backoff=0.0, batch_size=1)
+    m.record(provider="openai", model="gpt-4o", tokens_in=1, tokens_out=1)
+    m.flush(timeout=5)
+    assert m.dropped == 1
+    assert cap.calls == []
+
+    m.record(provider="openai", model="gpt-4o", tokens_in=2, tokens_out=1)
+    m.flush(timeout=5)
+    assert len(cap.calls) == 1, "the worker died with the failed batch"
+    assert cap.calls[0]["events"][0]["tokens_in"] == 2

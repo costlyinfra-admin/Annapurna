@@ -31,7 +31,21 @@ meter.flush()          # returns True if the queue drained, False on timeout
 meter.flush(timeout=1) # never waits longer than you allow
 ```
 
-Tunable per meter: `batch_size`, `flush_interval`, `queue_max`, `timeout`.
+### Retries
+
+A failed batch is retried (3 attempts, backing off ~1s / 4s / 15s with jitter) —
+enough to ride out a restart, a blip, or a sleeping instance waking up. A 4xx is
+*not* retried: a bad token or a malformed event fails the same way forever, so
+retrying only hammers the endpoint. 429 is retried, since it explicitly asks you
+to come back.
+
+Retrying is safe because every attempt carries the same `batch_id`. The server
+applies a batch once and recognises re-deliveries, so a retry after a timeout you
+could not distinguish from a failure cannot double-charge a feature. Events only
+count as lost after the final attempt, and then `meter.dropped` says so.
+
+Tunable per meter: `batch_size`, `flush_interval`, `queue_max`, `timeout`,
+`max_attempts`, `retry_backoff`.
 
 ## Install
 

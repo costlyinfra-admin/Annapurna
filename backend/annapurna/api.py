@@ -301,6 +301,9 @@ class HookEvent(BaseModel):
 
 class HookEventsRequest(BaseModel):
     events: list[HookEvent] = Field(min_length=1, max_length=10000)
+    # Stable across retries of the same batch, so re-delivery applies nothing.
+    # Optional: pre-0.4 SDKs don't send one and every call is applied, as before.
+    batch_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
 
 
 class ReconcileRequest(BaseModel):
@@ -826,7 +829,9 @@ def create_app() -> FastAPI:
     @app.post("/api/hook/events")
     def ingest_hook_events(body: HookEventsRequest, request: Request) -> dict:
         tenant_id = _ingest_tenant(request)
-        return hook.ingest_events(tenant_id, [e.model_dump() for e in body.events])
+        return hook.ingest_events(
+            tenant_id, [e.model_dump() for e in body.events], batch_id=body.batch_id
+        )
 
     @app.get("/api/hook/salt")
     def hook_salt(request: Request) -> dict:

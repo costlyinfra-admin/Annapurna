@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import random
 import secrets
 from decimal import Decimal
 from typing import Optional
@@ -80,11 +81,51 @@ def _period_of(occurred_at: Optional[str]) -> dt.date:
         return month_start(dt.date.fromisoformat(text[:10]))
 
 
-def ingest_events(tenant_id: str, events: list[dict]) -> dict:
-    """Cost and persist metered events into monthly hook rows. Returns a summary."""
+#: How long a batch id is remembered — comfortably longer than any client will
+#: still be retrying, and short enough that the table stays small by itself.
+_BATCH_MEMORY = "1 hour"
+
+
+def _replayed(conn, tenant_id: str, batch_id: str) -> Optional[dict]:
+    """Claim `batch_id`, or return the result of its first delivery.
+
+    Costing is additive, so applying a batch twice inflates a feature's spend.
+    The insert is the claim: whoever gets the row does the work, and a retry that
+    loses the race is handed the original answer instead of a second helping.
+    """
+    claimed = conn.execute(
+        """
+        INSERT INTO hook_batch (tenant_id, batch_id) VALUES (%s, %s)
+        ON CONFLICT (tenant_id, batch_id) DO NOTHING
+        RETURNING batch_id
+        """,
+        (tenant_id, batch_id),
+    ).fetchone()
+    if claimed:
+        return None  # ours to process
+    prior = conn.execute(
+        "SELECT accepted, cost FROM hook_batch WHERE tenant_id = %s AND batch_id = %s",
+        (tenant_id, batch_id),
+    ).fetchone()
+    # A replay reports what the first delivery did, so a retrying client sees one
+    # consistent answer rather than a silent zero.
+    return {"accepted": int(prior[0]), "cost": float(prior[1]), "duplicate": True}
+
+
+def ingest_events(tenant_id: str, events: list[dict], batch_id: Optional[str] = None) -> dict:
+    """Cost and persist metered events into monthly hook rows. Returns a summary.
+
+    Pass `batch_id` to make the call idempotent: re-sending the same batch (a
+    client retry, a duplicated delivery) applies nothing and returns the original
+    result. Without one, every call is applied — the pre-0.4 SDK behaviour.
+    """
     total = Decimal("0")
     accepted = 0
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        if batch_id:
+            prior = _replayed(conn, tenant_id, batch_id)
+            if prior is not None:
+                return prior
         valid_features = {str(r[0]) for r in conn.execute("SELECT id FROM feature").fetchall()}
         pools = compute.pool_labels(conn)  # provider_label -> pool_id (self-hosted)
         accumulator: dict[tuple, dict] = {}
@@ -184,6 +225,22 @@ def ingest_events(tenant_id: str, events: list[dict]) -> dict:
                 entry["tout"],
                 entry["count"],
             )
+
+        if batch_id:
+            conn.execute(
+                "UPDATE hook_batch SET accepted = %s, cost = %s "
+                "WHERE tenant_id = %s AND batch_id = %s",
+                (accepted, total, tenant_id, batch_id),
+            )
+            # Amortised cleanup: a batch id is only useful while a client might
+            # still retry it. Pruning on a small fraction of calls keeps the
+            # table bounded without a DELETE on every ingest or a cron job.
+            if random.random() < 0.02:  # noqa: S311  (not security-sensitive)
+                conn.execute(
+                    f"DELETE FROM hook_batch WHERE tenant_id = %s "  # noqa: S608
+                    f"AND seen_at < now() - interval '{_BATCH_MEMORY}'",
+                    (tenant_id,),
+                )
 
     return {"accepted": accepted, "cost": float(total)}
 
