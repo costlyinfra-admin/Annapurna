@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { ThemeToggle } from "./ThemeToggle";
 import { REFRESH_ALERTS_EVENT } from "../pages/Dashboard";
 import { Assistant } from "./Assistant";
 import { BrandMark } from "./BrandMark";
@@ -216,9 +217,12 @@ export function AppShell() {
               </Link>
             )}
             <span className="sidebar-email muted">{user?.email}</span>
-            <button className="link" onClick={() => logout().then(() => navigate("/login"))}>
-              Sign out
-            </button>
+            <div className="sidebar-actions">
+              <button className="link" onClick={() => logout().then(() => navigate("/login"))}>
+                Sign out
+              </button>
+              <ThemeToggle />
+            </div>
           </div>
         </div>
       </aside>

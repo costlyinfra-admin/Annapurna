@@ -116,9 +116,125 @@
   --font-display: "Space Grotesk", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
+  /* Ink for text sitting ON a saturated fill (a badge, a banner). It is white
+     here and dark in the dark theme, because the semantic colours invert: a
+     tone that needs white on it in daylight needs dark ink on it at night. */
+  --on-fill: #ffffff;
+
+  /* The remaining odds and ends that were literals in the rules below. They are
+     tokens now for one reason: every colour the app draws has to have a dark
+     counterpart, and a literal buried in a rule has nowhere to put one. */
+  --placeholder: #9c9a90;
+  --error-line: #f4c8bd;
+  --warn-line: #ecdcb8;
+  --good-tint: rgba(43, 114, 100, 0.1);
+  --good-line: rgba(43, 114, 100, 0.2);
+  --warn-tint: rgba(146, 102, 28, 0.1);
+  --warn-line-soft: rgba(146, 102, 28, 0.2);
+  /* A shade off the card, for table headers and rows that step back. */
+  --surface-raised: #fbfaf6;
+  /* Code snippets are dark in both themes — a terminal looks like a terminal. */
+  --snippet-bg: #1a1c17;
+  --snippet-ink: #e6ecd6;
+  --code-tint: rgba(26, 28, 23, 0.07);
+  /* The assistant panel's header bar. A near-black slab on a white card in
+     daylight; at night it only needs to be a step above the card, because a
+     cream slab would be the loudest thing on a dark screen. */
+  --panel-head: var(--ink);
+  --panel-head-ink: var(--bg);
+
   color-scheme: light;
   font-family: var(--font);
   color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Dark theme.
+   Every colour the app draws comes from the tokens above, so this block is the
+   whole of it: redefine the palette and the rest of the stylesheet follows.
+
+   The attribute is always set to a resolved theme — "light" or "dark", never
+   "system" — so this one selector covers both an explicit choice and following
+   the operating system. See src/theme.ts.
+
+   Two things genuinely invert rather than darken. The primary action is
+   near-black with pale-lime text in daylight; here it becomes lime with
+   near-black text, which is the same brand relationship the other way up. And
+   the semantic tones (good, warn, error) lighten, so anything sitting ON one of
+   them takes dark ink — that is what --on-fill is for.
+   --------------------------------------------------------------------------- */
+:root[data-theme="dark"] {
+  /* Warm charcoal, kept in the same hue family as the ink of the light theme,
+     so the app reads as dimmed rather than as a different product. */
+  --bg: #14150f;
+  --bg-accent: #23251c;
+  --card: #1c1e17;
+  --ink: #f3f2ea;
+  --ink-soft: #d2d2c6;
+  --muted: #989b8d;
+  --line: #2f3229;
+  --line-strong: #40443a;
+  --surface: #20221a;
+  --surface-alt: #2a2d23;
+  --surface-raised: #202219;
+
+  /* The dot grid, inverted: pale dots at a lower alpha, because light-on-dark
+     texture reads louder than dark-on-light at the same strength. */
+  --dots: radial-gradient(rgba(243, 242, 234, 0.09) 1px, transparent 1px);
+
+  --accent: #ddf859;
+  --accent-hover: #e8fc85;
+  --accent-ink: #16180f;
+  --accent-soft: #2c3421;
+  --accent-ring: rgba(221, 248, 89, 0.3);
+
+  --lime: #ddf859;
+  --lime-tint: #333c22;
+
+  /* Lime still leads the ramp; the rest are lifted until they read on charcoal.
+     --chart-6 was near-black and has to become near-white to stay a colour. */
+  --chart-1: #ddf859;
+  --chart-2: #4fae98;
+  --chart-3: #cf9f45;
+  --chart-4: #a79ce0;
+  --chart-5: #ef7f5c;
+  --chart-6: #cfd1c7;
+  --chart-none: #2e3128;
+
+  --link: #7fcfba;
+  --link-hover: #a3e0cf;
+
+  --good: #6fc3ae;
+  --good-bg: #17281f;
+  --good-tint: rgba(111, 195, 174, 0.14);
+  --good-line: rgba(111, 195, 174, 0.28);
+  --warn: #e0b45c;
+  --warn-bg: #2b2418;
+  --warn-tint: rgba(224, 180, 92, 0.14);
+  --warn-line: #453a22;
+  --warn-line-soft: rgba(224, 180, 92, 0.28);
+  --error: #f19277;
+  --error-bg: #2f1c17;
+  --error-line: #4d2a20;
+  /* Unchanged: a saturated fill that carries white text in either theme. */
+  --error-fill: #dd442c;
+
+  --on-fill: #14150f;
+  --placeholder: #7d8074;
+  --code-tint: rgba(243, 242, 234, 0.09);
+  /* Below the card rather than above it, so a terminal still looks sunk in. */
+  --snippet-bg: #0e0f0a;
+  --panel-head: #262920;
+  --panel-head-ink: var(--ink);
+
+  /* Shadow does almost no work on a dark ground, so these lean on depth of
+     black rather than spread, and the borders carry the separation instead. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
 }
 
 * {
@@ -258,7 +374,7 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
-  color: #9c9a90;
+  color: var(--placeholder);
 }
 
 input:focus,
@@ -299,7 +415,7 @@ select {
 .error {
   color: var(--error);
   background: var(--error-bg);
-  border: 1px solid #f4c8bd;
+  border: 1px solid var(--error-line);
   border-radius: var(--radius-sm);
   padding: 0.55rem 0.8rem;
   font-size: 0.9rem;
@@ -432,6 +548,37 @@ select {
 .sidebar-email {
   font-size: 0.78rem;
   word-break: break-all;
+}
+
+/* Sign out and the theme switch share the footer's last line. */
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  /* The base button rule fills on hover; an icon button in the footer should
+     not, so it says so explicitly. */
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .app-main {
@@ -924,7 +1071,7 @@ select {
 
 .stepper li.done .step-num {
   background: var(--good);
-  color: #fff;
+  color: var(--on-fill);
 }
 
 .wizard-body {
@@ -1345,7 +1492,7 @@ select {
 .feature-card.needs-review {
   border-style: dashed;
   border-color: var(--line-strong);
-  background: linear-gradient(180deg, #fbf9f4, var(--card));
+  background: linear-gradient(180deg, var(--surface-raised), var(--card));
 }
 
 .pr-evidence {
@@ -1755,7 +1902,7 @@ a.exec-value:hover {
   letter-spacing: 0.05em;
   color: var(--muted);
   font-weight: 650;
-  background: #fbfaf6;
+  background: var(--surface-raised);
   text-align: left;
   padding: 0.7rem 0.9rem;
   border-bottom: 1px solid var(--line);
@@ -1791,7 +1938,7 @@ a.exec-value:hover {
 }
 
 .unattributed-row td {
-  background: #fbfaf6;
+  background: var(--surface-raised);
   color: var(--muted);
   font-style: italic;
 }
@@ -1932,7 +2079,7 @@ a.exec-value:hover {
 
 .hint {
   background: var(--warn-bg);
-  border: 1px solid #ecdcb8;
+  border: 1px solid var(--warn-line);
   border-radius: var(--radius-sm);
   padding: 0.7rem 0.95rem;
   font-size: 0.9rem;
@@ -2278,7 +2425,7 @@ a.exec-value:hover {
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--success, var(--good));
-  background: rgba(43, 114, 100, 0.1);
+  background: var(--good-tint);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
 }
@@ -2299,14 +2446,14 @@ a.exec-value:hover {
 .opt-effort.effort-very_low,
 .opt-effort.effort-low {
   color: var(--good);
-  background: rgba(43, 114, 100, 0.1);
-  border-color: rgba(43, 114, 100, 0.2);
+  background: var(--good-tint);
+  border-color: var(--good-line);
 }
 
 .opt-effort.effort-high {
   color: var(--warn);
-  background: rgba(146, 102, 28, 0.1);
-  border-color: rgba(146, 102, 28, 0.2);
+  background: var(--warn-tint);
+  border-color: var(--warn-line-soft);
 }
 
 .opt-applied {
@@ -2332,7 +2479,7 @@ a.exec-value:hover {
   font-size: 0.68rem;
   font-weight: 600;
   color: var(--success, var(--good));
-  background: rgba(43, 114, 100, 0.1);
+  background: var(--good-tint);
   border-radius: 999px;
   padding: 0.1rem 0.45rem;
   white-space: nowrap;
@@ -2534,7 +2681,7 @@ a.exec-value:hover {
 .trend-toggle button.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 
 /* Month caption under a daily trend (shows the actual month once). */
@@ -2810,8 +2957,8 @@ a.exec-value:hover {
 }
 
 .snippet {
-  background: #1a1c17;
-  color: #e6ecd6;
+  background: var(--snippet-bg);
+  color: var(--snippet-ink);
   border-radius: var(--radius-sm);
   padding: 0.95rem 1.1rem;
   font-family: var(--mono);
@@ -2872,12 +3019,12 @@ a.exec-value:hover {
   justify-content: space-between;
   gap: 1rem;
   background: var(--warn);
-  color: #fff;
+  color: var(--on-fill);
   padding: 0.5rem 1.3rem;
   font-size: 0.9rem;
 }
 .impersonation-banner .link {
-  color: #fff;
+  color: var(--on-fill);
   text-decoration: underline;
 }
 
@@ -3069,7 +3216,7 @@ a.exec-value:hover {
   padding: 0 0.35rem;
   border-radius: 999px;
   background: var(--error);
-  color: #fff;
+  color: var(--on-fill);
   font-size: 0.68rem;
   font-weight: 700;
   display: inline-flex;
@@ -3730,8 +3877,8 @@ a.exec-value:hover {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 20px;
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--panel-head);
+  color: var(--panel-head-ink);
 }
 
 .assist-title {
@@ -3804,7 +3951,7 @@ a.exec-value:hover {
 .assist-msg code {
   padding: 1px 5px;
   border-radius: 5px;
-  background: rgba(26, 28, 23, 0.07);
+  background: var(--code-tint);
   font-family: var(--mono);
   font-size: 12px;
 }
@@ -3947,7 +4094,7 @@ a.exec-value:hover {
   flex: 0 0 36px;
   border: 0;
   border-radius: 10px;
-  background: var(--ink);
+  background: var(--accent);
   color: var(--accent-ink);
   cursor: pointer;
 }
@@ -3971,7 +4118,7 @@ a.exec-value:hover {
   justify-content: center;
   border: 0;
   border-radius: 10px;
-  background: var(--ink);
+  background: var(--accent);
   color: var(--accent-ink);
   font-size: 13px;
   font-weight: 500;
