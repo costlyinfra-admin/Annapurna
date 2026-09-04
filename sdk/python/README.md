@@ -49,9 +49,17 @@ Tunable per meter: `batch_size`, `flush_interval`, `queue_max`, `timeout`,
 
 ## Install
 
+Into the virtualenv your application runs in:
+
 ```bash
-pip install annapurna-meter
+python3 -m pip install "annapurna-meter>=0.4"
 ```
+
+Or add `annapurna-meter>=0.4` to `requirements.txt` / `pyproject.toml`, which is
+the version that survives a rebuild.
+
+If pip answers `error: externally-managed-environment`, you are outside a
+virtualenv — activate your application's environment and run it again.
 
 ## Use
 

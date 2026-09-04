@@ -22,6 +22,9 @@ process open.
 npm install annapurna-meter
 ```
 
+ESM only — `import` it. In a CommonJS project use a dynamic import
+(`const { wrap } = await import("annapurna-meter")`); `require()` will not work.
+
 ## Use
 
 **Recommended — wrap the client once (no per-call code):**

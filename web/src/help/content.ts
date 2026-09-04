@@ -391,7 +391,7 @@ export const CATEGORIES: Category[] = [
         summary: "Wrap your client once; no per-call code.",
         blocks: [
           p(
-            "Full copy-paste instructions with your own ingest token live on [Install SDK](/install-sdk). The short version:",
+            "Full copy-paste instructions with your own ingest token live on [Install SDK](/install-sdk) — including a prompt you can hand to a coding agent, which carries your real feature ids and does the wiring for you. The short version:",
           ),
           code(`# Python
 from anthropic import Anthropic
@@ -406,6 +406,9 @@ const client = wrap(openai, { featureId: "<feature-id>" });
 await client.chat.completions.create({ ... });   // metered automatically`),
           p(
             "Configuration is two environment variables — the ingest URL and your token. With neither set, every call is a no-op, so the same code runs in environments where you have not enabled it.",
+          ),
+          note(
+            'Install into the environment your app actually runs in. On Python that means the virtualenv — `python3 -m pip install "annapurna-meter>=0.4"`, or a line in your requirements file. The Node package is ESM only, so `import` it rather than `require()` it.',
           ),
         ],
       },

@@ -2956,6 +2956,15 @@ a.exec-value:hover {
   margin-top: 0.6rem;
 }
 
+/* The agent prompt is a hundred lines, which would otherwise push the rest of
+   the page below the fold. It scrolls in place; nobody reads it top to bottom
+   anyway — they copy it. */
+.snippet.agent-prompt {
+  max-height: 22rem;
+  overflow-y: auto;
+  margin-top: 0.75rem;
+}
+
 .snippet {
   background: var(--snippet-bg);
   color: var(--snippet-ink);
