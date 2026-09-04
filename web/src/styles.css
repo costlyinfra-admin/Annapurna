@@ -53,8 +53,10 @@
      uses that declared colour at full strength, because the app's background
      shows only in narrow gutters where the dimmed version all but disappears.
      Texture, not pattern — it should never compete with a number. */
-  --dots: radial-gradient(rgba(26, 28, 23, 0.14) 1px, transparent 1px);
+  --dots: radial-gradient(rgba(26, 28, 23, 0.14) 1.5px, transparent 1.5px);
   --dots-size: 22px 22px;
+  /* The same dot, as a flat colour the canvas field can paint with. */
+  --dot-ink: rgba(26, 28, 23, 0.22);
 
   /* Brand. The site's primary button is near-black with pale-lime text. */
   --accent: #22241e;
@@ -183,7 +185,8 @@
 
   /* The dot grid, inverted: pale dots at a lower alpha, because light-on-dark
      texture reads louder than dark-on-light at the same strength. */
-  --dots: radial-gradient(rgba(243, 242, 234, 0.09) 1px, transparent 1px);
+  --dots: radial-gradient(rgba(243, 242, 234, 0.09) 1.5px, transparent 1.5px);
+  --dot-ink: rgba(243, 242, 234, 0.16);
 
   --accent: #ddf859;
   --accent-hover: #e8fc85;
@@ -960,12 +963,18 @@ select {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  /* The site's hero: its dot grid over a pale lime wash. The wash is the pair
-     already composited (the site draws brand-soft at 60% over the page cream),
-     so nothing has to be stacked to get it. */
-  background:
-    var(--dots) 0 0 / var(--dots-size),
-    var(--auth-wash);
+  /* Just the wash — the pair already composited (the site draws brand-soft at
+     60% over the page cream). The dots here are the canvas, not the background,
+     because they move. */
+  background: var(--auth-wash);
+}
+
+/* The interactive dot grid, behind everything and deaf to the pointer so it
+   never stands between the cursor and the form. */
+.dot-field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 /* The site's lime bloom off the top-right corner: a soft circle, heavily

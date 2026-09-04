@@ -11,6 +11,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api";
 import { BrandMark } from "../components/BrandMark";
+import { DotField } from "../components/DotField";
 
 interface AuthFormProps {
   title: string;
@@ -63,8 +64,10 @@ export function AuthForm({ title, submitLabel, onSubmit, footer, note }: AuthFor
 
   return (
     <div className="auth-hero">
-      {/* The site's lime bloom, off the top-right corner. */}
+      {/* The site's lime bloom, off the top-right corner, and the dot grid that
+          scatters away from the cursor. */}
       <div className="auth-glow" aria-hidden />
+      <DotField />
 
       <header className="auth-top">
         <div className="auth-top-inner">
