@@ -2956,6 +2956,48 @@ a.exec-value:hover {
   margin-top: 0.6rem;
 }
 
+/* Every snippet carries a copy button, pinned to its top-right corner. The
+   wrapper is what the button is positioned against; the snippet keeps its own
+   padding so the button never sits on top of the first line of code. */
+.snippet-wrap {
+  position: relative;
+}
+
+.snippet-copy {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid rgba(230, 236, 214, 0.22);
+  border-radius: var(--radius-sm);
+  /* The snippet is dark in both themes, so this button is too — it does not
+     follow the page palette, it follows the block it sits on. */
+  background: rgba(230, 236, 214, 0.08);
+  color: var(--snippet-ink);
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0.65;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
+}
+
+.snippet-wrap:hover .snippet-copy,
+.snippet-copy:focus-visible {
+  opacity: 1;
+}
+
+.snippet-copy:hover {
+  background: rgba(230, 236, 214, 0.16);
+  transform: none;
+}
+
 /* The agent prompt is a hundred lines, which would otherwise push the rest of
    the page below the fold. It scrolls in place; nobody reads it top to bottom
    anyway — they copy it. */
@@ -2963,6 +3005,8 @@ a.exec-value:hover {
   max-height: 22rem;
   overflow-y: auto;
   margin-top: 0.75rem;
+  /* Room for the copy button, which stays put while the prompt scrolls. */
+  padding-right: 6.5rem;
 }
 
 .snippet {

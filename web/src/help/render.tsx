@@ -8,6 +8,7 @@
  */
 import { Fragment, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Snippet } from "../components/Snippet";
 import type { Block } from "./blocks";
 
 const INLINE = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
@@ -77,11 +78,7 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
               </ol>
             );
           case "code":
-            return (
-              <pre key={i} className="snippet">
-                {block.text}
-              </pre>
-            );
+            return <Snippet key={i}>{block.text}</Snippet>;
           case "note":
             return (
               <p key={i} className="hint">

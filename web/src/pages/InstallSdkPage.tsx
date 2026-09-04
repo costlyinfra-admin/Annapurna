@@ -7,13 +7,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Feature } from "../api";
+import { Snippet } from "../components/Snippet";
 import { agentPrompt } from "./installPrompt";
 
 export function InstallSdkPage() {
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
-  const [copied, setCopied] = useState(false);
 
   // The endpoint the SDK posts to — shown so setup is copy-paste for THIS install.
   const ingestUrl = `${window.location.origin}/api/hook/events`;
@@ -28,16 +28,6 @@ export function InstallSdkPage() {
   }, []);
 
   const prompt = agentPrompt(ingestUrl, features);
-
-  async function copyPrompt() {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError("Couldn't copy — select the text and copy it manually.");
-    }
-  }
 
   async function generate() {
     setError(null);
@@ -87,14 +77,14 @@ export function InstallSdkPage() {
         )}
         {token ? (
           <>
-            <pre className="snippet token">{`ANNAPURNA_INGEST_URL=${ingestUrl}
-ANNAPURNA_INGEST_TOKEN=${token}`}</pre>
+            <Snippet className="token">{`ANNAPURNA_INGEST_URL=${ingestUrl}
+ANNAPURNA_INGEST_TOKEN=${token}`}</Snippet>
             <p className="muted">Copy the token now — it isn't shown again. Keep it secret.</p>
           </>
         ) : (
           <>
-            <pre className="snippet">{`ANNAPURNA_INGEST_URL=${ingestUrl}
-ANNAPURNA_INGEST_TOKEN=…    # click "Generate" to create yours`}</pre>
+            <Snippet>{`ANNAPURNA_INGEST_URL=${ingestUrl}
+ANNAPURNA_INGEST_TOKEN=…    # click "Generate" to create yours`}</Snippet>
             <button className="secondary" onClick={generate}>
               Generate ingest token
             </button>
@@ -119,10 +109,9 @@ ANNAPURNA_INGEST_TOKEN=…    # click "Generate" to create yours`}</pre>
             </>
           )}
         </p>
-        <button className="secondary" onClick={copyPrompt}>
-          {copied ? "Copied ✓" : "Copy prompt for your coding agent"}
-        </button>
-        <pre className="snippet agent-prompt">{prompt}</pre>
+        <Snippet className="agent-prompt" copyLabel="Copy prompt">
+          {prompt}
+        </Snippet>
         <p className="muted">
           The prompt tells the agent to read the token from your environment, never to write it into
           the code. Set it where the app already keeps its secrets.
@@ -137,17 +126,17 @@ ANNAPURNA_INGEST_TOKEN=…    # click "Generate" to create yours`}</pre>
           system Python.
         </p>
         <span className="chart-title">Python</span>
-        <pre className="snippet">{`python3 -m pip install "annapurna-meter>=0.4"
+        <Snippet>{`python3 -m pip install "annapurna-meter>=0.4"
 
 # or, the durable version — add it to your requirements.txt / pyproject.toml:
-annapurna-meter>=0.4`}</pre>
+annapurna-meter>=0.4`}</Snippet>
         <p className="muted">
           If pip answers <code>error: externally-managed-environment</code>, you are outside a
           virtualenv — activate your app's environment and run it again. That message is Python
           protecting the system install, not a problem with the package.
         </p>
         <span className="chart-title">Node</span>
-        <pre className="snippet">{`npm install annapurna-meter`}</pre>
+        <Snippet>{`npm install annapurna-meter`}</Snippet>
         <p className="muted">
           The Node package is <strong>ESM only</strong>: use <code>import</code>. In a CommonJS
           project, load it with <code>{`const { wrap } = await import("annapurna-meter")`}</code> —{" "}
@@ -167,21 +156,21 @@ annapurna-meter>=0.4`}</pre>
           The provider is auto-detected.
         </p>
         <span className="chart-title">Python</span>
-        <pre className="snippet">{`from anthropic import Anthropic
+        <Snippet>{`from anthropic import Anthropic
 from annapurna_meter import wrap
 
 client = wrap(Anthropic(), feature_id="<feature-id>")   # reads the env vars above
 
 # unchanged — this call is metered automatically:
-resp = client.messages.create(model="claude-sonnet-4-6", messages=[...])`}</pre>
+resp = client.messages.create(model="claude-sonnet-4-6", messages=[...])`}</Snippet>
         <span className="chart-title">Node</span>
-        <pre className="snippet">{`import OpenAI from "openai";
+        <Snippet>{`import OpenAI from "openai";
 import { wrap } from "annapurna-meter";
 
 const client = wrap(new OpenAI(), { featureId: "<feature-id>" });
 
 // unchanged — this call is metered automatically:
-const resp = await client.chat.completions.create({ model: "gpt-4o", messages: [...] });`}</pre>
+const resp = await client.chat.completions.create({ model: "gpt-4o", messages: [...] });`}</Snippet>
         <p className="muted">
           Optional: pass <code>metadata</code> at wrap time (e.g.{" "}
           <code>{`metadata={ "environment": "prod" }`}</code>) and it is attached to every call
@@ -192,14 +181,14 @@ const resp = await client.chat.completions.create({ model: "gpt-4o", messages: [
           <strong>Two cases the wrapper doesn't cover.</strong> Streaming and async responses are
           skipped, so record those yourself — and for that you need a meter of your own rather than
           the one <code>wrap()</code> makes internally:
-          <pre className="snippet">{`from annapurna_meter import Meter
+          <Snippet>{`from annapurna_meter import Meter
 
 meter = Meter(feature_id="<feature-id>")     # reads the same two env vars
 meter.record_anthropic(resp)                 # or meter.record_openai(resp)
 
 # In a short-lived process — a script, a job, a Lambda — the background worker
 # may not get to send before the process ends. Flush before you exit:
-meter.flush()`}</pre>
+meter.flush()`}</Snippet>
           In Node the equivalents are <code>meter.recordAnthropic(resp)</code>,{" "}
           <code>meter.recordOpenAI(resp)</code> and <code>await meter.flush()</code>.
         </div>
