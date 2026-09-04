@@ -416,9 +416,12 @@ select {
 }
 
 .content {
-  max-width: 1040px;
+  /* Wide enough to give the dense tables room on a large display, still bounded
+     so a 27" monitor doesn't stretch a row of numbers across two feet of glass.
+     Pages whose content is prose cap themselves tighter (see .kb-body). */
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 1.75rem 2rem 3rem;
+  padding: 1.75rem 1.5rem 3rem;
 }
 
 .breadcrumb {
@@ -3418,6 +3421,10 @@ a.exec-value:hover {
   grid-template-columns: 260px minmax(0, 1fr);
   gap: 1.75rem;
   align-items: start;
+  /* The handbook is the one place that is pure reading, so it stays narrower
+     than the dashboards: this cap leaves the article column at a comfortable
+     line length instead of letting it run the full width of the page. */
+  max-width: 1140px;
 }
 
 .kb-nav {
@@ -3521,8 +3528,6 @@ a.exec-value:hover {
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   padding: 1.6rem 1.9rem 1.9rem;
-  /* Prose is easier to read short; the container may be far wider. */
-  max-width: 46rem;
 }
 
 .kb-crumb {
