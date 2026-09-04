@@ -100,8 +100,13 @@ export function PeriodSelector({
     };
   }, [open]);
 
+  // What is applied and on screen. Never the draft: the draft belongs to the
+  // open panel, and it is only seeded when the panel opens — so reading it here
+  // would leave the button showing the previous period until it was reopened.
+  const applied = resolved ?? spanOf(value);
+  // What the panel edits: the applied period until the user touches something.
   const edited = draft !== value;
-  const span = !edited && resolved ? resolved : spanOf(draft);
+  const span = edited ? spanOf(draft) : applied;
   const thisMonth = monthValue(0);
 
   /** Clicking a month: the first click starts a span, the second closes it.
@@ -145,7 +150,7 @@ export function PeriodSelector({
         onClick={toggle}
       >
         <CalendarIcon />
-        {spanLabel(span.start, span.end)}
+        {spanLabel(applied.start, applied.end)}
       </button>
 
       {open && (

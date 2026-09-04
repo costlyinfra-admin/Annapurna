@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PeriodSelector } from "./PeriodSelector";
@@ -100,10 +101,12 @@ describe("PeriodSelector", () => {
     openPanel();
     fireEvent.click(screen.getByRole("button", { name: "Mar" }));
 
-    // A half-picked span must not announce some other period in the meantime.
-    expect(screen.getByRole("button", { name: /Mar 2026/ })).toBeInTheDocument();
+    // A half-picked span shows as the one month picked, not as some other
+    // period inferred from an incomplete selection.
     expect(screen.getByRole("button", { name: "Mar" })).toHaveClass("edge");
     expect(screen.getByRole("button", { name: "Aug" })).not.toHaveClass("inside");
+    // The button still reports what is applied — this pick is not applied yet.
+    expect(screen.getByRole("button", { name: /Sep 2026/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(onChange).toHaveBeenCalledWith({ kind: "custom", start: "2026-03", end: "2026-03" });
@@ -137,5 +140,55 @@ describe("PeriodSelector", () => {
     expect(screen.getByText("2025")).toBeInTheDocument();
     // Every month of a past year is fair game.
     expect(screen.getByRole("button", { name: "Oct" })).toBeEnabled();
+  });
+  it("updates the button as soon as a period is applied", () => {
+    // The bug this covers: the button read the panel's draft, which is only
+    // seeded when the panel opens — so after applying, it kept showing the
+    // previous period until it was clicked a second time.
+    function Harness() {
+      const [range, setRange] = useState<ReviewRange>({ kind: "this_month" });
+      return <PeriodSelector value={range} onChange={setRange} />;
+    }
+    render(<Harness />);
+
+    expect(screen.getByRole("button", { name: /Sep 2026/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Sep 2026/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Last 3 months" }));
+
+    // No second click needed.
+    expect(screen.getByRole("button", { name: /Jul – Sep 2026/ })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("updates the button after a custom span is applied too", () => {
+    function Harness() {
+      const [range, setRange] = useState<ReviewRange>({ kind: "this_month" });
+      return <PeriodSelector value={range} onChange={setRange} />;
+    }
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Sep 2026/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Feb" }));
+    fireEvent.click(screen.getByRole("button", { name: "May" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(screen.getByRole("button", { name: /Feb – May 2026/ })).toBeInTheDocument();
+  });
+
+  it("shows the resolved period once the server answers", () => {
+    // The parent passes what came back, which can differ from what was asked.
+    const { rerender } = render(
+      <PeriodSelector value={{ kind: "this_month" }} onChange={vi.fn()} />,
+    );
+    expect(screen.getByRole("button", { name: /Sep 2026/ })).toBeInTheDocument();
+
+    rerender(
+      <PeriodSelector
+        value={{ kind: "this_month" }}
+        onChange={vi.fn()}
+        resolved={{ start: "2026-05", end: "2026-05" }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /May 2026/ })).toBeInTheDocument();
   });
 });
