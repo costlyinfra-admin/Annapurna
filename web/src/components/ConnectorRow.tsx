@@ -9,6 +9,7 @@
 import { type ReactNode, useState } from "react";
 import { api, type ConnectorStatus } from "../api";
 import { CONNECTOR_GUIDES } from "../connectorGuides";
+import { ConnectorMark } from "./ConnectorMark";
 
 export function ConnectorRow({
   connector,
@@ -72,8 +73,13 @@ export function ConnectorRow({
           onClick={onToggle}
           aria-expanded={expanded}
         >
-          <span className="connector-name">{connector.name}</span>
-          <span className="connector-category">{hint ?? connector.category.replace("_", " ")}</span>
+          <ConnectorMark type={connector.type} name={connector.name} />
+          <span className="connector-text">
+            <span className="connector-name">{connector.name}</span>
+            <span className="connector-category">
+              {hint ?? connector.category.replace("_", " ")}
+            </span>
+          </span>
         </button>
         {connector.connected ? (
           <span className="connector-actions">
