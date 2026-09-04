@@ -4936,10 +4936,17 @@ a.exec-value:hover {
   margin-bottom: 1.25rem;
 }
 
+.overview-middle,
 .overview-side {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+/* Token efficiency takes the slack under the trend, which is what was empty
+   space before it existed. */
+.overview-middle .tokens-panel {
+  flex: 1;
 }
 
 /* The right column holds two cards in the height of one, so the taller of the
@@ -5057,51 +5064,88 @@ a.exec-value:hover {
   background: var(--chart-1);
 }
 
-.trend-cols {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.4rem;
-  height: 9rem;
-}
-
-.trend-col {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  height: 100%;
-  gap: 0.3rem;
-}
-
-.trend-stack {
-  display: flex;
-  flex-direction: column;
+/* Fixed viewBox, fluid width: the bars and the axis stay in step at any size.
+   Gridlines and axis labels reuse the classes the classification chart already
+   defines, so the two charts read as the same chart drawn twice. */
+.trend-svg {
   width: 100%;
-  max-width: 2.5rem;
-  min-height: 2px;
-  border-radius: 4px 4px 0 0;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.trend-bar-run {
+  fill: var(--chart-1);
+}
+
+.trend-bar-build {
+  fill: var(--chart-4);
+}
+
+/* ---- token efficiency ---- */
+.panel-note {
+  font-size: 0.72rem;
+}
+
+.token-grid {
+  display: grid;
+  align-items: center;
+  gap: 0.45rem 0.6rem;
+}
+
+.token-month,
+.token-rate {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.token-month {
+  color: var(--muted);
+}
+
+.token-label {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* A track per cell, so a short bar still shows where the month is. */
+.token-bar {
+  display: block;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--surface-alt);
   overflow: hidden;
 }
 
-.trend-seg {
+.token-fill {
   display: block;
-  width: 100%;
-  flex-basis: 0;
+  height: 100%;
+  border-radius: 3px;
+  min-width: 1px;
 }
 
-.trend-seg.run {
+.token-fill.in {
   background: var(--chart-1);
 }
 
-.trend-seg.build {
+/* Cached input is part of input, so it is the same hue a shade back rather
+   than a colour of its own. */
+.token-fill.cached {
+  background: var(--chart-1);
+  opacity: 0.45;
+}
+
+.token-fill.out {
   background: var(--chart-4);
 }
 
-.trend-col-label {
-  font-size: 0.72rem;
-  color: var(--muted);
+.token-rate-label,
+.token-rate {
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+  font-weight: 600;
 }
 
 /* ---- provider spend ---- */

@@ -700,12 +700,16 @@ def _insights(rows: list, unattributed: dict, totals: dict, facts: dict, end: dt
 
 
 def _monthly_trend(conn, start: dt.date, end: dt.date) -> list[dict]:
-    """Build and inference cost per month across the range, kept apart.
+    """Cost and tokens per month across the range, each kind kept apart.
 
-    One row per month in the range, including months with no spend, so the chart
-    shows a gap as a gap rather than closing it up. The two costs are never
-    summed here — the chart stacks them, which is a drawing decision, not a
-    claim that they are the same kind of money.
+    One row per month in the range, including months with nothing in them, so a
+    chart shows a gap as a gap rather than closing it up. Build and inference
+    cost are never summed here — a chart may stack them, which is a drawing
+    decision, not a claim that they are the same kind of money.
+
+    Tokens ride along because they answer a different question from cost: the
+    same dollars can buy very different amounts of work, and cached input bills
+    at a fraction of the standard rate.
     """
     build = dict(
         conn.execute(
@@ -714,20 +718,32 @@ def _monthly_trend(conn, start: dt.date, end: dt.date) -> list[dict]:
             (start, end),
         ).fetchall()
     )
-    inference = dict(
-        conn.execute(
-            "SELECT period, COALESCE(SUM(amount), 0) FROM inference_cost "
-            f"WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} GROUP BY period",  # noqa: S608
+    inference = {
+        row[0]: row
+        for row in conn.execute(
+            "SELECT period, COALESCE(SUM(amount), 0), COALESCE(SUM(tokens_in), 0), "
+            "COALESCE(SUM(cached_tokens_in), 0), COALESCE(SUM(tokens_out), 0) "
+            f"FROM inference_cost WHERE period BETWEEN %s AND %s AND {_ACTIVE_ENV} "  # noqa: S608
+            "GROUP BY period",
             (start, end),
         ).fetchall()
-    )
+    }
     out, month = [], start
     while month <= end:
+        row = inference.get(month)
+        tokens_in = int(row[2]) if row else 0
+        cached = int(row[3]) if row else 0
         out.append(
             {
                 "period": month.isoformat(),
                 "build_cost": float(build.get(month, 0)),
-                "inference_cost": float(inference.get(month, 0)),
+                "inference_cost": float(row[1]) if row else 0.0,
+                "tokens_in": tokens_in,
+                # A subset of tokens_in, not an addition to it: the provider
+                # counts a cached read as input and bills it at a fraction.
+                "cached_tokens_in": cached,
+                "tokens_out": int(row[4]) if row else 0,
+                "cache_rate": (cached / tokens_in * 100) if tokens_in else 0.0,
             }
         )
         month = dt.date(month.year + (month.month // 12), (month.month % 12) + 1, 1)

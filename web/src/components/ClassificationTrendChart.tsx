@@ -14,6 +14,7 @@ import { useId, useState } from "react";
 import { type ClassificationTrendPoint } from "../api";
 import { money, wholeMoney } from "../format";
 import { smoothArea, smoothLine } from "../chartCurve";
+import { GRID_LEVELS, niceCeil } from "./chartAxis";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -117,15 +118,6 @@ const PLOT_BOTTOM = 158; // baseline; x-axis ticks sit below it
 const PAD_RIGHT = 14;
 const PLOT_W = VB_W - AXIS_W - PAD_RIGHT;
 
-/** A "nice" axis ceiling at or above `v` — 1/2/2.5/5/10 x a power of ten. */
-function niceCeil(v: number): number {
-  if (v <= 0) return 1;
-  const mag = Math.pow(10, Math.floor(Math.log10(v)));
-  const n = v / mag;
-  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
-  return step * mag;
-}
-
 /** Dollars to a y coordinate, against a ceiling. */
 function scale(ceil: number) {
   return (v: number) => PLOT_BOTTOM - (v / ceil) * (PLOT_BOTTOM - PLOT_TOP);
@@ -137,7 +129,7 @@ function scale(ceil: number) {
 function AxisFrame({ ceil, y }: { ceil: number; y: (v: number) => number }) {
   return (
     <>
-      {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+      {GRID_LEVELS.map((f) => (
         <g key={f}>
           <line
             className="trend-grid-line"

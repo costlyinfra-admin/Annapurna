@@ -25,6 +25,7 @@ import {
   OpenActions,
   ProviderSpendPanel,
   SpendTrend,
+  TokenEfficiency,
   type SavingsSummary,
 } from "../components/OverviewPanels";
 
@@ -248,7 +249,11 @@ export function Dashboard() {
       {data && (
         <div className="overview-grid">
           <KeyInsights insights={data.insights} />
-          <SpendTrend trend={data.trend} />
+          {/* The middle column: what it cost, then what that bought. */}
+          <div className="overview-middle">
+            <SpendTrend trend={data.trend} />
+            <TokenEfficiency trend={data.trend} />
+          </div>
           <div className="overview-side">
             <ProviderSpendPanel providers={data.providers} />
             <OpenActions actions={data.actions} />

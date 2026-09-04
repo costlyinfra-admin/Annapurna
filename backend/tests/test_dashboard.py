@@ -1072,3 +1072,32 @@ def test_unattributed_spend_becomes_an_action_that_says_where_to_go(app_env, ten
     assert len(unattributed) == 1
     assert "$100" in unattributed[0]["title"]
     assert unattributed[0]["href"] == "/cost-sources"
+
+
+def test_the_trend_carries_tokens_alongside_cost(app_env, tenant_id):
+    app_env.execute(
+        """
+        INSERT INTO inference_cost (tenant_id, provider, model, amount, period, source,
+                                    confidence, tokens_in, cached_tokens_in, tokens_out)
+        VALUES (%s, 'anthropic', 'c', 70, %s, 'cost_api', 'high', 1000, 250, 400)
+        """,
+        (tenant_id, dt.date(2026, 5, 1)),
+    )
+    app_env.commit()
+
+    [month] = dashboard.dashboard(tenant_id)["trend"]
+    assert month["tokens_in"] == 1000
+    assert month["tokens_out"] == 400
+    # Cached input is a SUBSET of tokens_in, so the rate is out of input alone.
+    assert month["cached_tokens_in"] == 250
+    assert month["cache_rate"] == 25.0
+
+
+def test_a_month_with_no_tokens_reports_no_cache_rate_rather_than_dividing_by_zero(
+    app_env, tenant_id
+):
+    _monthly(app_env, tenant_id, dt.date(2026, 5, 1), 70)  # cost, no token counts
+    app_env.commit()
+    [month] = dashboard.dashboard(tenant_id)["trend"]
+    assert month["tokens_in"] == 0
+    assert month["cache_rate"] == 0.0

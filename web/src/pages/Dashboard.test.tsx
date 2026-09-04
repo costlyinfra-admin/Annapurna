@@ -90,8 +90,24 @@ const DATA = {
     },
   ],
   trend: [
-    { period: "2026-04-01", build_cost: 100, inference_cost: 2000 },
-    { period: "2026-05-01", build_cost: 211, inference_cost: 4960 },
+    {
+      period: "2026-04-01",
+      build_cost: 100,
+      inference_cost: 2000,
+      tokens_in: 500_000,
+      cached_tokens_in: 50_000,
+      tokens_out: 120_000,
+      cache_rate: 10,
+    },
+    {
+      period: "2026-05-01",
+      build_cost: 211,
+      inference_cost: 4960,
+      tokens_in: 1_200_000,
+      cached_tokens_in: 180_000,
+      tokens_out: 300_000,
+      cache_rate: 15,
+    },
   ],
   providers: [
     { provider: "anthropic", build_cost: 0, inference_cost: 4000, amount: 4000, share: 77.4 },
@@ -257,6 +273,48 @@ describe("Dashboard (Overview)", () => {
     expect(await screen.findByRole("button", { name: /2026/ })).toBeInTheDocument();
   });
 
+  it("draws the spend trend against a dollar axis", async () => {
+    renderDashboard();
+    await screen.findByText("Spend trend");
+    const chart = screen.getByRole("img", { name: /Build and inference cost per month/ });
+
+    // Dotted gridlines with a round ceiling above the tallest month ($5,171).
+    expect(chart.querySelectorAll(".trend-grid-line")).toHaveLength(5);
+    const labels = [...chart.querySelectorAll(".trend-axis-label")].map((e) => e.textContent);
+    expect(labels.slice(0, 5)).toEqual(["$0", "$2,500", "$5,000", "$7,500", "$10,000"]);
+    // Build and inference are drawn as separate bars, never one.
+    expect(chart.querySelectorAll(".trend-bar-build")).toHaveLength(2);
+    expect(chart.querySelectorAll(".trend-bar-run")).toHaveLength(2);
+  });
+
+  it("shows what the money bought, alongside what it cost", async () => {
+    renderDashboard();
+    const panel = (await screen.findByText("Token efficiency")).closest("section")!;
+
+    expect(within(panel).getByText("Input")).toBeInTheDocument();
+    expect(within(panel).getByText("Cached")).toBeInTheDocument();
+    expect(within(panel).getByText("Output")).toBeInTheDocument();
+    // The cache rate is per month, from the server, not recomputed here.
+    expect(within(panel).getByText("10.0%")).toBeInTheDocument();
+    expect(within(panel).getByText("15.0%")).toBeInTheDocument();
+  });
+
+  it("says so when there are no token counts, rather than drawing nothing", async () => {
+    vi.mocked(api.dashboard).mockResolvedValue({
+      ...DATA,
+      trend: DATA.trend.map((m) => ({
+        ...m,
+        tokens_in: 0,
+        cached_tokens_in: 0,
+        tokens_out: 0,
+        cache_rate: 0,
+      })),
+    });
+    renderDashboard();
+    const panel = (await screen.findByText("Token efficiency")).closest("section")!;
+    expect(within(panel).getByText("No token counts for this period.")).toBeInTheDocument();
+  });
+
   it("shows one period-over-period delta on total spend", async () => {
     renderDashboard();
     await screen.findByText("Key insights");
@@ -408,9 +466,13 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText(/\$4,200 · 77%/)).toBeInTheDocument();
     // Token-type split sits between the provider and workspace breakdowns, and is
     // labelled as a DERIVED split (providers don't bill per token type).
-    expect(screen.getByText("Inference cost by token type")).toBeInTheDocument();
-    expect(screen.getByText("Output")).toBeInTheDocument();
-    expect(screen.getByText("Input")).toBeInTheDocument();
+    // Scoped to this section: the Overview's own token panel above uses the
+    // same two words for a different thing.
+    const tokenSplit = screen
+      .getByText("Inference cost by token type")
+      .closest("section, div") as HTMLElement;
+    expect(within(tokenSplit).getByText("Output")).toBeInTheDocument();
+    expect(within(tokenSplit).getByText("Input")).toBeInTheDocument();
     expect(screen.getByText("derived")).toBeInTheDocument();
     // Provider-reported token counts show alongside the dollars.
     expect(screen.getByText("· 300K tok")).toBeInTheDocument();

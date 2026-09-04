@@ -318,11 +318,19 @@ export interface OpenAction {
   tone: "warn" | "info";
 }
 
-/** One month of the Overview's trend. Build and inference stay apart. */
+/** One month of the Overview's trend. Build and inference stay apart, and the
+ *  token counts ride along because they answer a different question: the same
+ *  dollars can buy very different amounts of work. */
 export interface TrendMonth {
   period: string;
   build_cost: number;
   inference_cost: number;
+  tokens_in: number;
+  /** A subset of tokens_in, not an addition to it. */
+  cached_tokens_in: number;
+  tokens_out: number;
+  /** cached_tokens_in as a percentage of tokens_in; 0 when there is no input. */
+  cache_rate: number;
 }
 
 /** Total spend per vendor over the period, with each one's own split.

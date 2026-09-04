@@ -11,10 +11,12 @@
  * data does not support: a card with no history shows no sparkline rather than
  * a flat line implying one.
  */
+import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import type { Dashboard, Insight, OpenAction, ProviderTotal, TrendMonth } from "../api";
+import { GRID_LEVELS, niceCeil } from "./chartAxis";
 import { ConnectorMark } from "./ConnectorMark";
-import { compact, money } from "../format";
+import { compact, money, wholeMoney } from "../format";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -304,8 +306,23 @@ export function KeyInsights({ insights }: { insights: Insight[] }) {
 // ---------------------------------------------------------------------------
 // Spend trend
 // ---------------------------------------------------------------------------
+// A fixed viewBox: the panel is fluid, so drawing to a constant grid keeps the
+// bars and the axis in step at any width.
+const VB_W = 320;
+const VB_H = 150;
+const AXIS_W = 40; // room for the dollar labels
+const PLOT_TOP = 8;
+const PLOT_BOTTOM = 118; // baseline; month labels sit below it
+
 export function SpendTrend({ trend }: { trend: TrendMonth[] }) {
   const max = Math.max(...trend.map((m) => m.build_cost + m.inference_cost), 0);
+  const ceiling = niceCeil(max);
+  const y = (value: number) => PLOT_BOTTOM - (value / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
+
+  const plotW = VB_W - AXIS_W - 6;
+  const slot = plotW / Math.max(trend.length, 1);
+  const barW = Math.min(slot * 0.55, 28);
+
   return (
     <section className="panel trend-panel" aria-label="Spend trend">
       <div className="panel-head">
@@ -322,26 +339,151 @@ export function SpendTrend({ trend }: { trend: TrendMonth[] }) {
       {max <= 0 ? (
         <p className="muted">No spend in this period.</p>
       ) : (
-        <div className="trend-cols">
-          {trend.map((month) => {
-            const total = month.build_cost + month.inference_cost;
-            return (
-              <div
-                key={month.period}
-                className="trend-col"
-                title={`${monthLabel(month.period)}: ${money(month.build_cost)} build · ${money(month.inference_cost)} inference`}
+        <svg
+          className="trend-svg"
+          viewBox={`0 0 ${VB_W} ${VB_H}`}
+          role="img"
+          aria-label="Build and inference cost per month"
+        >
+          {GRID_LEVELS.map((level) => (
+            <g key={level}>
+              <line
+                className="trend-grid-line"
+                x1={AXIS_W}
+                y1={y(level * ceiling)}
+                x2={VB_W - 6}
+                y2={y(level * ceiling)}
+              />
+              <text
+                className="trend-axis-label"
+                x={AXIS_W - 6}
+                y={y(level * ceiling) + 3}
+                textAnchor="end"
               >
-                <div className="trend-stack" style={{ height: `${(total / max) * 100}%` }}>
-                  {/* Stacked for shape only. The two are never one number. */}
-                  <span className="trend-seg run" style={{ flexGrow: month.inference_cost || 0 }} />
-                  <span className="trend-seg build" style={{ flexGrow: month.build_cost || 0 }} />
-                </div>
-                <span className="trend-col-label">{monthLabel(month.period)}</span>
-              </div>
+                {wholeMoney(level * ceiling)}
+              </text>
+            </g>
+          ))}
+
+          {trend.map((month, i) => {
+            const total = month.build_cost + month.inference_cost;
+            const x = AXIS_W + i * slot + (slot - barW) / 2;
+            // Inference sits on top of build, so the two are read as parts of
+            // the month rather than as one blended number.
+            const buildH = (month.build_cost / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
+            const runH = (month.inference_cost / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
+            return (
+              <g key={month.period}>
+                <title>{`${monthLabel(month.period)}: ${money(month.build_cost)} build · ${money(month.inference_cost)} inference`}</title>
+                {total > 0 && (
+                  <>
+                    <rect
+                      className="trend-bar-run"
+                      x={x}
+                      y={y(total)}
+                      width={barW}
+                      height={Math.max(runH, month.inference_cost > 0 ? 1 : 0)}
+                      rx={2}
+                    />
+                    <rect
+                      className="trend-bar-build"
+                      x={x}
+                      y={PLOT_BOTTOM - buildH}
+                      width={barW}
+                      height={Math.max(buildH, month.build_cost > 0 ? 1 : 0)}
+                    />
+                  </>
+                )}
+                <text
+                  className="trend-axis-label"
+                  x={x + barW / 2}
+                  y={PLOT_BOTTOM + 14}
+                  textAnchor="middle"
+                >
+                  {monthLabel(month.period)}
+                </text>
+              </g>
             );
           })}
-        </div>
+        </svg>
       )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Token efficiency
+// ---------------------------------------------------------------------------
+/**
+ * What the money bought, which is a different question from what it cost.
+ *
+ * Three bars per month on one shared scale, so input, cached and output are
+ * comparable across the row as well as down it. Cached input is a SUBSET of
+ * input, not a fourth quantity — the provider counts a cached read as input and
+ * bills it at a fraction — so it is drawn against the same scale rather than
+ * stacked onto it.
+ */
+export function TokenEfficiency({ trend }: { trend: TrendMonth[] }) {
+  const max = Math.max(...trend.flatMap((m) => [m.tokens_in, m.tokens_out]), 0);
+  if (max <= 0) {
+    return (
+      <section className="panel tokens-panel" aria-label="Token efficiency">
+        <div className="panel-head">
+          <h2>Token efficiency</h2>
+        </div>
+        <p className="muted">No token counts for this period.</p>
+      </section>
+    );
+  }
+
+  const rows = [
+    { key: "tokens_in" as const, label: "Input", className: "in" },
+    { key: "cached_tokens_in" as const, label: "Cached", className: "cached" },
+    { key: "tokens_out" as const, label: "Output", className: "out" },
+  ];
+
+  return (
+    <section className="panel tokens-panel" aria-label="Token efficiency">
+      <div className="panel-head">
+        <h2>Token efficiency</h2>
+        <span className="muted panel-note">Cached input bills at a fraction</span>
+      </div>
+      <div
+        className="token-grid"
+        style={{ gridTemplateColumns: `auto repeat(${trend.length}, minmax(0, 1fr))` }}
+      >
+        <span />
+        {trend.map((month) => (
+          <span key={month.period} className="token-month">
+            {monthLabel(month.period)}
+          </span>
+        ))}
+
+        {rows.map((row) => (
+          <Fragment key={row.key}>
+            <span className="token-label">{row.label}</span>
+            {trend.map((month) => (
+              <span
+                key={month.period}
+                className="token-bar"
+                title={`${row.label} ${monthLabel(month.period)}: ${compact(month[row.key])}`}
+              >
+                <span
+                  className={`token-fill ${row.className}`}
+                  style={{ width: `${(month[row.key] / max) * 100}%` }}
+                />
+              </span>
+            ))}
+          </Fragment>
+        ))}
+
+        <span className="token-label token-rate-label">Cache rate</span>
+        {trend.map((month) => (
+          <span key={month.period} className="token-rate">
+            {month.tokens_in > 0 ? `${month.cache_rate.toFixed(1)}%` : "—"}
+          </span>
+        ))}
+      </div>
     </section>
   );
 }
