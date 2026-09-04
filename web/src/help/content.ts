@@ -777,6 +777,30 @@ await client.chat.completions.create({ ... });   // metered automatically`),
           ),
         ],
       },
+      {
+        slug: "getting-help",
+        title: "Getting help",
+        summary: "The assistant answers from this handbook; a human answers the rest.",
+        blocks: [
+          p(
+            "The chat button in the bottom-right corner opens the Annapurna assistant. It answers from **this handbook and nothing else**, and every reply links to the topics it drew on, so you can check the answer against the source rather than taking its word for it.",
+          ),
+          p("That boundary is deliberate. It means the assistant can tell you:"),
+          list(
+            "how a number is worked out, and where it comes from",
+            "what a screen, a column or a setting means",
+            "how to connect a provider, install the SDK, or fix a common problem",
+          ),
+          p("And it means the assistant will not:"),
+          list(
+            "read your own data — it cannot see your spend, features or invoices, so it can never tell you *your* numbers",
+            "guess at anything the handbook does not cover; it says so instead",
+          ),
+          note(
+            "When the handbook has no answer, the assistant offers **Contact support** — that goes to a person, and is the right route for anything about your account, your bill, or a number you believe is wrong.",
+          ),
+        ],
+      },
     ],
   },
 ];

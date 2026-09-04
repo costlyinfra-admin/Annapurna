@@ -640,6 +640,29 @@ export interface PoolAllocation {
   unattributed: number;
 }
 
+/** Support assistant: one handbook excerpt sent as grounding for a question. */
+export interface AssistantPassage {
+  id: string;
+  title: string;
+  category: string;
+  text: string;
+}
+
+export interface AssistantReply {
+  answer: string;
+  /** Ids of the excerpts the answer used — rendered as links into the handbook. */
+  sources: string[];
+  /** False when the handbook did not cover the question. */
+  answered: boolean;
+  /** False when the reply is a handbook excerpt rather than a written answer. */
+  composed: boolean;
+}
+
+export interface AssistantMeta {
+  composed: boolean;
+  support_email: string;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -680,6 +703,15 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
   me: () => request<User>("/auth/me"),
+
+  assistantMeta: () => request<AssistantMeta>("/assistant/meta"),
+
+  askAssistant: (body: {
+    question: string;
+    passages: AssistantPassage[];
+    history: { role: "user" | "assistant"; content: string }[];
+    page: string;
+  }) => request<AssistantReply>("/assistant/chat", { method: "POST", body: JSON.stringify(body) }),
 
   discoveryLlm: () => request<DiscoveryLlm>("/settings/discovery-llm"),
 

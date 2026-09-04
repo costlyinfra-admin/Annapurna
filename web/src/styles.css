@@ -3603,3 +3603,354 @@ a.exec-value:hover {
     max-height: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Support assistant — the launcher and panel from costlyinfra.com, rebuilt on
+   this app's tokens: ink chrome, warm paper body, lime only on the launcher's
+   hover. Pinned bottom-right above everything, and out of the way of the page.
+   --------------------------------------------------------------------------- */
+.assist-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  color: var(--bg);
+  cursor: pointer;
+  box-shadow: var(--shadow-lg);
+  transition: transform 0.15s ease;
+}
+
+.assist-fab:hover {
+  transform: scale(1.05);
+}
+
+/* The site's launcher fills with lime on hover, from the middle outwards. */
+.assist-fab-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-pill);
+  background: var(--lime);
+  transform: scale(0);
+  transition: transform 0.9s linear;
+}
+
+.assist-fab:hover .assist-fab-ripple {
+  transform: scale(3);
+}
+
+.assist-fab-icon {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  transition: color 0.9s linear;
+}
+
+.assist-fab:hover .assist-fab-icon {
+  color: var(--ink);
+}
+
+.assist-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 2rem));
+  height: min(560px, calc(100vh - 9rem));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+}
+
+.assist-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.assist-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.assist-sub {
+  margin: 2px 0 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.assist-x {
+  display: flex;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.assist-x:hover {
+  opacity: 1;
+}
+
+.assist-thread {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.assist-msg {
+  max-width: 85%;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.assist-msg p {
+  margin: 0;
+}
+
+.assist-msg p + p {
+  margin-top: 8px;
+}
+
+.assist-msg.bot {
+  align-self: flex-start;
+  background: var(--bg-accent);
+  color: var(--ink);
+}
+
+.assist-msg.user {
+  align-self: flex-end;
+  background: var(--ink);
+  color: var(--accent-ink);
+}
+
+.assist-msg code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(26, 28, 23, 0.07);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.assist-msg a {
+  color: var(--link);
+}
+
+/* Evidence, the same way the rest of the app shows it: the topics behind the
+   answer, linked, so a reply can always be checked against the handbook. */
+.assist-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.assist-sources-label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.assist-source {
+  font-size: 12px;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.assist-source:hover {
+  text-decoration: underline;
+}
+
+.assist-typing {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 14px 16px;
+}
+
+.assist-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  animation: assist-blink 1.2s infinite ease-in-out;
+}
+
+.assist-typing span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.assist-typing span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes assist-blink {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.assist-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.assist-label {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.assist-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 128px;
+  overflow-y: auto;
+}
+
+.assist-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.assist-chip:hover {
+  border-color: var(--ink);
+  background: var(--bg-accent);
+}
+
+.assist-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.assist-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.assist-send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+.assist-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.assist-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.assist-btn {
+  flex: 1;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.assist-btn.ghost {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.assist-btn:hover {
+  text-decoration: none;
+}
+
+/* On a phone the panel is the screen, not a card floating on it. */
+@media (max-width: 520px) {
+  .assist-panel {
+    right: 16px;
+    left: 16px;
+    bottom: 88px;
+    width: auto;
+    height: min(560px, calc(100vh - 7rem));
+  }
+
+  .assist-fab {
+    right: 16px;
+    bottom: 16px;
+  }
+}

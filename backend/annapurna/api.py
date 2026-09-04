@@ -25,6 +25,7 @@ from . import (
     admin,
     alerts,
     alerts_eval,
+    assistant,
     auth,
     build,
     claudecode,
@@ -49,6 +50,10 @@ from .github import GitHubError
 from .providers import ProviderError
 
 logger = logging.getLogger("annapurna.api")
+
+#: Where "Contact support" in the assistant writes to. Overridable so a fork, or
+#: a customer running their own deployment, can point it at their own desk.
+SUPPORT_EMAIL = os.environ.get("ANNAPURNA_SUPPORT_EMAIL", "support@costlyinfra.com")
 
 # Quick-start alert templates — prefill the create form but stay fully editable.
 _ALERT_TEMPLATES = [
@@ -305,6 +310,36 @@ class HookEventsRequest(BaseModel):
     # Stable across retries of the same batch, so re-delivery applies nothing.
     # Optional: pre-0.4 SDKs don't send one and every call is applied, as before.
     batch_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
+
+
+class AssistantPassage(BaseModel):
+    """One handbook excerpt the browser retrieved for this question.
+
+    The knowledge base ships in the app bundle and retrieval runs there, so the
+    excerpts arrive with the question rather than from a second copy on the
+    server that could drift out of date. See annapurna/assistant.py.
+    """
+
+    id: str = Field(min_length=1, max_length=120)
+    title: str = Field(default="", max_length=200)
+    category: str = Field(default="", max_length=200)
+    text: str = Field(default="", max_length=assistant.MAX_PASSAGE_CHARS)
+
+
+class AssistantTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(default="", max_length=assistant.MAX_HISTORY_CHARS)
+
+
+class AssistantRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=assistant.MAX_QUESTION)
+    passages: list[AssistantPassage] = Field(
+        default_factory=list, max_length=assistant.MAX_PASSAGES
+    )
+    history: list[AssistantTurn] = Field(default_factory=list, max_length=assistant.MAX_HISTORY)
+    #: Where the user is in the app, so the answer can be about the screen in
+    #: front of them. A label, not a URL with data in it.
+    page: str = Field(default="", max_length=80)
 
 
 class DiscoveryLlmRequest(BaseModel):
@@ -1207,6 +1242,35 @@ def create_app() -> FastAPI:
     def delete_discovery_llm(user: CurrentUser) -> dict:
         """Delete the configuration and its stored key."""
         return discovery_llm.remove(user["tenant_id"])
+
+    # ---- Support assistant (knowledge-base grounded) --------------------
+    @app.get("/api/assistant/meta")
+    def assistant_meta(user: CurrentUser) -> dict:
+        """What the widget needs to describe itself honestly.
+
+        `composed` false means no answering model is configured, so replies will
+        be handbook excerpts rather than written answers — the UI says so instead
+        of pretending.
+        """
+        return {
+            "composed": assistant.env_llm_config() is not None,
+            "support_email": SUPPORT_EMAIL,
+        }
+
+    @app.post("/api/assistant/chat")
+    def assistant_chat(body: AssistantRequest, user: CurrentUser) -> dict:
+        try:
+            assistant.check_rate(user["tenant_id"])
+        except assistant.RateLimited as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)
+            ) from exc
+        return assistant.answer(
+            body.question,
+            passages=[p.model_dump() for p in body.passages],
+            history=[t.model_dump() for t in body.history],
+            page=body.page,
+        )
 
     @app.get("/api/dashboard/providers")
     def dashboard_providers(

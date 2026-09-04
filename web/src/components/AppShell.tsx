@@ -11,6 +11,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { REFRESH_ALERTS_EVENT } from "../pages/Dashboard";
+import { Assistant } from "./Assistant";
 import { BrandMark } from "./BrandMark";
 
 const NAV = [
@@ -128,6 +129,7 @@ export function AppShell() {
         )}
         <Outlet />
       </main>
+      <Assistant />
     </div>
   );
 }
