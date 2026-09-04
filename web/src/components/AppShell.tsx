@@ -21,6 +21,7 @@ const NAV = [
   { to: "/install-sdk", label: "Install SDK", end: false },
   { to: "/alerts", label: "Alerts", end: false, icon: "bell" },
   { to: "/settings", label: "Settings", end: false },
+  { to: "/help", label: "Knowledge base", end: false },
 ];
 
 function BellIcon() {

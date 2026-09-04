@@ -3410,3 +3410,196 @@ a.exec-value:hover {
   margin-top: 0.75rem;
   font-size: 0.8rem;
 }
+
+/* ---------- Knowledge base ---------- */
+/* A book: contents down the left, one topic at a time on the right. */
+.kb-body {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 1.75rem;
+  align-items: start;
+}
+
+.kb-nav {
+  position: sticky;
+  top: 1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
+.kb-search {
+  width: 100%;
+  margin-bottom: 0.9rem;
+}
+
+.kb-cat + .kb-cat {
+  margin-top: 1.05rem;
+}
+
+.kb-cat-title {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.kb-topics {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.kb-topic-link {
+  display: block;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.kb-topic-link:hover {
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.kb-topic-link.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-weight: 650;
+}
+
+.kb-result-count {
+  font-size: 0.78rem;
+  margin: 0 0 0.5rem;
+}
+
+.kb-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.25rem;
+}
+
+.kb-result:hover {
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.kb-result-title {
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.kb-result-cat {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kb-result-snippet {
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.kb-article {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.6rem 1.9rem 1.9rem;
+  /* Prose is easier to read short; the container may be far wider. */
+  max-width: 46rem;
+}
+
+.kb-crumb {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.2rem;
+}
+
+.kb-summary {
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0 0 1.2rem;
+}
+
+.kb-p {
+  line-height: 1.65;
+  margin: 0 0 0.9rem;
+}
+
+.kb-list,
+.kb-steps {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+  line-height: 1.6;
+}
+
+.kb-list li,
+.kb-steps li {
+  margin-bottom: 0.4rem;
+}
+
+.kb-article code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 0.08rem 0.3rem;
+}
+
+.kb-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 1.1rem;
+}
+
+.kb-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.kb-toc-cat {
+  margin-bottom: 1.6rem;
+}
+
+.kb-toc-cat h3 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  margin: 0 0 0.2rem;
+}
+
+.kb-toc-cat > p {
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 900px) {
+  .kb-body {
+    grid-template-columns: 1fr;
+  }
+
+  .kb-nav {
+    position: static;
+    max-height: none;
+  }
+}
