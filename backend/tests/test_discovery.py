@@ -5,8 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import httpx
 import pytest
-from annapurna import discovery, features
+from annapurna import discovery, discovery_llm, features
 from annapurna.github import PullRequest
 
 
@@ -342,3 +343,208 @@ def test_category_is_none_when_the_evidence_does_not_say():
     # and an untagged row invites a tag where a wrong tag hides the question.
     assert discovery._category([_pr(1, "acme/core", "Bump dependencies", "chore/bump")]) is None
     assert discovery._category([]) is None
+
+
+# --- BYOK: a tenant's own LLM for discovery --------------------------------
+
+
+def _saved(tenant_id, **kw):
+    defaults = {
+        "provider": "groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "llama-3.3-70b-versatile",
+        "api_key": "gsk_tenant_secret_value",
+    }
+    return discovery_llm.save(tenant_id, **{**defaults, **kw})
+
+
+def test_byok_never_returns_the_key(tenant_id):
+    """The one thing this module must not do.
+
+    Not the key, not a prefix, not a suffix, not its length — `has_key` is the
+    whole truth the API tells about the secret.
+    """
+    status = _saved(tenant_id)
+    assert status["configured"] is True
+    assert status["has_key"] is True
+    blob = json.dumps(status)
+    assert "gsk_tenant_secret_value" not in blob
+    assert "gsk" not in blob
+    # A read path returns the same shape, with no key anywhere in it.
+    assert "gsk" not in json.dumps(discovery_llm.status(tenant_id))
+
+
+def test_byok_stores_the_key_encrypted(tenant_id, app_env):
+    _saved(tenant_id)
+    row = app_env.execute("SELECT ciphertext FROM discovery_llm").fetchone()
+    assert b"gsk_tenant_secret_value" not in bytes(row[0])  # ciphertext, not plaintext
+    # ...and it round-trips for the outbound request that actually needs it.
+    assert discovery_llm.active_config(tenant_id).api_key == "gsk_tenant_secret_value"
+
+
+def test_discovery_uses_the_tenants_config_when_set(tenant_id):
+    _saved(tenant_id, provider="openai", base_url="https://byok.test/v1", model="my-model")
+    config = discovery_llm.active_config(tenant_id)
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("Authorization")
+        seen["model"] = json.loads(request.content)["model"]
+        content = json.dumps(
+            [{"name": "Notifications", "confidence": "high", "pr_refs": [f"{MCS}#201"]}]
+        )
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    proposals = discovery.openai_compatible_cluster(
+        MCS_PRS, client=httpx.Client(transport=httpx.MockTransport(handler)), config=config
+    )
+    assert proposals[0].name == "Notifications"
+    assert seen["url"] == "https://byok.test/v1/chat/completions"
+    assert seen["auth"] == "Bearer gsk_tenant_secret_value"
+    assert seen["model"] == "my-model"
+
+
+def test_no_byok_leaves_the_existing_behaviour_alone(tenant_id, monkeypatch):
+    """Fallback must be exact: Annapurna's own env configuration, untouched."""
+    assert discovery_llm.active_config(tenant_id) is None
+
+    monkeypatch.setenv("ANNAPURNA_DISCOVERY_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("ANNAPURNA_DISCOVERY_API_KEY", "annapurna_server_key")
+    monkeypatch.delenv("ANNAPURNA_DISCOVERY_MODEL", raising=False)
+
+    config = discovery.env_llm_config()
+    assert config.base_url == "https://api.groq.com/openai/v1"
+    assert config.api_key == "annapurna_server_key"
+    assert config.model == "llama-3.3-70b-versatile"  # the shipped default
+    assert discovery._llm_backend() is discovery.openai_compatible_cluster
+
+
+def test_disabling_byok_falls_back_without_discarding_it(tenant_id):
+    _saved(tenant_id)
+    assert discovery_llm.active_config(tenant_id) is not None
+
+    off = discovery_llm.set_enabled(tenant_id, False)
+    assert off["configured"] is True and off["enabled"] is False
+    assert discovery_llm.active_config(tenant_id) is None  # back to Annapurna's endpoint
+
+    on = discovery_llm.set_enabled(tenant_id, True)
+    assert on["enabled"] is True
+    assert discovery_llm.active_config(tenant_id).api_key == "gsk_tenant_secret_value"
+
+
+def test_removing_byok_deletes_the_key(tenant_id, app_env):
+    _saved(tenant_id)
+    gone = discovery_llm.remove(tenant_id)
+    assert gone == {"configured": False, "enabled": False, "has_key": False}
+    assert app_env.execute("SELECT count(*) FROM discovery_llm").fetchone()[0] == 0
+    assert discovery_llm.active_config(tenant_id) is None
+
+
+def test_editing_keeps_the_stored_key(tenant_id):
+    """The UI never shows the key, so editing a model must not require re-entry."""
+    _saved(tenant_id)
+    discovery_llm.save(
+        tenant_id,
+        provider="groq",
+        base_url="https://api.groq.com/openai/v1",
+        model="llama-3.1-8b-instant",
+    )  # no api_key
+    config = discovery_llm.active_config(tenant_id)
+    assert config.model == "llama-3.1-8b-instant"
+    assert config.api_key == "gsk_tenant_secret_value"
+
+
+def test_a_first_save_requires_a_key(tenant_id):
+    with pytest.raises(discovery_llm.ByokError):
+        discovery_llm.save(tenant_id, provider="groq", model="llama-3.3-70b-versatile")
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"provider": "not-a-provider"},
+        {"provider": "custom", "base_url": ""},  # custom needs its own URL
+        {"base_url": "ftp://nope"},  # not http(s)
+        {"model": "   "},  # blank model
+    ],
+)
+def test_byok_rejects_invalid_configuration(tenant_id, kw):
+    with pytest.raises(discovery_llm.ByokError):
+        _saved(tenant_id, **kw)
+
+
+def test_invalid_credentials_report_an_error_without_echoing_the_key(tenant_id):
+    """A 401 must be surfaced usefully — and must not quote the key back."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Some providers echo the request; make sure that can't leak.
+        return httpx.Response(401, text='{"error":"invalid api key: gsk_tenant_secret_value"}')
+
+    result = discovery_llm.test_connection(
+        tenant_id,
+        provider="groq",
+        base_url="https://api.groq.com/openai/v1",
+        model="llama-3.3-70b-versatile",
+        api_key="gsk_tenant_secret_value",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert result["ok"] is False
+    assert "401" in result["error"]
+    assert "gsk_tenant_secret_value" not in result["error"]
+    assert "***" in result["error"]
+
+
+def test_test_connection_succeeds_against_a_working_endpoint(tenant_id):
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["model"] == "llama-3.3-70b-versatile"
+        assert body["max_tokens"] == 1  # a probe, not a real completion
+        return httpx.Response(200, json={"choices": [{"message": {"content": "pong"}}]})
+
+    _saved(tenant_id)
+    result = discovery_llm.test_connection(
+        tenant_id, client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    assert result == {"ok": True, "model": "llama-3.3-70b-versatile"}
+
+
+def test_test_connection_without_any_config(tenant_id):
+    assert discovery_llm.test_connection(tenant_id)["ok"] is False
+
+
+def test_a_broken_byok_key_degrades_to_the_heuristic(tenant_id):
+    """A tenant's own key failing must not break their discovery run."""
+    config = discovery.LlmConfig(base_url="https://byok.test/v1", api_key="bad", model="m")
+
+    def boom(prs, *, config=None):
+        raise RuntimeError("401 Unauthorized")
+
+    original = discovery.openai_compatible_cluster
+    discovery.openai_compatible_cluster = boom
+    try:
+        proposals = discovery.cluster_prs(MCS_PRS, config=config)
+    finally:
+        discovery.openai_compatible_cluster = original
+    assert proposals, "discovery produced nothing instead of falling back"
+
+
+def test_byok_is_tenant_isolated(tenant_id, app_env):
+    other = str(
+        app_env.execute("INSERT INTO tenant (name) VALUES ('Other Co') RETURNING id").fetchone()[0]
+    )
+    app_env.commit()
+
+    _saved(tenant_id, model="mine")
+    _saved(other, model="theirs", api_key="gsk_other_tenant_key")
+
+    assert discovery_llm.active_config(tenant_id).model == "mine"
+    assert discovery_llm.active_config(tenant_id).api_key == "gsk_tenant_secret_value"
+    assert discovery_llm.active_config(other).model == "theirs"
+    assert discovery_llm.active_config(other).api_key == "gsk_other_tenant_key"
+
+    # Removing one tenant's configuration leaves the other's intact.
+    discovery_llm.remove(tenant_id)
+    assert discovery_llm.active_config(tenant_id) is None
+    assert discovery_llm.active_config(other) is not None

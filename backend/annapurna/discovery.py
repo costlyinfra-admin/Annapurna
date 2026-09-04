@@ -21,8 +21,13 @@ from typing import Callable, Optional
 
 import httpx
 
-from . import build
+from . import build, discovery_llm
 from .db import app_dsn, connect, tenant_tx
+from .discovery_llm import (
+    DEFAULT_DISCOVERY_MODEL,
+    LlmConfig,
+    env_llm_config,
+)
 from .github import GitHubClient, PullRequest
 
 _BRANCH_PREFIXES = (
@@ -531,20 +536,24 @@ def claude_cluster(prs: list[PullRequest]) -> list[Proposal]:
 
 
 def openai_compatible_cluster(
-    prs: list[PullRequest], *, client: Optional[httpx.Client] = None
+    prs: list[PullRequest],
+    *,
+    client: Optional[httpx.Client] = None,
+    config: Optional[LlmConfig] = None,
 ) -> list[Proposal]:
     """Cluster via any OpenAI-compatible /chat/completions endpoint.
 
     Lets discovery run on a FREE model — Groq's free tier, a local Ollama, an
-    OpenRouter ``:free`` model, etc. — configured by env:
-        ANNAPURNA_DISCOVERY_BASE_URL  e.g. https://api.groq.com/openai/v1
-        ANNAPURNA_DISCOVERY_API_KEY   the provider key ("ollama" for local Ollama)
-        ANNAPURNA_DISCOVERY_MODEL     e.g. llama-3.3-70b-versatile
+    OpenRouter ``:free`` model, etc. `config` defaults to Annapurna's own
+    endpoint from env; a tenant's BYOK configuration is passed in instead.
     Only PR metadata (ref/title/branch/repo) is sent — never source code.
     """
-    base = os.environ["ANNAPURNA_DISCOVERY_BASE_URL"].rstrip("/")
-    api_key = os.environ.get("ANNAPURNA_DISCOVERY_API_KEY", "")
-    model = os.environ.get("ANNAPURNA_DISCOVERY_MODEL", "llama-3.3-70b-versatile")
+    cfg = config or env_llm_config()
+    if cfg is None:
+        raise RuntimeError("No discovery LLM is configured.")
+    base = cfg.base_url.rstrip("/")
+    api_key = cfg.api_key
+    model = cfg.model or DEFAULT_DISCOVERY_MODEL
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -616,10 +625,23 @@ def _llm_backend() -> Optional[Callable[[list[PullRequest]], list[Proposal]]]:
     return None
 
 
-def cluster_prs(prs: list[PullRequest]) -> list[Proposal]:
-    """Cluster with the configured LLM; fall back to the heuristic on any issue."""
+def cluster_prs(prs: list[PullRequest], *, config: Optional[LlmConfig] = None) -> list[Proposal]:
+    """Cluster with an LLM; fall back to the heuristic on any issue.
+
+    `config` is a tenant's own endpoint (BYOK). Without one, selection is exactly
+    as it has always been: Annapurna's configured endpoint, else Anthropic, else
+    the heuristic.
+    """
     if not prs:
         return []
+    if config is not None:
+        try:
+            proposals = openai_compatible_cluster(prs, config=config)
+            return proposals or heuristic_cluster(prs)
+        except Exception:
+            # A tenant's own key being wrong, rate-limited or unreachable must
+            # degrade like any other LLM hiccup, not fail their discovery run.
+            return heuristic_cluster(prs)
     backend = _llm_backend()
     if backend is None:
         return heuristic_cluster(prs)
@@ -662,7 +684,9 @@ def run_discovery(
         else:
             scope = accessible  # no selection -> whole org (legacy behavior)
             prs = gh.fetch_merged_prs(owner, since)
-    proposals = cluster_prs(prs)
+    # A tenant's own LLM configuration (Settings -> BYOK) wins; without one this
+    # is None and clustering behaves exactly as before.
+    proposals = cluster_prs(prs, config=discovery_llm.active_config(tenant_id))
     pr_by_ref = {pr.ref: pr for pr in prs}
     _persist_proposals(tenant_id, proposals, pr_by_ref)
     _save_scope(tenant_id, owner, selected)

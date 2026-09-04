@@ -24,6 +24,25 @@ export interface OrgSettings {
   data_retention: "30d" | "90d" | "1y" | "indefinite";
 }
 
+/** BYOK: the tenant's own LLM for feature discovery. The key is write-only —
+ *  no field here ever carries it back. */
+export interface DiscoveryLlm {
+  configured: boolean;
+  enabled: boolean;
+  /** The whole truth about the stored secret: never a prefix, suffix or length. */
+  has_key: boolean;
+  provider?: string;
+  base_url?: string;
+  model?: string;
+  updated_at?: string | null;
+  updated_by?: string | null;
+}
+
+export interface DiscoveryLlmProviders {
+  providers: { value: string; base_url: string }[];
+  default_model: string;
+}
+
 // ---- Internal admin portal (allow-listed admins only) ----
 export interface AdminOverview {
   total_customers: number;
@@ -661,6 +680,38 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
   me: () => request<User>("/auth/me"),
+
+  discoveryLlm: () => request<DiscoveryLlm>("/settings/discovery-llm"),
+
+  discoveryLlmProviders: () => request<DiscoveryLlmProviders>("/settings/discovery-llm/providers"),
+
+  saveDiscoveryLlm: (body: {
+    provider: string;
+    base_url: string;
+    model: string;
+    api_key?: string;
+    enabled?: boolean;
+  }) =>
+    request<DiscoveryLlm>("/settings/discovery-llm", { method: "PUT", body: JSON.stringify(body) }),
+
+  testDiscoveryLlm: (body: {
+    provider?: string;
+    base_url?: string;
+    model?: string;
+    api_key?: string;
+  }) =>
+    request<{ ok: boolean; model?: string; error?: string }>("/settings/discovery-llm/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  setDiscoveryLlmEnabled: (enabled: boolean) =>
+    request<DiscoveryLlm>("/settings/discovery-llm", {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  removeDiscoveryLlm: () => request<DiscoveryLlm>("/settings/discovery-llm", { method: "DELETE" }),
 
   getSettings: () => request<OrgSettings>("/settings"),
 

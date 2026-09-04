@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, ApiError, type OrgSettings } from "../api";
+import { DiscoveryLlmCard } from "../components/DiscoveryLlmCard";
 
 const TIMEZONES = [
   "UTC",
@@ -171,6 +172,8 @@ export function SettingsPage() {
           {orgSaved && <span className="settings-saved">Saved ✓</span>}
         </div>
       </section>
+
+      <DiscoveryLlmCard />
 
       <section className="settings-card">
         <h2>Privacy &amp; data</h2>

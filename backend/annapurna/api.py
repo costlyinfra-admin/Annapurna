@@ -34,6 +34,7 @@ from . import (
     cursorspend,
     dashboard,
     discovery,
+    discovery_llm,
     entra,
     features,
     hook,
@@ -304,6 +305,29 @@ class HookEventsRequest(BaseModel):
     # Stable across retries of the same batch, so re-delivery applies nothing.
     # Optional: pre-0.4 SDKs don't send one and every call is applied, as before.
     batch_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
+
+
+class DiscoveryLlmRequest(BaseModel):
+    """BYOK for feature discovery. `api_key` is write-only and never read back."""
+
+    provider: str = Field(min_length=1, max_length=40)
+    base_url: str = Field(default="", max_length=500)
+    model: str = Field(min_length=1, max_length=200)
+    api_key: Optional[str] = Field(default=None, max_length=4096)
+    enabled: bool = True
+
+
+class DiscoveryLlmTestRequest(BaseModel):
+    """Test a configuration. With no api_key, tests the one already stored."""
+
+    provider: Optional[str] = Field(default=None, max_length=40)
+    base_url: str = Field(default="", max_length=500)
+    model: Optional[str] = Field(default=None, max_length=200)
+    api_key: Optional[str] = Field(default=None, max_length=4096)
+
+
+class DiscoveryLlmEnabledRequest(BaseModel):
+    enabled: bool
 
 
 class ReconcileRequest(BaseModel):
@@ -1128,6 +1152,61 @@ def create_app() -> FastAPI:
     @app.delete("/api/admin/impersonate", status_code=status.HTTP_204_NO_CONTENT)
     def admin_stop_impersonate(request: Request, user: RealUser) -> None:
         request.session.pop("impersonate_tenant", None)
+
+    # ---- BYOK: the tenant's own LLM for feature discovery ---------------
+    @app.get("/api/settings/discovery-llm")
+    def get_discovery_llm(user: CurrentUser) -> dict:
+        """The tenant's configuration. Never includes the key — see status()."""
+        return discovery_llm.status(user["tenant_id"])
+
+    @app.get("/api/settings/discovery-llm/providers")
+    def discovery_llm_providers(user: CurrentUser) -> dict:
+        """Known OpenAI-compatible hosts and a suggested base URL for each."""
+        return {
+            "providers": [
+                {"value": p, "base_url": url} for p, url in discovery_llm.PROVIDER_BASE_URLS.items()
+            ],
+            "default_model": discovery_llm.DEFAULT_DISCOVERY_MODEL,
+        }
+
+    @app.put("/api/settings/discovery-llm")
+    def save_discovery_llm(body: DiscoveryLlmRequest, user: CurrentUser) -> dict:
+        try:
+            return discovery_llm.save(
+                user["tenant_id"],
+                provider=body.provider,
+                base_url=body.base_url,
+                model=body.model,
+                api_key=body.api_key,
+                enabled=body.enabled,
+                updated_by=user["email"],
+            )
+        except discovery_llm.ByokError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @app.post("/api/settings/discovery-llm/test")
+    def test_discovery_llm(body: DiscoveryLlmTestRequest, user: CurrentUser) -> dict:
+        """Probe the endpoint. Returns ok/error; the error never carries the key."""
+        try:
+            return discovery_llm.test_connection(
+                user["tenant_id"],
+                provider=body.provider,
+                base_url=body.base_url,
+                model=body.model,
+                api_key=body.api_key,
+            )
+        except discovery_llm.ByokError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @app.patch("/api/settings/discovery-llm")
+    def toggle_discovery_llm(body: DiscoveryLlmEnabledRequest, user: CurrentUser) -> dict:
+        """Switch back to Annapurna's endpoint without discarding the config."""
+        return discovery_llm.set_enabled(user["tenant_id"], body.enabled)
+
+    @app.delete("/api/settings/discovery-llm")
+    def delete_discovery_llm(user: CurrentUser) -> dict:
+        """Delete the configuration and its stored key."""
+        return discovery_llm.remove(user["tenant_id"])
 
     @app.get("/api/dashboard/providers")
     def dashboard_providers(

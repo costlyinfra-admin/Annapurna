@@ -162,3 +162,73 @@ def test_feature_categories_endpoint_publishes_the_vocabulary(client):
     values = [c["value"] for c in body["categories"]]
     assert {"chat", "api", "ui", "docs", "auth"} <= set(values)
     assert {"value": "data", "label": "Data/ETL"} in body["categories"]
+
+
+# --- BYOK over the API: the key must not come back out ---------------------
+
+
+def test_discovery_llm_roundtrip_never_exposes_the_key(client):
+    assert client.get("/api/settings/discovery-llm").json() == {
+        "configured": False,
+        "enabled": False,
+        "has_key": False,
+    }
+
+    saved = client.put(
+        "/api/settings/discovery-llm",
+        json={
+            "provider": "groq",
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": "llama-3.3-70b-versatile",
+            "api_key": "gsk_super_secret_key_value",
+        },
+    )
+    assert saved.status_code == 200
+    body = saved.json()
+    assert body["configured"] is True and body["has_key"] is True
+    assert body["provider"] == "groq" and body["model"] == "llama-3.3-70b-versatile"
+
+    # The secret appears in no response, on save or on read.
+    assert "gsk_super_secret_key_value" not in saved.text
+    assert "gsk_super_secret_key_value" not in client.get("/api/settings/discovery-llm").text
+    assert "api_key" not in client.get("/api/settings/discovery-llm").json()
+
+
+def test_discovery_llm_can_be_disabled_and_removed(client):
+    client.put(
+        "/api/settings/discovery-llm",
+        json={"provider": "groq", "model": "llama-3.3-70b-versatile", "api_key": "gsk_x_secret"},
+    )
+    off = client.patch("/api/settings/discovery-llm", json={"enabled": False}).json()
+    assert off["configured"] is True and off["enabled"] is False
+
+    gone = client.delete("/api/settings/discovery-llm").json()
+    assert gone["configured"] is False and gone["has_key"] is False
+
+
+def test_discovery_llm_rejects_a_bad_configuration(client):
+    bad = client.put(
+        "/api/settings/discovery-llm",
+        json={"provider": "nope", "model": "m", "api_key": "k"},
+    )
+    assert bad.status_code == 400
+    assert "provider" in bad.json()["detail"].lower()
+
+
+def test_discovery_llm_providers_are_published_for_the_picker(client):
+    body = client.get("/api/settings/discovery-llm/providers").json()
+    values = [p["value"] for p in body["providers"]]
+    assert "groq" in values and "custom" in values
+    assert body["default_model"]  # the UI prefills this
+    groq = next(p for p in body["providers"] if p["value"] == "groq")
+    assert groq["base_url"].startswith("https://")
+
+
+def test_discovery_llm_requires_a_session(client):
+    client.post("/api/auth/logout")
+    for call in (
+        lambda: client.get("/api/settings/discovery-llm"),
+        lambda: client.put("/api/settings/discovery-llm", json={"provider": "groq", "model": "m"}),
+        lambda: client.delete("/api/settings/discovery-llm"),
+    ):
+        assert call().status_code == 401
