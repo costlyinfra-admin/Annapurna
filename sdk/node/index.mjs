@@ -6,13 +6,36 @@
  * side from Annapurna's pricing tables — the SDK never sees prices.
  *
  *   - Never throws into the caller (errors are swallowed).
+ *   - Recording enqueues and returns; a timer batches and posts, so the call
+ *     path never waits on the network.
+ *   - Bounded: a capped queue (10,000 events) whose oldest entries are dropped
+ *     and counted when it fills. Metering degrades, the application does not.
  *   - No third-party dependencies (Node builtins only: global fetch + crypto, Node >= 18).
  *   - A no-op when no ingest URL/token is configured, so the same code runs
  *     whether or not the hook is enabled.
  *
+ * Delivery: batched (up to `batchSize`) and flushed when a batch fills or after
+ * `flushIntervalMs`, whichever comes first. `await meter.flush()` forces a send —
+ * do that before `process.exit()`, which bypasses the automatic drain.
+ *
  * Config (constructor opts or env): ANNAPURNA_INGEST_URL, ANNAPURNA_INGEST_TOKEN.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+
+// Delivery defaults, matching the Python SDK. Batch size is well under the
+// server's 10,000-event cap; the interval bounds what a hard kill loses.
+const BATCH_SIZE = 50;
+const FLUSH_INTERVAL_MS = 5000;
+const QUEUE_MAX = 10000;
+// Retried on failures that might clear: a timeout, a refused connection, a 5xx —
+// or a Render free instance waking from sleep, which takes 30-60s and is the
+// case this exists for.
+const RETRY_BACKOFF_MS = [1000, 4000, 15000];
+const MAX_ATTEMPTS = 3;
+const SHUTDOWN_TIMEOUT_MS = 2000;
+
+// Live meters, so one exit hook can drain them all.
+const METERS = new Set();
 
 export class Meter {
   constructor(featureId = null, opts = {}) {
@@ -27,6 +50,20 @@ export class Meter {
     // so a hung or sleeping ingest endpoint leaves requests pending forever and
     // they pile up in the caller's process. Mirrors the Python SDK's 5s default.
     this.timeoutMs = opts.timeoutMs ?? 5000;
+
+    // --- delivery: a bounded queue drained by a timer ---------------------
+    this.batchSize = Math.max(1, opts.batchSize ?? BATCH_SIZE);
+    this.flushIntervalMs = Math.max(0, opts.flushIntervalMs ?? FLUSH_INTERVAL_MS);
+    this.queueMax = Math.max(1, opts.queueMax ?? QUEUE_MAX);
+    this.maxAttempts = Math.max(1, opts.maxAttempts ?? MAX_ATTEMPTS);
+    this.retryBackoffMs = opts.retryBackoffMs ?? RETRY_BACKOFF_MS;
+    /** Events discarded because the queue was full, or undeliverable after every
+     *  attempt. Metering degrades visibly rather than silently. */
+    this.dropped = 0;
+    this._queue = [];
+    this._timer = null;
+    this._draining = null;
+    METERS.add(this);
     // Optimize mode (opt spec §4): measure traffic SHAPE — salted-hash
     // fingerprints and counts, never prompt text — to find duplicate calls and
     // uncached repeated prefixes. Off by default; work is off the call path,
@@ -34,7 +71,11 @@ export class Meter {
     this.salt = opts.salt ?? null;
     this._saltPromise = null;
     this._optimizer = opts.optimize
-      ? new Optimizer({ prefixChars: opts.prefixChars, flushInterval: opts.flushInterval })
+      ? new Optimizer({
+          prefixChars: opts.prefixChars,
+          // Its own name: flushInterval now belongs to delivery.
+          flushInterval: opts.optimizeFlushInterval,
+        })
       : null;
   }
 
@@ -58,8 +99,12 @@ export class Meter {
       tokens_in: tokensIn | 0,
       tokens_out: tokensOut | 0,
       feature_id: featureId ?? this.featureId,
+      // Stamped HERE, not at send time: delivery is deferred, and the server
+      // derives the billing month from this field (falling back to arrival).
+      // Without it a call made at 23:59 on the last of the month could be posted
+      // seconds later and land in the wrong one.
+      occurred_at: occurredAt ?? nowIso(),
     };
-    if (occurredAt) event.occurred_at = occurredAt;
     if (latencyMs != null) event.latency_ms = latencyMs | 0;
     const merged = { ...this.metadata, ...(metadata ?? {}) };
     if (Object.keys(merged).length) event.metadata = merged;
@@ -92,23 +137,139 @@ export class Meter {
     });
   }
 
-  /** Fire-and-forget. Resolves true/false; never rejects. */
+  // -------------------------------------------------------------------------
+  // Delivery: enqueue on the call path, batch and post on a timer
+  // -------------------------------------------------------------------------
+
+  /** Queue events. Returns immediately and never rejects. */
   _send(events) {
-    if (!this.enabled || !events.length) return Promise.resolve(false);
-    return Promise.resolve()
-      .then(() =>
-        this.fetchImpl(this.ingestUrl, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ events }),
-          signal: this._deadline(),
-        }),
-      )
-      .then(() => true)
-      .catch(() => false);
+    if (!this.enabled || !events.length) return;
+    try {
+      for (const event of events) {
+        if (this._queue.length >= this.queueMax) {
+          // Full: shed the oldest so the newest always gets in, and so a stalled
+          // endpoint can never grow this without limit.
+          this._queue.shift();
+          this.dropped += 1;
+        }
+        this._queue.push(event);
+      }
+      if (this._queue.length >= this.batchSize) this._drain();
+      else this._arm();
+    } catch {
+      // Queueing is on the call path, so it is as fail-safe as sending.
+    }
+  }
+
+  /** Start the batching timer, if it isn't already running. */
+  _arm() {
+    if (this._timer || !this._queue.length) return;
+    this._timer = setTimeout(() => {
+      this._timer = null;
+      this._drain();
+    }, this.flushIntervalMs);
+    // Never hold the process open on metering's account: an armed timer would
+    // otherwise keep the event loop alive after the app is done.
+    this._timer.unref?.();
+  }
+
+  /** Drain the queue, one batch at a time. Serialised: one in flight per meter. */
+  _drain() {
+    if (this._draining) return this._draining;
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = null;
+    }
+    const run = async () => {
+      while (this._queue.length) {
+        await this._deliver(this._queue.splice(0, this.batchSize));
+      }
+    };
+    this._draining = run()
+      .catch(() => {})
+      .finally(() => {
+        this._draining = null;
+        this._arm(); // anything queued while we were sending
+      });
+    return this._draining;
+  }
+
+  /**
+   * Deliver one batch, retrying transient failures. Never rejects.
+   *
+   * The batch id is generated ONCE and reused for every attempt, which is what
+   * makes retrying safe: the server applies the first delivery and recognises
+   * the rest as replays. Without it a retry after an ambiguous timeout — server
+   * committed, response lost — would silently double a feature's cost.
+   */
+  async _deliver(events) {
+    const batchId = randomUUID().replace(/-/g, "");
+    for (let attempt = 0; attempt < this.maxAttempts; attempt += 1) {
+      const outcome = await this._postOnce(events, batchId);
+      if (outcome === "ok") return;
+      if (outcome === "drop") {
+        this.dropped += events.length;
+        return;
+      }
+      if (attempt + 1 >= this.maxAttempts) break;
+      // Jittered, so many processes recovering from one outage don't return in
+      // lockstep.
+      const base = this.retryBackoffMs[Math.min(attempt, this.retryBackoffMs.length - 1)];
+      await new Promise((r) => {
+        const t = setTimeout(r, base * (0.5 + Math.random()));
+        t.unref?.();
+      });
+    }
+    this.dropped += events.length;
+  }
+
+  /** One attempt -> "ok" | "retry" | "drop". Never rejects. */
+  async _postOnce(events, batchId) {
+    try {
+      const res = await this.fetchImpl(this.ingestUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ events, batch_id: batchId }),
+        signal: this._deadline(),
+      });
+      // fetch does not reject on 4xx/5xx, so a bad status has to be read off the
+      // response — previously any status at all counted as delivered.
+      const status = res && typeof res.status === "number" ? res.status : 200;
+      if (status < 400) return "ok";
+      // 4xx is our fault and fails identically forever: a bad token, a malformed
+      // event. Retrying only hammers the endpoint. 429 is the exception.
+      if (status < 500 && status !== 429) return "drop";
+      return "retry";
+    } catch {
+      return "retry"; // timeout, DNS, refused, TLS: the endpoint may come back
+    }
+  }
+
+  /**
+   * Send what is queued now. Resolves true if the queue drained, false on
+   * timeout. Never rejects.
+   *
+   * Worth awaiting before `process.exit()`, which bypasses the automatic drain.
+   */
+  async flush(timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+    if (!this.enabled) return true;
+    try {
+      const drained = this._drain();
+      if (!drained) return true;
+      let timer;
+      const expired = new Promise((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), timeoutMs);
+        timer.unref?.();
+      });
+      const result = await Promise.race([drained.then(() => "drained"), expired]);
+      clearTimeout(timer);
+      return result === "drained" && this._queue.length === 0;
+    } catch {
+      return false;
+    }
   }
 
   /** An abort signal that fires at the timeout, or undefined if unsupported. */
@@ -164,6 +325,7 @@ export class Meter {
         tokens_out: tokensOut | 0,
         feature_id: this.featureId,
         latency_ms: latencyMs | 0,
+        occurred_at: nowIso(), // see record(): the billing month comes from this
       };
       if (Object.keys(this.metadata).length) event.metadata = { ...this.metadata };
       const extra = [];
@@ -177,6 +339,31 @@ export class Meter {
     return this._optimizer ? this._ensureSalt().then(build) : build(null);
   }
 }
+
+/** UTC, ISO-8601 with a Z — the shape the ingest endpoint parses. */
+function nowIso() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * Give every live meter a brief chance to drain as the process winds down.
+ *
+ * `beforeExit` fires when the loop is about to empty and lets us schedule one
+ * more turn of async work, which is what a flush needs. It deliberately does NOT
+ * fire on `process.exit()` or an uncaught throw — await `meter.flush()` yourself
+ * before a hard exit. Timers here are unref'd, so this can never be the reason a
+ * process stays alive.
+ */
+let draining = false;
+process.on?.("beforeExit", async () => {
+  if (draining) return;
+  draining = true;
+  try {
+    await Promise.all([...METERS].map((m) => m.flush(SHUTDOWN_TIMEOUT_MS).catch(() => false)));
+  } finally {
+    draining = false;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // wrap() — auto-instrument a provider client (zero code at the call sites)

@@ -6,8 +6,15 @@ attributed **per feature**. No dependencies (Node ≥ 18). Cost is computed
 server-side from Annapurna's pricing tables — the SDK never sees prices, and it
 never sends prompt or response content, only token counts and a `featureId`.
 
-It is **fail-safe**: reporting is fire-and-forget and can never throw into your
-request path. With no ingest URL/token configured, every call is a no-op.
+It is **fail-safe**: recording appends to an in-memory queue and returns. A timer
+batches and posts; nothing on your call path blocks, throws, or touches the
+network. If Annapurna is down, misconfigured, or asleep, your application is
+unaffected. With no ingest URL/token configured, every call is a no-op.
+
+It is also **bounded**: a capped queue (10,000 events) whose oldest entries are
+dropped and counted on `meter.dropped` when it fills. Metering degrades; your
+application does not. The batching timer is `unref`'d, so it never holds your
+process open.
 
 ## Install
 
@@ -44,9 +51,29 @@ meter.recordOpenAI(resp);        // <- the whole hook
 Helpers: `recordAnthropic`, `recordOpenAI`, plus the generic
 `record({ provider, model, tokensIn, tokensOut, featureId })`.
 
-Every request is bounded by a timeout (5s by default, `{ timeoutMs }` to change
-it), so an unreachable or sleeping ingest endpoint can never leave requests
-pending in your process.
+### Delivery, `flush()` and retries
+
+Events are sent when a batch fills (50) or after `flushIntervalMs` (5000),
+whichever comes first. Each request is bounded by a timeout (5s, `{ timeoutMs }`),
+so a sleeping endpoint can never leave requests pending.
+
+A failed batch is retried (3 attempts, backing off ~1s / 4s / 15s with jitter) —
+enough to ride out a restart or an instance waking from sleep. A 4xx is *not*
+retried: a bad token fails the same way forever. 429 is, since it explicitly asks
+you to come back. Retrying is safe because every attempt carries the same
+`batch_id`, which the server applies once and then recognises — so a retry after
+an ambiguous timeout cannot double-charge a feature.
+
+The SDK drains automatically on `beforeExit`. That does **not** fire on
+`process.exit()` or an uncaught throw, so await a flush before a hard exit:
+
+```js
+await meter.flush();      // true if the queue drained, false on timeout
+await meter.flush(1000);  // never waits longer than you allow
+```
+
+Tunable: `batchSize`, `flushIntervalMs`, `queueMax`, `timeoutMs`, `maxAttempts`,
+`retryBackoffMs`.
 
 ### Optimize mode (opt-in)
 

@@ -15,14 +15,15 @@ function meterWithCapture(calls) {
 
 test("record builds an event and authenticates", async () => {
   const calls = [];
-  const ok = await meterWithCapture(calls).record({
+  const m = meterWithCapture(calls);
+  m.record({
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     tokensIn: 1200,
     tokensOut: 300,
     featureId: "f1",
   });
-  assert.equal(ok, true);
+  assert.equal(await m.flush(), true);
   assert.equal(calls[0].opts.headers.Authorization, "Bearer tok");
   const event = JSON.parse(calls[0].opts.body).events[0];
   assert.equal(event.tokens_in, 1200);
@@ -31,10 +32,12 @@ test("record builds an event and authenticates", async () => {
 
 test("recordAnthropic maps usage fields", async () => {
   const calls = [];
-  await meterWithCapture(calls).recordAnthropic(
+  const m = meterWithCapture(calls);
+  m.recordAnthropic(
     { model: "claude-haiku-4-5", usage: { input_tokens: 50, output_tokens: 7 } },
     { featureId: "f2" },
   );
+  await m.flush();
   const event = JSON.parse(calls[0].opts.body).events[0];
   assert.equal(event.provider, "anthropic");
   assert.equal(event.tokens_in, 50);
@@ -45,7 +48,9 @@ test("recordAnthropic maps usage fields", async () => {
 test("unconfigured meter is a no-op", async () => {
   const m = new Meter();
   assert.equal(m.enabled, false);
-  assert.equal(await m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 }), false);
+  m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 });
+  assert.equal(m._queue.length, 0); // nothing queued when unconfigured
+  assert.equal(await m.flush(), true);
 });
 
 // --- wrap() auto-instrumentation ------------------------------------------
@@ -84,7 +89,7 @@ test("wrap records the completion with latency and passes through", async () => 
   assert.equal(out, resp); // returns the real response, unchanged
   assert.equal(wrapped.apiKey, "sk-real"); // non-instrumented attribute passes through
 
-  await new Promise((r) => setTimeout(r, 10)); // recording fires after resolution
+  await meter.flush(); // delivery is batched; force it
   const event = JSON.parse(calls[0].opts.body).events[0];
   assert.equal(event.provider, "openai");
   assert.equal(event.feature_id, "f1");
@@ -107,7 +112,7 @@ test("wrap skips a streaming response (no usage)", async () => {
   const wrapped = wrap(new OpenAI(stream), { meter });
   const out = await wrapped.chat.completions.create({ stream: true });
   assert.equal(out, stream);
-  await new Promise((r) => setTimeout(r, 10));
+  await meter.flush();
   assert.equal(calls.length, 0); // nothing recorded
 });
 
@@ -136,7 +141,12 @@ function optMeter(calls, opts = {}) {
 }
 
 const allEvents = (calls) => calls.flatMap((c) => JSON.parse(c.opts.body).events);
-const settle = () => new Promise((r) => setTimeout(r, 20));
+// The optimizer resolves its salt asynchronously before the event is queued, so
+// give that a turn, then force the batch out.
+const settle = async (meter) => {
+  await new Promise((r) => setTimeout(r, 20));
+  await meter.flush();
+};
 
 test("optimize is off by default", async () => {
   const calls = [];
@@ -144,20 +154,21 @@ test("optimize is off by default", async () => {
   assert.equal(meter._optimizer, null);
   const wrapped = wrap(new OpenAI({ model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } }), { meter });
   await wrapped.chat.completions.create({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] });
-  await settle();
+  await settle(meter);
   assert.equal("signal" in JSON.parse(calls[0].opts.body).events[0], false);
 });
 
 test("optimize flags a duplicate call", async () => {
   const calls = [];
   const resp = { model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } };
-  const wrapped = wrap(new OpenAI(resp), { meter: optMeter(calls) });
+  const meter = optMeter(calls);
+  const wrapped = wrap(new OpenAI(resp), { meter });
   const req = { model: "gpt-4o", messages: [{ role: "user", content: "same" }] };
 
   await wrapped.chat.completions.create({ ...req });
-  await settle();
+  await settle(meter); // force the first out so the repeat is seen as a repeat
   await wrapped.chat.completions.create({ ...req });
-  await settle();
+  await settle(meter);
 
   const events = allEvents(calls);
   assert.equal("signal" in events[0], false); // first call is novel
@@ -169,13 +180,14 @@ test("optimize flags a duplicate call", async () => {
 test("optimize emits prefix summaries on flush", async () => {
   const calls = [];
   const resp = { model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } };
-  const wrapped = wrap(new OpenAI(resp), { meter: optMeter(calls, { flushInterval: 0 }) });
+  const meter = optMeter(calls, { optimizeFlushInterval: 0 });
+  const wrapped = wrap(new OpenAI(resp), { meter });
   await wrapped.chat.completions.create({
     model: "gpt-4o",
     tools: [{ type: "function", function: { name: "triage", description: "x".repeat(400) } }],
     messages: [{ role: "user", content: "alert 1" }],
   });
-  await settle();
+  await settle(meter);
 
   const prefixes = allEvents(calls).filter((e) => e.signal && e.signal.kind === "prefix");
   assert.equal(prefixes.length, 1);
@@ -187,12 +199,13 @@ test("optimize emits prefix summaries on flush", async () => {
 test("optimize emits nothing without a salt", async () => {
   const calls = [];
   const resp = { model: "gpt-4o", usage: { prompt_tokens: 5, completion_tokens: 1 } };
-  const wrapped = wrap(new OpenAI(resp), { meter: optMeter(calls, { flushInterval: 0, salt: "" }) });
+  const meter = optMeter(calls, { optimizeFlushInterval: 0, salt: "" });
+  const wrapped = wrap(new OpenAI(resp), { meter });
   const req = { model: "gpt-4o", messages: [{ role: "user", content: "x" }] };
   await wrapped.chat.completions.create({ ...req });
-  await settle();
+  await settle(meter);
   await wrapped.chat.completions.create({ ...req });
-  await settle();
+  await settle(meter);
   assert.ok(allEvents(calls).every((e) => !("signal" in e)));
 });
 
@@ -200,7 +213,9 @@ test("every request carries an abort deadline", async () => {
   // Without a signal a fetch has no timeout of its own, so a sleeping ingest
   // endpoint leaves requests pending in the caller's process indefinitely.
   const calls = [];
-  await meterWithCapture(calls).record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 });
+  const m = meterWithCapture(calls);
+  m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 });
+  await m.flush();
   assert.ok(calls[0].opts.signal, "no abort signal on the POST");
   assert.equal(typeof calls[0].opts.signal.aborted, "boolean");
 });
@@ -211,6 +226,7 @@ test("a hung endpoint aborts instead of pending forever", async () => {
     ingestUrl: "https://app.test/api/hook/events",
     token: "tok",
     timeoutMs: 40,
+    retryBackoffMs: [0], // the deadline is what's under test, not the backoff
     fetchImpl: (url, opts) =>
       new Promise((_resolve, reject) => {
         opts.signal.addEventListener("abort", () => reject(opts.signal.reason));
@@ -219,12 +235,161 @@ test("a hung endpoint aborts instead of pending forever", async () => {
   });
 
   const started = Date.now();
-  const ok = await m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 });
-  assert.equal(ok, false); // reported as a failed send, never thrown
-  assert.ok(Date.now() - started < 2000, "request did not abort");
+  m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1, tokensOut: 1 });
+  await m.flush(3000);
+  assert.ok(Date.now() - started < 3000, "request did not abort");
+  assert.equal(m.dropped, 1); // gave up after its attempts, and counted it
 });
 
 test("the timeout is configurable and defaults to 5s", () => {
   assert.equal(new Meter("f", { ingestUrl: "u", token: "t" }).timeoutMs, 5000);
   assert.equal(new Meter("f", { ingestUrl: "u", token: "t", timeoutMs: 250 }).timeoutMs, 250);
+});
+
+// --- delivery: queue, batching, bounds, retries ----------------------------
+
+test("events are batched into one request", async () => {
+  const calls = [];
+  const m = meterWithCapture(calls);
+  for (let i = 0; i < 20; i += 1) {
+    m.record({ provider: "openai", model: "gpt-4o", tokensIn: i, tokensOut: 1 });
+  }
+  await m.flush();
+
+  assert.equal(calls.length, 1, "20 events should not be 20 requests");
+  const events = JSON.parse(calls[0].opts.body).events;
+  assert.equal(events.length, 20);
+  assert.deepEqual(
+    events.map((e) => e.tokens_in),
+    [...Array(20).keys()],
+  ); // order preserved
+});
+
+test("a batch is capped at batchSize", async () => {
+  const calls = [];
+  const m = new Meter("f", {
+    ingestUrl: "https://app.test/api/hook/events",
+    token: "tok",
+    batchSize: 5,
+    fetchImpl: (url, opts) => {
+      calls.push({ url, opts });
+      return Promise.resolve({ status: 200 });
+    },
+  });
+  for (let i = 0; i < 12; i += 1) m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  await m.flush();
+
+  assert.deepEqual(
+    calls.map((c) => JSON.parse(c.opts.body).events.length),
+    [5, 5, 2],
+  );
+});
+
+test("recording does not wait on the network", async () => {
+  // The call path must not pay for a slow — or hung — ingest endpoint.
+  const m = new Meter("f", {
+    ingestUrl: "https://app.test/api/hook/events",
+    token: "tok",
+    fetchImpl: () => new Promise(() => {}), // never settles
+  });
+  const started = Date.now();
+  for (let i = 0; i < 1000; i += 1) m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  assert.ok(Date.now() - started < 300, "recording blocked behind the transport");
+});
+
+test("a full queue drops oldest and counts it", async () => {
+  const m = new Meter("f", {
+    ingestUrl: "https://app.test/api/hook/events",
+    token: "tok",
+    queueMax: 10,
+    fetchImpl: () => new Promise(() => {}), // stalled: nothing drains
+  });
+  for (let i = 0; i < 200; i += 1) m.record({ provider: "openai", model: "gpt-4o", tokensIn: i });
+
+  assert.ok(m.dropped > 0);
+  assert.ok(m._queue.length <= 10, "queue grew past its bound");
+});
+
+test("every batch carries an id and retries reuse it", async () => {
+  // The property that makes retrying safe: the server applies a batch id once
+  // and recognises replays, so a retry cannot double-charge a feature.
+  const seen = [];
+  const m = new Meter("f", {
+    ingestUrl: "https://app.test/api/hook/events",
+    token: "tok",
+    retryBackoffMs: [0],
+    fetchImpl: (url, opts) => {
+      seen.push(JSON.parse(opts.body).batch_id);
+      return seen.length < 3 ? Promise.reject(new Error("asleep")) : Promise.resolve({ status: 200 });
+    },
+  });
+  m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  await m.flush(5000);
+
+  assert.equal(seen.length, 3, "did not retry");
+  assert.equal(new Set(seen).size, 1, `retries invented new batch ids: ${new Set(seen).size}`);
+  assert.equal(m.dropped, 0);
+});
+
+test("a 5xx is retried, a 4xx is not", async () => {
+  const mk = (status) => {
+    const attempts = [];
+    const m = new Meter("f", {
+      ingestUrl: "https://app.test/api/hook/events",
+      token: "tok",
+      retryBackoffMs: [0],
+      fetchImpl: () => {
+        attempts.push(1);
+        return Promise.resolve({ status }); // fetch does NOT reject on 4xx/5xx
+      },
+    });
+    return { m, attempts };
+  };
+
+  const server = mk(503);
+  server.m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  await server.m.flush(5000);
+  assert.equal(server.attempts.length, 3, "a 5xx should be retried");
+
+  const client = mk(401); // a bad token fails identically forever
+  client.m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  await client.m.flush(5000);
+  assert.equal(client.attempts.length, 1, "a 4xx should not be retried");
+  assert.equal(client.m.dropped, 1);
+
+  const throttled = mk(429); // the one 4xx that invites coming back
+  throttled.m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  await throttled.m.flush(5000);
+  assert.equal(throttled.attempts.length, 3);
+});
+
+test("every event is timestamped when it happens, not when it is sent", async () => {
+  // The server bills by occurred_at and falls back to arrival time, so a
+  // deferred send could otherwise land a 23:59 call in the next month.
+  const calls = [];
+  const m = meterWithCapture(calls);
+  m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  const recorded = Date.now();
+  await new Promise((r) => setTimeout(r, 30));
+  await m.flush();
+
+  const stamp = JSON.parse(calls[0].opts.body).events[0].occurred_at;
+  assert.match(stamp, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  assert.ok(Math.abs(Date.parse(stamp) - recorded) < 5000);
+
+  // An explicit occurredAt still wins, so backfilling stays possible.
+  m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1, occurredAt: "2026-01-15T10:00:00Z" });
+  await m.flush();
+  const last = JSON.parse(calls[calls.length - 1].opts.body).events.at(-1);
+  assert.equal(last.occurred_at, "2026-01-15T10:00:00Z");
+});
+
+test("the batching timer never holds the process open", async () => {
+  // An armed setTimeout would keep the event loop alive after the app is done.
+  const m = meterWithCapture([]);
+  m.record({ provider: "openai", model: "gpt-4o", tokensIn: 1 });
+  assert.ok(m._timer, "no timer armed");
+  assert.equal(typeof m._timer.hasRef, "function");
+  assert.equal(m._timer.hasRef(), false, "the timer would keep the process alive");
+  await m.flush();
 });
