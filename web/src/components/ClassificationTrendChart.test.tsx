@@ -33,6 +33,22 @@ const DAILY = [
   },
 ];
 
+/** The hover targets: one invisible band per bar (or per point, in line mode). */
+const bands = () => document.querySelectorAll('.trend-line-svg rect[fill="transparent"]');
+const barValues = () =>
+  [...document.querySelectorAll(".trend-bar-value")].map((e) => e.textContent);
+const axisLabels = () =>
+  [...document.querySelectorAll(".trend-axis-label")].map((e) => e.textContent);
+
+/** Where the bars are and how wide, straight off the rendered rects. */
+function geometry() {
+  const rects = [...document.querySelectorAll(".trend-seg-fill")] as SVGRectElement[];
+  return {
+    width: Number(rects[0].getAttribute("width")),
+    xs: rects.map((r) => Number(r.getAttribute("x"))),
+  };
+}
+
 describe("ClassificationTrendChart", () => {
   it("labels daily bars by day number and shows the month once", () => {
     render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
@@ -56,7 +72,7 @@ describe("ClassificationTrendChart", () => {
     render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
     // Bar mode by default: classification legend + stacked segments present.
     expect(screen.getByLabelText("Classification legend")).toBeInTheDocument();
-    expect(document.querySelector(".trend-seg")).not.toBeNull();
+    expect(document.querySelector(".trend-seg-fill")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Line" }));
     // Line mode: the SVG line chart renders; the bar legend is gone.
@@ -104,8 +120,7 @@ describe("ClassificationTrendChart", () => {
     // Bar mode is the default — no card until the cursor lands on a bar.
     expect(document.querySelector(".trend-hover-card")).toBeNull();
 
-    const bars = document.querySelectorAll(".trend-bar-wrap");
-    fireEvent.mouseEnter(bars[2]);
+    fireEvent.mouseEnter(bands()[2]);
     const card = document.querySelector(".trend-hover-card")!;
     expect(card.textContent).toContain("Aug 3, 2026");
     expect(card.textContent).toContain("$209");
@@ -113,8 +128,8 @@ describe("ClassificationTrendChart", () => {
     expect(card.textContent).toContain("Dev / Test");
     expect(card.textContent).toContain("By workspace");
     expect(card.textContent).toContain("automations");
-    // The hovered bar is marked so the others can dim.
-    expect(bars[2].className).toContain("active");
+    // Every other bar dims, so the hovered one reads on its own.
+    expect(document.querySelectorAll(".trend-bar-group.dim")).toHaveLength(DAILY.length - 1);
   });
 
   it("thins bar labels when daily bars would collide", () => {
@@ -130,19 +145,15 @@ describe("ClassificationTrendChart", () => {
     }));
     render(<ClassificationTrendChart trend={many} granularity="day" />);
 
-    const labels = [...document.querySelectorAll(".trend-value")].map((e) => e.textContent);
-    expect(labels).toEqual(["$900"]); // the peak only
+    expect(barValues()).toEqual(["$900"]); // the peak only
     // Hovering another bar labels it too, without restoring the rest.
-    fireEvent.mouseEnter(document.querySelectorAll(".trend-bar-wrap")[0]);
-    expect([...document.querySelectorAll(".trend-value")].map((e) => e.textContent)).toEqual([
-      "$100",
-      "$900",
-    ]);
+    fireEvent.mouseEnter(bands()[0]);
+    expect(barValues()).toEqual(["$100", "$900"]);
   });
 
   it("labels every bar when there is room", () => {
     render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
-    expect(document.querySelectorAll(".trend-value")).toHaveLength(DAILY.length);
+    expect(barValues()).toHaveLength(DAILY.length);
   });
 
   it("draws a dollar y-axis with gridlines", () => {
@@ -150,7 +161,50 @@ describe("ClassificationTrendChart", () => {
     fireEvent.click(screen.getByRole("button", { name: "Line" }));
     // Dotted gridlines with whole-dollar axis labels, topped by a "nice" ceiling.
     expect(document.querySelectorAll(".trend-grid-line").length).toBe(5);
-    const labels = [...document.querySelectorAll(".trend-axis-label")].map((e) => e.textContent);
-    expect(labels).toEqual(["$0", "$63", "$125", "$188", "$250"]); // ceiling above $209
+    expect(axisLabels()).toEqual(["$0", "$63", "$125", "$188", "$250"]); // ceiling above $209
+  });
+
+  it("draws the same axis behind the bars", () => {
+    // Bar and line are two readings of one set of numbers; they should not
+    // disagree about the scale, or about where zero is.
+    render(<ClassificationTrendChart trend={DAILY} granularity="day" />);
+    expect(document.querySelectorAll(".trend-grid-line").length).toBe(5);
+    expect(axisLabels()).toEqual(["$0", "$63", "$125", "$188", "$250"]);
+
+    const barAxis = axisLabels();
+    fireEvent.click(screen.getByRole("button", { name: "Line" }));
+    expect(axisLabels()).toEqual(barAxis);
+  });
+
+  it("keeps bars the width of a full month, however little of it has happened", () => {
+    // The complaint this fixes: two days into September, two bars stretched
+    // across the whole card read as a complete month and are not one.
+    const day = (d: number) => ({
+      period: `2026-09-${String(d).padStart(2, "0")}`,
+      total: 100,
+      production: 100,
+      development: 0,
+      internal: 0,
+      unclassified: 0,
+    });
+
+    const twoDays = render(<ClassificationTrendChart trend={[day(1), day(2)]} granularity="day" />);
+    const early = geometry();
+    twoDays.unmount();
+
+    render(
+      <ClassificationTrendChart
+        trend={Array.from({ length: 30 }, (_, i) => day(i + 1))}
+        granularity="day"
+      />,
+    );
+    const full = geometry();
+
+    // Same width, same position: the second of the month sits where it will
+    // still sit on the thirtieth.
+    expect(early.width).toBe(full.width);
+    expect(early.xs).toEqual(full.xs.slice(0, 2));
+    // And the pair occupies its own slice of the plot, not the whole of it.
+    expect(early.xs[1]).toBeLessThan(200);
   });
 });

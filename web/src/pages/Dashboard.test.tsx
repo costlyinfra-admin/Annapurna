@@ -330,7 +330,7 @@ describe("Dashboard (Overview)", () => {
       expect(within(legend).getByText(label)).toBeInTheDocument(),
     );
     // Four stacked segments render for the single month (production/dev/internal/unclassified).
-    expect(document.querySelectorAll(".trend-seg").length).toBe(4);
+    expect(document.querySelectorAll(".trend-seg-fill").length).toBe(4);
     // The provider tab follows the Overview's selected period (default this month).
     await waitFor(() => expect(api.providerSpend).toHaveBeenCalledWith({ kind: "this_month" }));
     expect(screen.getByText("openai")).toBeInTheDocument();

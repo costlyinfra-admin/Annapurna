@@ -2590,29 +2590,6 @@ a.exec-value:hover {
   transition: opacity 0.12s ease-out;
 }
 
-/* Hovering one bar dims the rest, mirroring the line view's highlight. */
-.trend-line-wrap:hover .trend-bar {
-  opacity: 0.45;
-}
-
-.trend-bar-wrap.active .trend-bar,
-.trend-bar-wrap:hover .trend-bar {
-  opacity: 1;
-}
-
-/* Stacked classification bar: segments fill the bar bottom-to-top. */
-.trend-bar-stacked {
-  background: none;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.trend-seg {
-  width: 100%;
-  flex-shrink: 0;
-}
-
 .trend-seg-production {
   background: var(--chart-1);
 }
@@ -2627,6 +2604,40 @@ a.exec-value:hover {
 
 .trend-seg-unclassified {
   background: var(--chart-none);
+}
+
+/* The classification bars are SVG, so the same four colours are needed as fills.
+   `background` still does the work for the legend swatches, which are elements. */
+.trend-seg-fill.trend-seg-production {
+  fill: var(--chart-1);
+}
+
+.trend-seg-fill.trend-seg-development {
+  fill: var(--chart-3);
+}
+
+.trend-seg-fill.trend-seg-internal {
+  fill: var(--chart-2);
+}
+
+.trend-seg-fill.trend-seg-unclassified {
+  fill: var(--chart-none);
+}
+
+/* Hovering one bar dims the rest, the same highlight the line view uses. */
+.trend-bar-group {
+  transition: opacity 0.12s ease-out;
+}
+
+.trend-bar-group.dim {
+  opacity: 0.4;
+}
+
+.trend-bar-value {
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Compact legend directly under the chart. */
