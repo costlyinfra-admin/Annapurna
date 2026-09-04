@@ -206,8 +206,8 @@ describe("FeatureDetail", () => {
     expect(screen.getByText("$181")).toBeInTheDocument(); // total build spend
     expect(screen.getByText("alice")).toBeInTheDocument();
 
-    // A single review-period filter at the top scopes the page (default this month).
-    expect(screen.getByRole("combobox", { name: "Review period" })).toBeInTheDocument();
+    // A single review-period control at the top scopes the page (default this month).
+    expect(screen.getByRole("button", { name: /2026/ })).toBeInTheDocument();
     // Inference cost section: connector indicator + in-period total (no /mo window buttons).
     expect(screen.getByText("Inference cost")).toBeInTheDocument();
     expect(screen.getByText(/connector-derived/)).toBeInTheDocument();
@@ -359,9 +359,8 @@ describe("FeatureDetail", () => {
     expect(api.featureInference).toHaveBeenCalledWith("f1", { kind: "this_month" });
     expect(api.featureOpportunities).toHaveBeenCalledWith("f1", { kind: "this_month" });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Review period" }), {
-      target: { value: "last_3_months" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /Sep 2026|2026/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Last 3 months" }));
     await waitFor(() =>
       expect(api.featureInference).toHaveBeenCalledWith("f1", { kind: "last_3_months" }),
     );

@@ -370,9 +370,8 @@ describe("Dashboard (Overview)", () => {
     await screen.findByText("Key insights");
     expect(api.dashboard).toHaveBeenCalledWith({ kind: "this_month" });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Review period" }), {
-      target: { value: "last_3_months" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /Sep 2026|2026/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Last 3 months" }));
     await waitFor(() => expect(api.dashboard).toHaveBeenCalledWith({ kind: "last_3_months" }));
   });
 

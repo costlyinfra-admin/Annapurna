@@ -38,16 +38,6 @@ const DELTA_LABEL: Record<RangeKind, string> = {
   custom: "vs prior period",
 };
 
-/** "2026-05-01" + "2026-05-01" -> "May 2026"; spans -> "Mar – May 2026". */
-function fmtRange(startIso: string, endIso: string): string {
-  const fmt = (iso: string) =>
-    new Date(`${iso.slice(0, 7)}-01T00:00:00`).toLocaleString("en-US", {
-      month: "short",
-      year: "numeric",
-    });
-  return startIso === endIso ? fmt(startIso) : `${fmt(startIso)} – ${fmt(endIso)}`;
-}
-
 /** "Aug 22, 4:07 PM" — short, local, no seconds. */
 function shortStamp(d: Date): string {
   return d.toLocaleString("en-US", {
@@ -215,8 +205,13 @@ export function Dashboard() {
       {/* Review-period selector, right-justified beneath the cost/token tiles.
           Always rendered so it doesn't flicker away while a range change reloads. */}
       <div className="period-controls period-controls-below">
-        {data && <span className="muted period-label">{fmtRange(data.start, data.end)}</span>}
-        <PeriodSelector value={range} onChange={setRange} />
+        <PeriodSelector
+          value={range}
+          onChange={setRange}
+          // What is actually on screen, which is the server's answer and not
+          // always the selection's: a range can run past the months with data.
+          resolved={data ? { start: data.start.slice(0, 7), end: data.end.slice(0, 7) } : undefined}
+        />
       </div>
 
       {/* Tabs switch only the detailed breakdown below; the summary, insights,

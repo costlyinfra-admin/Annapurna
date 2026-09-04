@@ -1795,23 +1795,244 @@ a.pr-ref:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* The review-period control: a button carrying the period in view, and the
+   panel it opens. */
 .period-selector {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  position: relative;
 }
 
-.period-selector select,
-.period-custom input {
-  font-size: 0.88rem;
-  padding: 0.4rem 0.6rem;
-}
-
-.period-custom {
+.period-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.period-trigger:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.period-trigger svg {
+  color: var(--muted);
+}
+
+/* Anchored to the trigger's right edge so it opens inward, never off-screen —
+   the control lives at the right of the page. */
+.period-pop {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  /* Above the assistant launcher (60), which sits in the same bottom-right
+     corner this panel opens into. */
+  z-index: 70;
+  width: 30rem;
+  max-width: calc(100vw - 2rem);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  text-align: left;
+}
+
+.period-pop-body {
+  display: grid;
+  grid-template-columns: 1fr auto;
+}
+
+.period-cal {
+  padding: 0.9rem 1rem;
+  border-right: 1px solid var(--line);
+}
+
+.period-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.7rem;
+}
+
+.period-cal-year {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.period-cal-nav {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.period-cal-nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.period-cal-nav button:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+
+.period-cal-nav button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Twelve months, four to a row — a year at a glance, the way the day grid in a
+   date picker shows a month. */
+.period-months {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.3rem;
+}
+
+.period-month {
+  padding: 0.5rem 0.2rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.period-month:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.period-month:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* The ends of the span carry the weight; the months between are only tinted,
+   so the shape of the selection reads at a glance. */
+.period-month.edge {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.period-month.inside {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.period-presets {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0.9rem 0.8rem;
+  min-width: 11rem;
+}
+
+.period-presets button {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+}
+
+.period-presets button:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.period-presets button.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-weight: 650;
+}
+
+.period-span {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.period-span label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.period-span input {
+  font-size: 0.85rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.period-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.period-foot button:not(.link) {
+  padding: 0.4rem 1.1rem;
+  font-size: 0.88rem;
+}
+
+/* Narrow screens: the calendar and the named ranges stack rather than shrink. */
+@media (max-width: 620px) {
+  .period-pop {
+    width: min(22rem, calc(100vw - 2rem));
+  }
+
+  .period-pop-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .period-cal {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .period-presets {
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .period-presets li {
+    flex: 1 1 8rem;
+  }
 }
 
 /* ---- Executive summary (one compact card, 4 segments) ---- */

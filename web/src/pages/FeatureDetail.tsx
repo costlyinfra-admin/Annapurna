@@ -95,7 +95,13 @@ export function FeatureDetail() {
           Overview's presets and preserved in the URL. */}
       <div className="period-controls detail-period">
         <span className="muted period-label">Showing costs for</span>
-        <PeriodSelector value={range} onChange={setRange} />
+        <PeriodSelector
+          value={range}
+          onChange={setRange}
+          resolved={
+            detail ? { start: detail.start.slice(0, 7), end: detail.end.slice(0, 7) } : undefined
+          }
+        />
       </div>
 
       {error && (
