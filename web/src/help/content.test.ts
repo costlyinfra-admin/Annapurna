@@ -17,6 +17,8 @@ const ROUTES = new Set([
   "/alerts",
   "/settings",
   "/help",
+  // Opt-in module: the route always exists, and refuses unless it is enabled.
+  "/reconciliation",
 ]);
 
 const LINKS = /\[[^\]]+\]\(([^)]+)\)/g;
@@ -99,3 +101,57 @@ describe("knowledge base search", () => {
     expect(search("kubernetes helm chart")).toEqual([]);
   });
 });
+
+describe("invoice reconciliation topics", () => {
+  const category = CATEGORIES.find((c) => c.slug === "reconciliation")!;
+
+  it("is documented as its own section", () => {
+    expect(category).toBeDefined();
+    expect(category.topics.length).toBeGreaterThan(4);
+  });
+
+  it("tells the two reconciliations apart, in both directions", () => {
+    // "Reconciliation" names two different things in this product. A reader
+    // who lands on either one must be pointed at the other.
+    const internal = findTopic("concepts", "reconciliation")!;
+    const invoice = findTopic("reconciliation", "what-it-is")!;
+    expect(text(internal.topic)).toContain("/help/reconciliation/what-it-is");
+    expect(text(invoice.topic)).toContain("/help/concepts/reconciliation");
+  });
+
+  it("states the promises the module actually makes", () => {
+    const body = category.topics.map(text).join(" ").toLowerCase();
+    expect(body).toContain("never changes your cost data");
+    expect(body).toContain("never converts currencies");
+    expect(body).toContain("opt-in");
+    // The tolerance defaults, which a reader will act on.
+    expect(body).toContain("$1.00");
+    expect(body).toContain("0.5%");
+  });
+
+  it("documents every status the module can end in", () => {
+    const body = category.topics.map(text).join(" ");
+    for (const status of [
+      "Matched",
+      "Within tolerance",
+      "Discrepancy",
+      "Incomplete data",
+      "Failed",
+    ]) {
+      expect(body).toContain(status);
+    }
+  });
+
+  it("documents every confidence level, since the distinction is the point", () => {
+    const body = category.topics.map(text).join(" ");
+    for (const level of ["Confirmed", "Possible", "Unknown"]) {
+      expect(body).toContain(level);
+    }
+  });
+});
+
+/** A topic's prose, with the inline syntax left in — these assertions are
+ *  about links as much as words. */
+function text(topic: { blocks: { kind: string }[] }): string {
+  return JSON.stringify(topic.blocks);
+}

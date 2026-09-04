@@ -183,6 +183,9 @@ export const CATEGORIES: Category[] = [
           note(
             "This is why losing a few metered events never corrupts your bill — it only reduces how much of the bill is attributed. Under-counting is caught by design.",
           ),
+          p(
+            "This reconciliation is internal and automatic. Checking Annapurna against the invoice your provider actually sent is a separate, opt-in feature — see [Invoice reconciliation](/help/reconciliation/what-it-is).",
+          ),
         ],
       },
       {
@@ -602,6 +605,192 @@ await client.chat.completions.create({ ... });   // metered automatically`),
           ),
           p(
             "This is the part most cost tools skip. An estimate that is never checked against the invoice is a guess with a dollar sign on it.",
+          ),
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: "reconciliation",
+    title: "Invoice reconciliation",
+    blurb: "Check Annapurna's numbers against the provider's own bill, and see what differs.",
+    topics: [
+      {
+        slug: "what-it-is",
+        title: "What invoice reconciliation does",
+        summary: "Compares a provider billing export against tracked spend, and explains the gap.",
+        blocks: [
+          p(
+            "Import the CSV your provider bills you with, and Annapurna lines it up against the spend it already tracked for the same period — then tells you what accounts for the difference, line by line, with the evidence for each explanation.",
+          ),
+          p(
+            "It answers the question a finance team asks first: *does this tool agree with my actual invoice, and if not, why not?*",
+          ),
+          note(
+            "This is a different thing from [Reconciliation: why the bill is always right](/help/concepts/reconciliation), which is internal and automatic — that one keeps SDK metering honest against the provider's cost API. This one compares Annapurna against the **invoice you were sent**, and only happens when you import one.",
+          ),
+          p(
+            "It is **opt-in and additive**. Until you turn it on there is no menu item, and turning it on changes nothing about your existing cost data, dashboards, Optimize or Alerts.",
+          ),
+        ],
+      },
+      {
+        slug: "turning-it-on",
+        title: "Turning it on",
+        summary: "Off by default, per organization, and safe to turn off again.",
+        blocks: [
+          steps(
+            "Open [Reconciliation](/reconciliation) — the page is reachable whether or not the feature is on.",
+            "Press **Enable reconciliation**. That adds a Reconciliation entry under Analyze in the sidebar.",
+            "Import a statement, and reconcile it.",
+          ),
+          p(
+            "Turning it off again hides the section and stops all of its work. It deletes nothing: your imports, runs and explanations are all still there if you turn it back on.",
+          ),
+          note(
+            "An operator can disable the module for a whole installation with `ANNAPURNA_RECONCILIATION=off`, regardless of what any organization has chosen. That is a kill switch, not a data change.",
+          ),
+        ],
+      },
+      {
+        slug: "importing",
+        title: "Importing a statement",
+        summary: "Map your columns, see what would be imported, then commit.",
+        blocks: [
+          p(
+            "Providers do not agree on a billing CSV format, so Annapurna does not pretend to know yours. It reads your header row, guesses which column holds each field, and shows you the guess to correct before anything is stored.",
+          ),
+          p("Only two fields are required:"),
+          list(
+            "**a date** — when the usage happened",
+            "**a usage amount** — the charge before tax, credits and fees",
+          ),
+          p(
+            "Everything else — model, workspace, API key, category, tax, credits, fees, invoice and line ids — improves the match if your export has it, and is simply absent if it does not.",
+          ),
+          p(
+            "Before you commit, the preview shows the period covered, the currency, the financial totals, how many rows are readable, and every row that is not — with the reason. Rows that cannot be read are left out of the comparison; the rest still import.",
+          ),
+          note(
+            "Only the columns you map are stored. A billing export that also carries a contact name or an account manager's email keeps those to itself.",
+          ),
+        ],
+      },
+      {
+        slug: "how-the-comparison-works",
+        title: "How the comparison works",
+        summary: "Usage against usage, on the most specific dimensions both sides share.",
+        blocks: [
+          p(
+            "The headline number is the **provider's usage subtotal** against **Annapurna's tracked usage cost**. Tax, credits, discounts and fees are read from the statement and reported separately — never added to either side.",
+          ),
+          p(
+            "That distinction matters more than it sounds. Comparing a tax-inclusive invoice total against usage cost would report a discrepancy every month there is any tax at all, and call it missing usage. Annapurna does not do that.",
+          ),
+          p(
+            "Each statement line is matched against tracked spend using the most specific dimensions both sides carry, in this order:",
+          ),
+          table(
+            ["Strategy", "Matches on"],
+            [
+              ["Line item id", "The provider's own id for the line, where the export has one"],
+              ["Account + key + date + model", "Workspace, API key, service date and model"],
+              ["Account + date + model", "Workspace, service date and model"],
+              ["Aggregate", "Workspace and billing period only"],
+            ],
+          ),
+          p(
+            "Every comparison records which strategy produced it, and an aggregate comparison says so. A tracked row is never counted against two statement lines, and totals are never adjusted to agree.",
+          ),
+          note(
+            "Only connector spend is compared. SDK-metered spend is a second observation of the same calls, and self-hosted spend is not on a provider invoice at all — counting either would double the tracked side against your bill.",
+          ),
+        ],
+      },
+      {
+        slug: "statuses-and-tolerance",
+        title: "Statuses and tolerance",
+        summary: "Two tolerances, both applied, and both stored with the run that used them.",
+        blocks: [
+          p("Every reconciliation ends in one of these:"),
+          table(
+            ["Status", "Means"],
+            [
+              ["**Matched**", "The two usage figures agree exactly"],
+              ["**Within tolerance**", "They differ by less than you have said you care about"],
+              ["**Discrepancy**", "A material difference worth looking at"],
+              [
+                "**Incomplete data**",
+                "Something is missing or not comparable — a currency mismatch, or no tracked data for the period",
+              ],
+              ["**Failed**", "The calculation could not run; the reason is on the run"],
+            ],
+          ),
+          p(
+            "Two tolerances apply, and a difference inside **either** one is forgiven: an absolute amount (default $1.00) and a percentage (default 0.5%). The absolute bound covers rounding on a small bill; the percentage covers proportional drift on a large one.",
+          ),
+          note(
+            "The tolerances in force are copied onto every run. Changing them later never rewrites what a past run was judged against.",
+          ),
+        ],
+      },
+      {
+        slug: "reading-a-discrepancy",
+        title: "Reading a discrepancy",
+        summary: "Every explanation says how sure it is, and shows what it is based on.",
+        blocks: [
+          p(
+            "A difference is classified when the data supports a classification: usage the provider billed that Annapurna has no record of, usage Annapurna tracked that the statement never mentions, a price difference, a line dated outside the period, a workspace that is not connected, a duplicated statement row, an unrecognised model, or simply an unexplained difference.",
+          ),
+          p("Each explanation carries a confidence, and the distinction is real:"),
+          table(
+            ["Confidence", "Means"],
+            [
+              [
+                "**Confirmed**",
+                "It follows directly from the data — a line dated outside the period, or a repeated line id",
+              ],
+              ["**Possible**", "It is the most likely reading of the evidence, not a fact"],
+              ["**Unknown**", "The data does not say"],
+            ],
+          ),
+          p(
+            "The evidence behind each explanation is shown with it, so you can disagree. Annapurna will not tell you a cause is confirmed because it is plausible.",
+          ),
+        ],
+      },
+      {
+        slug: "recalculating-and-audit",
+        title: "Recalculating, history and export",
+        summary: "Runs are immutable; a recalculation is a new one beside the old.",
+        blocks: [
+          p(
+            "Recalculate after a corrected export, after ingestion catches up, or after changing your tolerances. It writes a **new** run and leaves the previous one exactly as it was, so you can always see what you knew and when.",
+          ),
+          list(
+            "**Import history** shows every file, who imported it, when, and how many runs came from it.",
+            "**Removing an import** is recoverable — it stops being used for new calculations, and its rows and past runs stay readable.",
+            "**Export report** downloads the whole comparison as CSV: the totals, each financial category, every match with its strategy, classification, confidence and evidence, and the tolerances used.",
+          ),
+          note(
+            "Every material action — import, replace, remove, reconcile, export — is recorded with who did it. The audit trail records what happened, never the contents of the file.",
+          ),
+        ],
+      },
+      {
+        slug: "what-it-never-does",
+        title: "What it never does",
+        summary: "It reports differences. It does not resolve them for you.",
+        blocks: [
+          list(
+            "**It never changes your cost data.** A statement is evidence, not a correction. No tracked row is updated, reclassified or deleted, and no total anywhere else in Annapurna moves because you imported a bill.",
+            "**It never converts currencies.** A statement in one currency and tracked data in another is reported as incomplete data, with both figures intact.",
+            "**It never manufactures a match.** If a line cannot be matched, it is shown as unmatched rather than absorbed into an aggregate that happens to balance.",
+            "**It never treats tax, credits or fees as usage.** They are on your invoice and they are reported, but they are not inference cost.",
+          ),
+          p(
+            "If reconciliation is switched off, or fails, nothing else changes: ingestion, the [Overview](/), [Optimize](/optimize) and [Alerts](/alerts) do not know it exists.",
           ),
         ],
       },
