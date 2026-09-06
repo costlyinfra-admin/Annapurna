@@ -24,7 +24,7 @@ from decimal import Decimal
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from . import notify
+from . import budgets, notify
 from .db import admin_dsn, app_dsn, connect, tenant_tx
 from .providers import month_start
 
@@ -141,7 +141,9 @@ def _metric_value(conn, rule: dict, month: dt.date) -> Optional[Decimal]:
     return None
 
 
-def _observed_and_breach(conn, rule: dict, month: dt.date) -> tuple[Optional[Decimal], bool]:
+def _observed_and_breach(
+    conn, rule: dict, month: dt.date, *, tenant_id: str
+) -> tuple[Optional[Decimal], bool]:
     """Return (observed_lhs, breached) or (None, False) when insufficient data.
 
     observed_lhs is the number the user compares against the threshold: the metric
@@ -161,10 +163,17 @@ def _observed_and_breach(conn, rule: dict, month: dt.date) -> tuple[Optional[Dec
         pct = (value - prev) / prev * Decimal("100")
         return pct, pct > threshold
     if cond == "budget_pct":
-        budget = rule.get("budget_amount")
-        if not budget or Decimal(str(budget)) <= 0:
+        # The denominator is the organization's persisted budget, prorated to
+        # this month — which is what makes an annual budget and an effective date
+        # work here for free. No budget means no denominator: insufficient data,
+        # never a default or a demo figure.
+        configured = budgets.get_budget(tenant_id)
+        if configured is None:
             return None, False
-        pct = value / Decimal(str(budget)) * Decimal("100")
+        applicable = Decimal(str(budgets.prorate(configured, month, month)["amount"]))
+        if applicable <= 0:
+            return None, False
+        pct = value / applicable * Decimal("100")
         return pct, pct > threshold
     return None, False
 
@@ -218,7 +227,7 @@ def evaluate_rule(tenant_id: str, alert_id: str, *, now: Optional[dt.datetime] =
         if rule is None or not rule["enabled"]:
             return {"status": "skipped"}
 
-        observed, breached = _observed_and_breach(conn, rule, month)
+        observed, breached = _observed_and_breach(conn, rule, month, tenant_id=tenant_id)
         next_eval = now + _WINDOW_DELTA[rule["window"]]
 
         if observed is None:

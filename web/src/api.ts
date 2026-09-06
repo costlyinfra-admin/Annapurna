@@ -24,6 +24,72 @@ export interface OrgSettings {
   data_retention: "30d" | "90d" | "1y" | "indefinite";
 }
 
+/** The organization's AI budget. Null everywhere until someone sets one — there
+ *  is no default budget, and none is invented on read. */
+export interface Budget {
+  amount: number;
+  cadence: "monthly" | "annual";
+  currency: string;
+  /** ISO date. Days before it are not budgeted. */
+  effective_from: string;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface BudgetInput {
+  amount: number;
+  cadence: "monthly" | "annual";
+  effective_from: string;
+  currency?: string;
+}
+
+/** How a budget was prorated onto the window being shown, so the UI can explain
+ *  a figure that is rarely the round number the customer typed in. */
+export interface BudgetProration {
+  amount: number;
+  method: "monthly" | "annual";
+  covered_days: number;
+  window_days: number;
+  covered_start: string | null;
+  covered_end: string | null;
+  fully_covered: boolean;
+}
+
+/**
+ * Where the reporting window lands against the budget. Computed entirely on the
+ * server: read `status` first.
+ *
+ *   `closed`       the window is over. `forecast` is the final spend.
+ *   `open`         the window includes the current month and could be projected.
+ *   `insufficient` open, but with no observed daily spend to project from.
+ */
+export interface BudgetForecast {
+  status: "open" | "closed" | "insufficient";
+  /** The date the server treated as today, in the org's timezone. */
+  as_of: string;
+  /** True only for a demo tenant with a pinned as-of date. */
+  as_of_is_fixed: boolean;
+  window_start: string;
+  window_end: string;
+  actual: number;
+  actual_build: number;
+  actual_inference: number;
+  /** Null when the organization has no budget. */
+  budget: number | null;
+  budget_detail: BudgetProration | null;
+  budget_cadence: "monthly" | "annual" | null;
+  currency: string | null;
+  /** Null when there is nothing to project from. */
+  forecast: number | null;
+  forecast_optimized: number | null;
+  identified_savings: number | null;
+  variance: number | null;
+  variance_pct: number | null;
+  method: "closed" | "recent_weighted" | "month_to_date_average" | "none";
+  confidence: "final" | "high" | "medium" | "low" | "none";
+  observed_days: number;
+}
+
 /** BYOK: the tenant's own LLM for feature discovery. The key is write-only —
  *  no field here ever carries it back. */
 export interface DiscoveryLlm {
@@ -231,7 +297,13 @@ export interface AlertMeta {
   channels: string[];
   valid_conditions: Record<string, string[]>;
   valid_scopes: Record<string, string[]>;
-  templates: { id: string; label: string; rule: Partial<AlertRule> }[];
+  templates: { id: string; label: string; requires_budget?: boolean; rule: Partial<AlertRule> }[];
+  /** Whether the organization has a budget for budget_pct rules to measure
+   *  against. False means such a rule cannot be saved, and the form says so. */
+  has_budget: boolean;
+  budget_required_message: string;
+  /** Conditions that need a budget — the server's list, not the form's guess. */
+  budget_conditions: string[];
 }
 
 export type AlertInput = {
@@ -948,6 +1020,18 @@ export const api = {
     }),
 
   removeDiscoveryLlm: () => request<DiscoveryLlm>("/settings/discovery-llm", { method: "DELETE" }),
+
+  getBudget: () => request<{ budget: Budget | null }>("/budget"),
+
+  setBudget: (body: BudgetInput) =>
+    request<{ budget: Budget }>("/budget", { method: "PUT", body: JSON.stringify(body) }),
+
+  removeBudget: () => request<{ budget: null }>("/budget", { method: "DELETE" }),
+
+  // Takes the same window the Overview is showing, so the card and the chart
+  // beside it can never disagree about which months are in view.
+  budgetForecast: (range?: ReviewRange) =>
+    request<BudgetForecast>(`/budget/forecast${rangeQuery(range)}`),
 
   getSettings: () => request<OrgSettings>("/settings"),
 

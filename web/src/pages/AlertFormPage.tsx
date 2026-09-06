@@ -127,6 +127,12 @@ export function AlertFormPage() {
   }
 
   async function save() {
+    if (needsBudget && !hasBudget) {
+      // The server refuses this too; stopping here keeps the message beside the
+      // control that caused it rather than at the top of the page.
+      setError(meta?.budget_required_message ?? "Configure a budget before saving this alert.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -145,6 +151,12 @@ export function AlertFormPage() {
 
   const selected = (ch: string) => form.channels.some((c) => c.channel === ch);
   const isPct = form.condition_type !== "exceeds";
+  // Whether this rule needs a budget, and whether the organization has one. Both
+  // come from the server: the form does not decide which conditions are
+  // budget-backed, and it never falls back to a figure of its own.
+  const needsBudget = (meta?.budget_conditions ?? ["budget_pct"]).includes(form.condition_type);
+  const hasBudget = meta?.has_budget ?? true;
+  const blockedOnBudget = needsBudget && !hasBudget;
 
   return (
     <div className="content alert-form-page">
@@ -172,8 +184,17 @@ export function AlertFormPage() {
                 key={t.id}
                 className="secondary template-btn"
                 onClick={() => applyTemplate(t.id)}
+                disabled={t.requires_budget && !hasBudget}
+                title={
+                  t.requires_budget && !hasBudget
+                    ? "Needs an organization budget — set one in Settings → Budgets."
+                    : undefined
+                }
               >
                 {t.label}
+                {t.requires_budget && !hasBudget && (
+                  <span className="template-note"> · needs a budget</span>
+                )}
               </button>
             ))}
           </div>
@@ -280,18 +301,15 @@ export function AlertFormPage() {
             onChange={(e) => patch({ threshold: Number(e.target.value) })}
           />
         </div>
-        {form.condition_type === "budget_pct" && (
-          <div className="settings-field">
-            <label htmlFor="a-budget">Monthly budget ($)</label>
-            <input
-              id="a-budget"
-              type="number"
-              min="0"
-              step="any"
-              value={form.budget_amount ?? ""}
-              onChange={(e) => patch({ budget_amount: Number(e.target.value) })}
-            />
-          </div>
+        {/* The denominator is the organization's stored budget, so there is no
+            budget field here any more — only a block when there is none to
+            measure against. */}
+        {needsBudget && !hasBudget && (
+          <p className="error alert-needs-budget" role="alert">
+            {meta?.budget_required_message ??
+              "This condition measures spend against your organization's AI budget, and no budget is configured."}{" "}
+            <Link to="/settings#budgets">Set a budget →</Link>
+          </p>
         )}
 
         <div className="settings-field">
@@ -393,7 +411,9 @@ export function AlertFormPage() {
         <div className="settings-actions">
           <button
             onClick={save}
-            disabled={saving || !form.name.trim() || form.channels.length === 0}
+            disabled={
+              saving || !form.name.trim() || form.channels.length === 0 || blockedOnBudget
+            }
           >
             {saving ? "Saving…" : editing ? "Save changes" : "Create alert"}
           </button>

@@ -10,6 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   api,
   ApiError,
+  type BudgetForecast,
   type Dashboard as DashboardData,
   type RangeKind,
   type ReviewRange,
@@ -79,6 +80,10 @@ export function Dashboard() {
   // Loaded by its own request; see the effect below.
   const [savings, setSavings] = useState<SavingsState | null>(null);
   const [savingsFailed, setSavingsFailed] = useState(false);
+  // Also its own request: the forecast reads the Optimize figure server-side,
+  // so it inherits that subsystem's latency and must not gate the Overview.
+  const [forecast, setForecast] = useState<BudgetForecast | null>(null);
+  const [forecastFailed, setForecastFailed] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -160,6 +165,22 @@ export function Dashboard() {
       live = false;
     };
   }, [data?.end]);
+
+  // The budget forecast is computed entirely on the server — the stored budget,
+  // the observed daily spend, the org's timezone — and asked for on the same
+  // window the page is showing.
+  useEffect(() => {
+    let live = true;
+    setForecast(null);
+    setForecastFailed(false);
+    api
+      .budgetForecast(range)
+      .then((f) => live && setForecast(f))
+      .catch(() => live && setForecastFailed(true));
+    return () => {
+      live = false;
+    };
+  }, [range, refreshKey]);
 
   // Filtering is on the name alone: it is what someone types a search box for,
   // and matching on numbers would make a stray digit hide rows without saying so.
@@ -254,7 +275,8 @@ export function Dashboard() {
             <SpendTrend trend={data.trend} />
             <BudgetForecastPanel
               trend={data.trend}
-              potentialMonthly={savings?.potentialMonthly ?? null}
+              forecast={forecast}
+              failed={forecastFailed}
             />
           </div>
           <div className="overview-side">

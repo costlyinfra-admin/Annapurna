@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, ApiError, type OrgSettings } from "../api";
+import { BudgetCard } from "../components/BudgetCard";
 import { DiscoveryLlmCard } from "../components/DiscoveryLlmCard";
 
 const TIMEZONES = [
@@ -174,6 +175,8 @@ export function SettingsPage() {
       </section>
 
       <DiscoveryLlmCard />
+
+      <BudgetCard currency={settings.currency} />
 
       <section className="settings-card">
         <h2>Privacy &amp; data</h2>

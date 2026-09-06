@@ -6,7 +6,7 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
-from annapurna import alerts, alerts_eval, auth, notify
+from annapurna import alerts, alerts_eval, auth, budgets, notify
 from annapurna.db import app_dsn, connect, tenant_tx
 
 MAY = dt.date(2026, 5, 1)
@@ -46,6 +46,14 @@ def _add_inference(
                 environment,
             ),
         )
+
+
+def _set_budget(tenant_id, amount, cadence, effective_from="2020-01-01"):
+    """Give the org a real budget the way Settings -> Budgets would."""
+    return budgets.set_budget(
+        tenant_id,
+        {"amount": amount, "cadence": cadence, "effective_from": effective_from},
+    )
 
 
 def _rule(**over):
@@ -144,13 +152,62 @@ def test_percentage_increase_condition(tenant_id):
 
 
 def test_budget_percentage_condition(tenant_id):
+    # The denominator is the organization's own budget, not a number carried on
+    # the rule. A $1,000/month budget over a whole month prorates to $1,000.
+    _set_budget(tenant_id, 1000, "monthly")
     rule = alerts.create_rule(
-        tenant_id,
-        _rule(condition_type="budget_pct", threshold=80, budget_amount=1000, window="monthly"),
+        tenant_id, _rule(condition_type="budget_pct", threshold=80, window="monthly")
     )
     _add_inference(tenant_id, 850)  # 85% of 1000 > 80%
     alerts_eval.evaluate_rule(tenant_id, rule["id"], now=NOW)
     assert alerts.get_rule(tenant_id, rule["id"])["status"] == "triggered"
+
+
+def test_a_budget_rule_cannot_be_saved_without_a_budget(tenant_id):
+    with pytest.raises(alerts.AlertError) as exc:
+        alerts.create_rule(
+            tenant_id, _rule(condition_type="budget_pct", threshold=80, window="monthly")
+        )
+    # The message has to be actionable: it names where to go and what to do.
+    assert "Settings" in str(exc.value) and "Budgets" in str(exc.value)
+    assert alerts.list_rules(tenant_id) == []
+
+
+def test_removing_the_budget_leaves_an_existing_rule_unable_to_evaluate(tenant_id):
+    _set_budget(tenant_id, 1000, "monthly")
+    rule = alerts.create_rule(
+        tenant_id, _rule(condition_type="budget_pct", threshold=80, window="monthly")
+    )
+    _add_inference(tenant_id, 850)
+    budgets.remove_budget(tenant_id)
+
+    alerts_eval.evaluate_rule(tenant_id, rule["id"], now=NOW)
+    # No denominator means no answer -- never a default budget, and never a
+    # trigger inferred from one.
+    assert alerts.get_rule(tenant_id, rule["id"])["status"] == "insufficient_data"
+
+
+def test_an_annual_budget_is_prorated_to_the_month_being_evaluated(tenant_id):
+    # $12,410/year over a 365-day year is $1,054 for May's 31 days. $850 is 80.6%
+    # of that -- just over an 80% threshold, and well under a naive $12,410.
+    _set_budget(tenant_id, 12_410, "annual")
+    rule = alerts.create_rule(
+        tenant_id, _rule(condition_type="budget_pct", threshold=80, window="monthly")
+    )
+    _add_inference(tenant_id, 850)
+    alerts_eval.evaluate_rule(tenant_id, rule["id"], now=NOW)
+    assert alerts.get_rule(tenant_id, rule["id"])["status"] == "triggered"
+
+
+def test_a_budget_that_starts_after_the_month_does_not_arm_the_rule(tenant_id):
+    # Effective in June; May has no budget to measure against.
+    _set_budget(tenant_id, 1000, "monthly", effective_from="2026-06-01")
+    rule = alerts.create_rule(
+        tenant_id, _rule(condition_type="budget_pct", threshold=80, window="monthly")
+    )
+    _add_inference(tenant_id, 850)
+    alerts_eval.evaluate_rule(tenant_id, rule["id"], now=NOW)
+    assert alerts.get_rule(tenant_id, rule["id"])["status"] == "insufficient_data"
 
 
 def test_ignore_is_excluded_from_metric(tenant_id):

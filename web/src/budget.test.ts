@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { budgetForecast, DEMO_ANNUAL_BUDGET, DEMO_MONTH_ELAPSED } from "./budget";
-import type { TrendMonth } from "./api";
+import { forecastShape, monthElapsed } from "./budget";
+import type { BudgetForecast, TrendMonth } from "./api";
 
 function month(period: string, total: number): TrendMonth {
   return {
@@ -14,83 +14,92 @@ function month(period: string, total: number): TrendMonth {
   };
 }
 
-describe("budgetForecast", () => {
-  it("completes the open month at the rate it has run so far", () => {
-    const plan = budgetForecast([month("2026-04-01", 1000), month("2026-05-01", 2000)], null)!;
+function forecast(over: Partial<BudgetForecast> = {}): BudgetForecast {
+  return {
+    status: "open",
+    as_of: "2026-05-21",
+    as_of_is_fixed: false,
+    window_start: "2026-03-01",
+    window_end: "2026-05-31",
+    actual: 45142,
+    actual_build: 0,
+    actual_inference: 45142,
+    budget: 50000,
+    budget_detail: null,
+    budget_cadence: "annual",
+    currency: "USD",
+    forecast: 58366,
+    forecast_optimized: 49611,
+    identified_savings: 8755,
+    variance: 8366,
+    variance_pct: 16.73,
+    method: "recent_weighted",
+    confidence: "high",
+    observed_days: 21,
+    ...over,
+  };
+}
 
-    // The settled month is left alone; only the open one is extrapolated.
-    expect(plan.spent).toBe(3000);
-    expect(plan.forecast).toBeCloseTo(1000 + 2000 / DEMO_MONTH_ELAPSED, 4);
-    // Spent is never quietly replaced by the projection.
-    expect(plan.spent).toBeLessThan(plan.forecast);
+const TREND = [
+  month("2026-03-01", 8548.68),
+  month("2026-04-01", 9745.39),
+  month("2026-05-01", 26847.95),
+];
+
+describe("monthElapsed", () => {
+  it("reads the server's as-of date, not this browser's clock", () => {
+    // 21 May of 31. Nothing here consults Date.now().
+    expect(monthElapsed(forecast({ as_of: "2026-05-21" }))).toBeCloseTo(21 / 31, 6);
+    // February 2028 is a leap February, so the 29th is the whole month.
+    expect(monthElapsed(forecast({ as_of: "2028-02-29" }))).toBe(1);
+    expect(monthElapsed(forecast({ as_of: "2027-02-28" }))).toBe(1);
+  });
+});
+
+describe("forecastShape", () => {
+  it("stops the solid line part-way into the open month, leaving room for the tail", () => {
+    const shape = forecastShape(TREND, forecast())!;
+    const lastActual = shape.actual[shape.actual.length - 1];
+
+    // Settled months land on whole months; the open one stops where the data does.
+    expect(shape.actual[1].x).toBe(1);
+    expect(lastActual.x).toBeCloseTo(2 + 21 / 31, 6);
+    expect(lastActual.y).toBeCloseTo(45142.02, 2);
+    expect(shape.projected![0]).toBe(lastActual);
+    expect(shape.projected![1]).toMatchObject({ x: 3, y: 58366 });
+    expect(shape.optimizedTail![1]).toMatchObject({ x: 3, y: 49611 });
   });
 
-  it("prorates the annual budget across the window on show", () => {
-    const three = budgetForecast(
-      [month("2026-03-01", 10), month("2026-04-01", 10), month("2026-05-01", 10)],
-      null,
+  it("draws no projection at all for a closed period", () => {
+    const shape = forecastShape(TREND, forecast({ status: "closed" }))!;
+
+    expect(shape.projected).toBeNull();
+    expect(shape.optimizedTail).toBeNull();
+    // The line runs to the end of the final month, because that is where the
+    // data ends — not part-way, which would imply a month still running.
+    expect(shape.actual[shape.actual.length - 1].x).toBe(3);
+  });
+
+  it("draws no tail when the server could not forecast", () => {
+    const shape = forecastShape(
+      TREND,
+      forecast({ status: "insufficient", forecast: null, forecast_optimized: null }),
     )!;
-    const one = budgetForecast([month("2026-05-01", 10)], null)!;
-
-    expect(three.budget).toBeCloseTo((DEMO_ANNUAL_BUDGET / 12) * 3, 6);
-    expect(one.budget).toBeCloseTo(DEMO_ANNUAL_BUDGET / 12, 6);
+    expect(shape.projected).toBeNull();
+    expect(shape.optimizedTail).toBeNull();
   });
 
-  it("reproduces the demo's figures, which is where the card's copy comes from", () => {
-    const plan = budgetForecast(
-      [
-        month("2026-03-01", 8548.68),
-        month("2026-04-01", 9745.39),
-        month("2026-05-01", 26847.95),
-      ],
-      8755,
-    )!;
-
-    expect(plan.spent).toBeCloseTo(45142.02, 2);
-    expect(plan.budget).toBe(50000);
-    expect(plan.forecast).toBeCloseTo(58365.64, 1);
-    expect(plan.optimized).toBeCloseTo(49610.64, 1);
-    expect(Math.round(plan.overBy)).toBe(17);
-    expect(plan.overBudget).toBe(true);
-    expect(plan.savingsCloseTheGap).toBe(true);
+  it("omits the optimized tail when Optimize had nothing to offer", () => {
+    const shape = forecastShape(TREND, forecast({ forecast_optimized: null }))!;
+    expect(shape.projected).not.toBeNull();
+    expect(shape.optimizedTail).toBeNull();
   });
 
-  it("does not claim savings close a gap they only narrow", () => {
-    const plan = budgetForecast([month("2026-05-01", 40_000)], 100)!;
-
-    expect(plan.overBudget).toBe(true);
-    expect(plan.savingsCloseTheGap).toBe(false);
+  it("has nothing to draw without a trend", () => {
+    expect(forecastShape([], forecast())).toBeNull();
   });
 
-  it("says nothing about savings until Optimize has answered", () => {
-    const plan = budgetForecast([month("2026-05-01", 40_000)], null)!;
-
-    // Not zero: an unknown saving and a saving of nothing are different answers.
-    expect(plan.optimized).toBeNull();
-    expect(plan.optimizedTail).toBeNull();
-    expect(plan.savingsCloseTheGap).toBe(false);
-  });
-
-  it("never forecasts a negative total, however large the identified savings", () => {
-    const plan = budgetForecast([month("2026-05-01", 100)], 10_000)!;
-
-    expect(plan.optimized).toBe(0);
-  });
-
-  it("has nothing to draw without spend to draw from", () => {
-    expect(budgetForecast([], 100)).toBeNull();
-    expect(budgetForecast([month("2026-05-01", 0)], 100)).toBeNull();
-  });
-
-  it("leaves the projected tail room on the x axis", () => {
-    const plan = budgetForecast([month("2026-04-01", 10), month("2026-05-01", 10)], null)!;
-    const lastActual = plan.actual[plan.actual.length - 1];
-
-    // Settled months land on whole months; the open one stops part-way, which
-    // is what leaves the dashed tail somewhere to go.
-    expect(plan.actual[1].x).toBe(1);
-    expect(lastActual.x).toBeCloseTo(1 + DEMO_MONTH_ELAPSED, 6);
-    expect(plan.projected[0]).toBe(lastActual);
-    expect(plan.projected[1].x).toBe(plan.months);
+  it("labels the months it draws", () => {
+    expect(forecastShape(TREND, forecast())!.labels).toEqual(["Mar", "Apr", "May"]);
   });
 });

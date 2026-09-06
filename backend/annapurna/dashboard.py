@@ -191,6 +191,22 @@ def _resolve_range(
     return _months_back(latest, back_start), _months_back(latest, back_end)
 
 
+def resolve_window(
+    tenant_id: str,
+    start: Optional[dt.date] = None,
+    end: Optional[dt.date] = None,
+    range_token: Optional[str] = None,
+) -> tuple[dt.date, dt.date]:
+    """The (start_month, end_month) a request's period arguments resolve to.
+
+    Public so other read-side features — the budget forecast — land on exactly the
+    window the Overview is showing, rather than resolving "last 3 months" their
+    own way and disagreeing with the chart beside them.
+    """
+    with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
+        return _resolve_range(conn, range_token, start, end)
+
+
 def _month_count(start: dt.date, end: dt.date) -> int:
     return (end.year - start.year) * 12 + (end.month - start.month) + 1
 

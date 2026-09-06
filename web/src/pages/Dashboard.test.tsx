@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError } from "../api";
+import { api, ApiError, type BudgetForecast } from "../api";
 import { AuthProvider } from "../auth/AuthContext";
 import { Dashboard } from "./Dashboard";
 
@@ -14,6 +14,7 @@ vi.mock("../api", async (importActual) => {
       me: vi.fn(),
       dashboard: vi.fn(),
       providerSpend: vi.fn(),
+      budgetForecast: vi.fn(),
       customerSpend: vi.fn(),
       refreshInference: vi.fn(),
     },
@@ -138,9 +139,46 @@ function renderDashboard() {
   );
 }
 
+/**
+ * Everything on the Budget & forecast card is computed on the server, so the
+ * fixture is a server response — the page's job is to choose a state and draw.
+ * These figures match DATA.trend: 2,100 in April and 5,171 in May.
+ */
+const FORECAST: BudgetForecast = {
+  status: "open",
+  as_of: "2026-05-21",
+  as_of_is_fixed: false,
+  window_start: "2026-04-01",
+  window_end: "2026-05-31",
+  actual: 7271,
+  actual_build: 311,
+  actual_inference: 6960,
+  budget: 12000,
+  budget_detail: {
+    amount: 12000,
+    method: "monthly",
+    covered_days: 61,
+    window_days: 61,
+    covered_start: "2026-04-01",
+    covered_end: "2026-05-31",
+    fully_covered: true,
+  },
+  budget_cadence: "monthly",
+  currency: "USD",
+  forecast: 13500,
+  forecast_optimized: 11660,
+  identified_savings: 1840,
+  variance: 1500,
+  variance_pct: 12.5,
+  method: "recent_weighted",
+  confidence: "high",
+  observed_days: 21,
+};
+
 describe("Dashboard (Overview)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(api.budgetForecast).mockResolvedValue({ ...FORECAST });
     vi.mocked(api.me).mockResolvedValue({
       id: "u1",
       tenant_id: "t1",
@@ -287,67 +325,118 @@ describe("Dashboard (Overview)", () => {
     expect(chart.querySelectorAll(".trend-bar-run")).toHaveLength(2);
   });
 
-  it("forecasts the period against the budget, and names it as a forecast", async () => {
+  it("shows the forecast, the budget and the variance the server computed", async () => {
     renderDashboard();
     const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
 
-    // 2100 in April and 5171 in May: 7271 spent. May is 0.67 elapsed, so it
-    // projects to 5171/0.67 = 7718 and the period to 9818 — against a two-month
-    // budget of 200,000/12*2 = 33,333.
-    expect(within(panel).getByText("$9.8K")).toBeInTheDocument();
-    expect(within(panel).getByText("$33.3K")).toBeInTheDocument();
-    expect(within(panel).getByText("$7.3K")).toBeInTheDocument();
-    expect(within(panel).getByText("71% under budget")).toBeInTheDocument();
+    // Every figure is the server's. The page rounds for display and nothing else.
+    await within(panel).findByText("13% over budget");
+    expect(panel.querySelector(".budget-headline")!.textContent).toBe("Forecast: $13.5K");
+    expect(within(panel).getByText("$12K")).toBeInTheDocument(); // budget
+    expect(within(panel).getByText("$7.3K")).toBeInTheDocument(); // spent so far
+    expect(within(panel).getByText("$11.7K")).toBeInTheDocument(); // with savings
+    expect(within(panel).getByText("13% over budget")).toBeInTheDocument();
 
     // Spend to date is solid; the projection is a separate dashed line, never
     // continuous with it and never added into the figure of what was spent.
     expect(panel.querySelector(".budget-actual")).toBeInTheDocument();
-    expect(panel.querySelector(".budget-projected.under")).toBeInTheDocument();
-    expect(panel.querySelector(".budget-line")).toBeInTheDocument();
-  });
-
-  it("flags an over-budget forecast, and whether savings would close the gap", async () => {
-    // The demo's own three months, which is where the card's figures come from:
-    // 45,142 spent, a 58,366 forecast against a 50,000 budget — 17% over — and
-    // 8,755/mo of identified savings, which lands it at 49,611.
-    vi.mocked(api.dashboard).mockResolvedValue({
-      ...DATA,
-      trend: [
-        { ...DATA.trend[0], period: "2026-03-01", build_cost: 0, inference_cost: 8_548.68 },
-        { ...DATA.trend[0], period: "2026-04-01", build_cost: 0, inference_cost: 9_745.39 },
-        { ...DATA.trend[1], period: "2026-05-01", build_cost: 0, inference_cost: 26_847.95 },
-      ],
-    });
-    vi.mocked(api.copilotOverview).mockResolvedValue({
-      totals: { measured: 8755, modeled_ceiling: 0, directional: 0 },
-      verified_monthly_savings: 0,
-      verified_annual_savings: 0,
-      by_feature: [],
-    } as never);
-    renderDashboard();
-    const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
-
-    await waitFor(() =>
-      expect(within(panel).getByText(/would bring forecasted spend within budget/)).toBeInTheDocument(),
-    );
-    expect(within(panel).getByText("17% over budget")).toBeInTheDocument();
-    expect(within(panel).getByText("$58.4K")).toBeInTheDocument();
-    expect(within(panel).getByText("$49.6K")).toBeInTheDocument();
     expect(panel.querySelector(".budget-projected.over")).toBeInTheDocument();
     expect(panel.querySelector(".budget-optimized")).toBeInTheDocument();
+    expect(panel.querySelector(".budget-line")).toBeInTheDocument();
+    expect(
+      within(panel).getByText(/would bring forecasted spend within budget/),
+    ).toBeInTheDocument();
   });
 
-  it("draws no forecast when the period has no spend to forecast from", async () => {
-    vi.mocked(api.dashboard).mockResolvedValue({
-      ...DATA,
-      trend: DATA.trend.map((m) => ({ ...m, build_cost: 0, inference_cost: 0 })),
+  it("asks for the forecast on the window the page is showing", async () => {
+    renderDashboard();
+    await waitFor(() =>
+      expect(api.budgetForecast).toHaveBeenCalledWith({ kind: "last_3_months" }),
+    );
+  });
+
+  it("offers to set a budget rather than inventing one when none exists", async () => {
+    vi.mocked(api.budgetForecast).mockResolvedValue({
+      ...FORECAST,
+      budget: null,
+      budget_detail: null,
+      budget_cadence: null,
+      currency: null,
+      variance: null,
+      variance_pct: null,
     });
     renderDashboard();
     const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
-    expect(
-      within(panel).getByText("No spend in this period to forecast from."),
-    ).toBeInTheDocument();
-    expect(panel.querySelector(".budget-actual")).not.toBeInTheDocument();
+
+    expect(await within(panel).findByText("No budget configured")).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: /Set a budget/ })).toHaveAttribute(
+      "href",
+      "/settings#budgets",
+    );
+    // No chart, and above all no number standing in for a budget nobody set.
+    expect(panel.querySelector(".budget-line")).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/over budget|under budget/)).not.toBeInTheDocument();
+  });
+
+  it("reports a closed period as final spend, with no forecast", async () => {
+    vi.mocked(api.budgetForecast).mockResolvedValue({
+      ...FORECAST,
+      status: "closed",
+      forecast: 7271,
+      forecast_optimized: null,
+      variance: -4729,
+      variance_pct: -39.41,
+      method: "closed",
+      confidence: "final",
+    });
+    renderDashboard();
+    const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
+
+    await within(panel).findByText("39% under budget");
+    // "Final spend", not "Forecast" — the period is over.
+    expect(panel.querySelector(".budget-headline")!.textContent).toBe("Final spend: $7.3K");
+    expect(within(panel).getByText("39% under budget")).toBeInTheDocument();
+    expect(within(panel).getByText(/no forecast applies/)).toBeInTheDocument();
+    // A closed period draws no dashed tail: there is nothing left to project.
+    expect(panel.querySelector(".budget-projected")).not.toBeInTheDocument();
+    expect(panel.querySelector(".budget-optimized")).not.toBeInTheDocument();
+    expect(panel.querySelector(".budget-actual")).toBeInTheDocument();
+  });
+
+  it("says the forecast is unavailable rather than projecting from nothing", async () => {
+    vi.mocked(api.budgetForecast).mockResolvedValue({
+      ...FORECAST,
+      status: "insufficient",
+      forecast: null,
+      forecast_optimized: null,
+      variance: null,
+      variance_pct: null,
+      method: "none",
+      confidence: "none",
+      observed_days: 0,
+    });
+    renderDashboard();
+    const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
+
+    expect(await within(panel).findByText("Forecast unavailable")).toBeInTheDocument();
+    // What IS known still gets said: the budget and the spend are both real.
+    expect(within(panel).getByText(/nothing to project from/)).toBeInTheDocument();
+    expect(panel.querySelector(".budget-projected")).not.toBeInTheDocument();
+  });
+
+  it("shows a loading state, then an error state if the forecast never lands", async () => {
+    let reject: (e: Error) => void = () => {};
+    vi.mocked(api.budgetForecast).mockReturnValue(
+      new Promise((_, r) => {
+        reject = r;
+      }),
+    );
+    renderDashboard();
+    const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
+    expect(within(panel).getByText("Calculating…")).toBeInTheDocument();
+
+    reject(new ApiError(500, "boom"));
+    expect(await within(panel).findByText(/unavailable right now/)).toBeInTheDocument();
   });
 
   it("shows the top three providers, and folds the rest behind a disclosure", async () => {

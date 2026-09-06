@@ -11,6 +11,9 @@ vi.mock("../api", async (importActual) => {
     api: {
       getSettings: vi.fn(),
       updateSettings: vi.fn(),
+      getBudget: vi.fn(),
+      setBudget: vi.fn(),
+      removeBudget: vi.fn(),
       connectors: vi.fn(),
       discoveryLlm: vi.fn(),
       discoveryLlmProviders: vi.fn(),
@@ -42,6 +45,8 @@ function renderPage() {
 function setupMocks() {
   vi.clearAllMocks();
   vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS });
+  // Budgets card loads alongside the page; default to "none set".
+  vi.mocked(api.getBudget).mockResolvedValue({ budget: null });
   vi.mocked(api.updateSettings).mockImplementation(async (p) => ({ ...SETTINGS, ...p }));
   // The BYOK card loads alongside the page; default to "not configured".
   vi.mocked(api.discoveryLlm).mockResolvedValue({
@@ -219,5 +224,81 @@ describe("Feature discovery model (BYOK)", () => {
     expect(await screen.findByText("Using Annapurna's model")).toBeInTheDocument();
     // Still configured, so it can be switched back on.
     expect(screen.getByRole("button", { name: "Use my model" })).toBeInTheDocument();
+  });
+});
+
+describe("Budgets", () => {
+  beforeEach(setupMocks);
+
+  it("says there is no budget rather than showing a plausible default", async () => {
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Budgets" })).toBeInTheDocument();
+    expect(await screen.findByText(/No budget is set/)).toBeInTheDocument();
+    // Nothing prefilled: an amount in the box would read as a budget somebody set.
+    expect(screen.getByLabelText(/Budget amount/)).toHaveValue(null);
+    expect(screen.queryByRole("button", { name: "Remove budget" })).not.toBeInTheDocument();
+  });
+
+  it("sets a budget, then offers to remove it", async () => {
+    vi.mocked(api.setBudget).mockResolvedValue({
+      budget: {
+        amount: 50000,
+        cadence: "annual",
+        currency: "USD",
+        effective_from: "2026-01-01",
+        updated_at: "2026-05-01T00:00:00Z",
+        updated_by: "cto@acme.com",
+      },
+    });
+    renderPage();
+    await screen.findByRole("heading", { name: "Budgets" });
+
+    fireEvent.change(screen.getByLabelText(/Budget amount/), { target: { value: "50000" } });
+    fireEvent.change(screen.getByLabelText("Applies"), { target: { value: "annual" } });
+    fireEvent.change(screen.getByLabelText("Effective from"), {
+      target: { value: "2026-01-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set budget" }));
+
+    await waitFor(() =>
+      expect(api.setBudget).toHaveBeenCalledWith({
+        amount: 50000,
+        cadence: "annual",
+        effective_from: "2026-01-01",
+      }),
+    );
+    expect(await screen.findByText(/Current budget: \$50,000 per year/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove budget" })).toBeInTheDocument();
+  });
+
+  it("refuses an amount of zero without asking the server", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Budgets" });
+    fireEvent.change(screen.getByLabelText(/Budget amount/), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set budget" }));
+
+    expect(await screen.findByText(/greater than 0/)).toBeInTheDocument();
+    expect(api.setBudget).not.toHaveBeenCalled();
+  });
+
+  it("removes the budget and goes back to saying there is none", async () => {
+    vi.mocked(api.getBudget).mockResolvedValue({
+      budget: {
+        amount: 12000,
+        cadence: "monthly",
+        currency: "USD",
+        effective_from: "2026-01-01",
+        updated_at: null,
+        updated_by: null,
+      },
+    });
+    vi.mocked(api.removeBudget).mockResolvedValue({ budget: null });
+    renderPage();
+
+    expect(await screen.findByText(/Current budget: \$12,000 per month/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove budget" }));
+
+    await waitFor(() => expect(api.removeBudget).toHaveBeenCalled());
+    expect(await screen.findByText(/No budget is set/)).toBeInTheDocument();
   });
 });

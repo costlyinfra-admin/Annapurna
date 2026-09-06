@@ -11,7 +11,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from . import crypto
+from . import budgets, crypto
 from .db import app_dsn, connect, tenant_tx
 
 # ---- Domain vocabulary ----------------------------------------------------
@@ -80,7 +80,15 @@ def _pos_number(value, field: str, *, allow_zero: bool = True) -> Decimal:
     return d
 
 
-def _validate(payload: dict) -> dict:
+#: What the client is told when a budget-percentage rule has no budget to measure
+#: against. The UI turns this into a link to Settings -> Budgets.
+NO_BUDGET_MESSAGE = (
+    "This alert measures spend against your organization's AI budget, and no "
+    "budget is configured. Set one in Settings -> Budgets, then save this alert."
+)
+
+
+def _validate(payload: dict, *, tenant_id: str) -> dict:
     """Validate + normalize a rule payload. Returns the cleaned fields."""
     name = (payload.get("name") or "").strip()
     if not name:
@@ -111,9 +119,12 @@ def _validate(payload: dict) -> dict:
     if condition in ("increase_pct", "budget_pct") and threshold > Decimal("100000"):
         raise AlertError("Percentage threshold looks too large.")
 
-    budget = None
-    if condition == "budget_pct":
-        budget = _pos_number(payload.get("budget_amount"), "Monthly budget", allow_zero=False)
+    # A budget-percentage rule is measured against the organization's real,
+    # persisted budget — not a number typed into the alert form, and never a
+    # demo or default one. Without a budget the rule has no denominator, so it
+    # cannot be saved.
+    if condition == "budget_pct" and budgets.get_budget(tenant_id) is None:
+        raise AlertError(NO_BUDGET_MESSAGE)
 
     window = payload.get("window")
     if window not in WINDOWS:
@@ -139,7 +150,9 @@ def _validate(payload: dict) -> dict:
         "scope_ref": scope_ref,
         "condition_type": condition,
         "threshold": threshold,
-        "budget_amount": budget,
+        # Deprecated: the denominator now comes from org_budget. Kept as a
+        # column so existing rows survive; never written from here again.
+        "budget_amount": None,
         "window": window,
         "cooldown": cooldown,
         "recovery_notify": bool(payload.get("recovery_notify", True)),
@@ -308,7 +321,7 @@ def get_rule(tenant_id: str, alert_id: str) -> Optional[dict]:
 
 
 def create_rule(tenant_id: str, payload: dict, *, created_by: Optional[str] = None) -> dict:
-    v = _validate(payload)
+    v = _validate(payload, tenant_id=tenant_id)
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         rid = conn.execute(
             """
@@ -342,7 +355,7 @@ def create_rule(tenant_id: str, payload: dict, *, created_by: Optional[str] = No
 
 
 def update_rule(tenant_id: str, alert_id: str, payload: dict) -> Optional[dict]:
-    v = _validate(payload)
+    v = _validate(payload, tenant_id=tenant_id)
     with connect(app_dsn()) as conn, tenant_tx(conn, tenant_id):
         if _get(conn, alert_id) is None:
             return None

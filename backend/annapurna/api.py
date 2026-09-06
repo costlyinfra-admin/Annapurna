@@ -27,6 +27,7 @@ from . import (
     alerts_eval,
     assistant,
     auth,
+    budgets,
     build,
     claudecode,
     compute,
@@ -56,18 +57,25 @@ logger = logging.getLogger("annapurna.api")
 #: a customer running their own deployment, can point it at their own desk.
 SUPPORT_EMAIL = os.environ.get("ANNAPURNA_SUPPORT_EMAIL", "support@costlyinfra.com")
 
+#: The named review periods every window-scoped endpoint accepts.
+_RANGE_RE = "^(this_month|last_month|last_3_months|last_6_months|last_12_months)$"
+
 # Quick-start alert templates — prefill the create form but stay fully editable.
+# The two budget_pct templates carry no budget of their own: the denominator is
+# the organization's configured budget, and a template that shipped a number
+# would be exactly the invented figure this feature exists to remove. The
+# `requires_budget` flag lets the form say so before the save is attempted.
 _ALERT_TEMPLATES = [
     {
         "id": "monthly_budget",
         "label": "Monthly AI spend exceeds budget",
+        "requires_budget": True,
         "rule": {
             "name": "Monthly AI spend over budget",
             "metric": "combined_cost",
             "scope_type": "organization",
             "condition_type": "budget_pct",
             "threshold": 100,
-            "budget_amount": 10000,
             "window": "monthly",
             "cooldown": "day",
         },
@@ -88,13 +96,13 @@ _ALERT_TEMPLATES = [
     {
         "id": "unattributed",
         "label": "Unattributed spend exceeds 10% of total",
+        "requires_budget": True,
         "rule": {
             "name": "High unattributed spend",
             "metric": "unattributed_cost",
             "scope_type": "organization",
             "condition_type": "budget_pct",
             "threshold": 10,
-            "budget_amount": 10000,
             "window": "monthly",
             "cooldown": "week",
         },
@@ -198,6 +206,15 @@ class SettingsRequest(BaseModel):
     customer_id_storage: Optional[str] = Field(default=None, max_length=16)
     store_prompts: Optional[bool] = None
     data_retention: Optional[str] = Field(default=None, max_length=16)
+
+
+class BudgetRequest(BaseModel):
+    # Every field required: a budget is one coherent statement, not a set of
+    # independently patchable parts, and a half-set budget has no meaning.
+    amount: float = Field(gt=0)
+    cadence: str = Field(max_length=16)
+    effective_from: str = Field(max_length=10)
+    currency: Optional[str] = Field(default=None, max_length=8)
 
 
 class CredentialRequest(BaseModel):
@@ -585,6 +602,50 @@ def create_app() -> FastAPI:
         except settings.SettingsError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    # ---- Budget (Settings -> Budgets) -----------------------------------
+    # Tenant-scoped like the rest of Settings: every member of an organization
+    # reads and writes the same budget, through their own tenant's RLS context.
+    @app.get("/api/budget")
+    def get_budget(user: CurrentUser) -> dict:
+        return {"budget": budgets.get_budget(user["tenant_id"])}
+
+    @app.put("/api/budget")
+    def put_budget(body: BudgetRequest, user: CurrentUser) -> dict:
+        try:
+            saved = budgets.set_budget(
+                user["tenant_id"], body.model_dump(), actor=user.get("email")
+            )
+        except budgets.BudgetError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return {"budget": saved}
+
+    @app.delete("/api/budget")
+    def delete_budget(user: CurrentUser) -> dict:
+        budgets.remove_budget(user["tenant_id"])
+        return {"budget": None}
+
+    @app.get("/api/budget/forecast")
+    def budget_forecast(
+        user: CurrentUser,
+        range: Optional[str] = Query(default=None, pattern=_RANGE_RE),
+        start: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+        end: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    ) -> dict:
+        tenant_id = user["tenant_id"]
+        s = _parse_period(start) if start else None
+        e = _parse_period(end) if end else None
+        win_start, win_end = dashboard.resolve_window(tenant_id, s, e, range)
+        # The same figure the Overview's "Potential savings" card shows: measured
+        # plus modelled, never the directional ones, which carry no defensible
+        # number. Read here rather than passed in so the forecast cannot be
+        # handed a savings figure the rest of the product would not agree with.
+        try:
+            overview = optimize_measured.copilot_overview(tenant_id, win_end)
+            savings = overview["totals"]["measured"] + overview["totals"]["modeled_ceiling"]
+        except Exception:  # noqa: BLE001 - a slow/failing Optimize must not take the card down
+            savings = None
+        return budgets.period_forecast(tenant_id, win_start, win_end, identified_savings=savings)
+
     @app.get("/api/connectors")
     def list_connectors(user: CurrentUser) -> list[credentials.ConnectorStatus]:
         return credentials.connector_statuses(user["tenant_id"])
@@ -790,6 +851,12 @@ def create_app() -> FastAPI:
             "valid_conditions": {m: list(alerts.valid_conditions(m)) for m in alerts.METRICS},
             "valid_scopes": {m: list(alerts.valid_scopes(m)) for m in alerts.METRICS},
             "templates": _ALERT_TEMPLATES,
+            # Whether a budget-percentage rule can be saved at all right now, and
+            # what to say if it cannot. The form asks once rather than each
+            # keystroke guessing at what the server will accept.
+            "has_budget": budgets.get_budget(user["tenant_id"]) is not None,
+            "budget_required_message": alerts.NO_BUDGET_MESSAGE,
+            "budget_conditions": ["budget_pct"],
         }
 
     @app.get("/api/alerts")
@@ -1036,7 +1103,6 @@ def create_app() -> FastAPI:
         return compute.allocate(user["tenant_id"], _parse_period(body.period), body.pool_id)
 
     # ---- The three screens (M6) ----------------------------------------
-    _RANGE_RE = "^(this_month|last_month|last_3_months|last_6_months|last_12_months)$"
 
     @app.get("/api/dashboard")
     def get_dashboard(

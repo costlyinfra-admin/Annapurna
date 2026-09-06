@@ -5175,6 +5175,36 @@ a.exec-value:hover {
   flex: 0 0 auto;
 }
 
+/* The states that are a sentence rather than a chart. */
+.budget-empty {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin: 0.2rem 0 0;
+}
+
+.budget-cta {
+  margin-top: 0.8rem;
+}
+
+/* An alert condition that cannot be saved because the organization has no
+   budget. Sits with the condition that caused it, not at the top of the form. */
+.alert-needs-budget {
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.template-note {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.settings-lead {
+  margin: -0.25rem 0 1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  max-width: 62ch;
+}
+
 /* Solid for what happened. */
 .budget-actual {
   fill: none;

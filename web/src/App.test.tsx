@@ -17,6 +17,7 @@ vi.mock("./api", async (importActual) => {
       signup: vi.fn(),
       listFeatures: vi.fn(),
       dashboard: vi.fn(),
+      budgetForecast: vi.fn(),
       alertsSummary: vi.fn(),
       reconSettings: vi.fn(),
     },
@@ -46,6 +47,9 @@ describe("App routing", () => {
 
   it("sends authenticated users into the app shell on the Overview", async () => {
     vi.mocked(api.me).mockResolvedValue({ id: "u1", tenant_id: "t1", email: "cto@acme.com" });
+    // The Overview asks for a budget forecast on mount; this route test only
+    // cares that the shell renders, so an empty answer is enough.
+    vi.mocked(api.budgetForecast).mockRejectedValue(new ApiError(404, "no budget"));
     // Reconciliation is opt-in; the shell asks and this organization has it off.
     vi.mocked(api.reconSettings).mockResolvedValue({
       available: true,

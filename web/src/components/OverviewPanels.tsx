@@ -11,12 +11,19 @@
  * data does not support: a card with no history shows no sparkline rather than
  * a flat line implying one.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { Dashboard, Insight, OpenAction, ProviderTotal, TrendMonth } from "../api";
+import type {
+  BudgetForecast,
+  Dashboard,
+  Insight,
+  OpenAction,
+  ProviderTotal,
+  TrendMonth,
+} from "../api";
 import { FINE_STEPS, GRID_LEVELS, niceCeil } from "./chartAxis";
 import { ConnectorMark } from "./ConnectorMark";
-import { budgetForecast, type BudgetForecast, type ForecastPoint } from "../budget";
+import { forecastShape, type ForecastPoint, type ForecastShape } from "../budget";
 import { compact, compactMoney, money, wholeMoney } from "../format";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -429,30 +436,36 @@ const BF_PLOT_BOTTOM = 78;
 const BF_GRID_LEVELS = [0, 0.5, 1] as const;
 
 /** Cumulative spend against the budget: solid where it happened, dashed where
- *  it is a projection. Two dashed tails when Optimize has an answer — what the
- *  window comes to if nothing changes, and what it comes to if it does. */
-function BudgetChart({ plan }: { plan: BudgetForecast }) {
-  const ceiling = niceCeil(Math.max(plan.forecast, plan.budget), FINE_STEPS);
-  const px = (x: number) => BF_AXIS_W + (x / plan.months) * (BF_VB_W - BF_AXIS_W - 8);
+ *  it is a projection. A closed period draws no dashes at all. */
+function BudgetChart({
+  shape,
+  forecast,
+}: {
+  shape: ForecastShape;
+  forecast: BudgetForecast;
+}) {
+  const top = Math.max(
+    forecast.forecast ?? 0,
+    forecast.actual,
+    forecast.budget ?? 0,
+  );
+  const ceiling = niceCeil(top, FINE_STEPS);
+  const px = (x: number) => BF_AXIS_W + (x / shape.months) * (BF_VB_W - BF_AXIS_W - 8);
   const py = (y: number) => BF_PLOT_BOTTOM - (y / ceiling) * (BF_PLOT_BOTTOM - BF_PLOT_TOP);
   const path = (points: ForecastPoint[]) =>
     points.map((p, i) => `${i === 0 ? "M" : "L"}${px(p.x)} ${py(p.y)}`).join(" ");
 
-  const last = plan.actual[plan.actual.length - 1];
-  const end = plan.projected[plan.projected.length - 1];
-  const optimizedEnd = plan.optimizedTail?.[plan.optimizedTail.length - 1] ?? null;
+  const over = forecast.variance !== null && forecast.variance > 0;
+  const lastActual = shape.actual[shape.actual.length - 1];
+  const end = shape.projected?.[1] ?? null;
+  const optimizedEnd = shape.optimizedTail?.[1] ?? null;
 
   return (
     <svg
       className="trend-svg budget-svg"
       viewBox={`0 0 ${BF_VB_W} ${BF_VB_H}`}
       role="img"
-      aria-label={
-        `Cumulative spend against a ${money(plan.budget)} budget. ` +
-        `${money(plan.spent)} spent so far, forecast ${money(plan.forecast)} — ` +
-        `${Math.abs(Math.round(plan.overBy))}% ${plan.overBudget ? "over" : "under"} budget.` +
-        (optimizedEnd ? ` With identified savings, ${money(optimizedEnd.y)}.` : "")
-      }
+      aria-label={budgetChartLabel(forecast)}
     >
       {BF_GRID_LEVELS.map((level) => (
         <g key={level}>
@@ -475,139 +488,269 @@ function BudgetChart({ plan }: { plan: BudgetForecast }) {
       ))}
 
       {/* The budget, drawn across the whole plot so it reads as a ceiling
-          rather than as another series. */}
-      <g>
-        <title>{`Budget for this period: ${money(plan.budget)}`}</title>
-        <line
-          className="budget-line"
-          x1={BF_AXIS_W}
-          y1={py(plan.budget)}
-          x2={BF_VB_W - 8}
-          y2={py(plan.budget)}
-        />
-        <text className="budget-line-label" x={BF_AXIS_W + 4} y={py(plan.budget) - 5}>
-          Budget {compactMoney(plan.budget)}
-        </text>
-      </g>
-
-      <g>
-        <title>{`Spent so far: ${money(plan.spent)}`}</title>
-        <path className="budget-actual" d={path(plan.actual)} />
-      </g>
-
-      {plan.optimizedTail && optimizedEnd && (
+          rather than as another series. Absent when there is no budget. */}
+      {forecast.budget !== null && (
         <g>
-          <title>{`With identified savings: ${money(optimizedEnd.y)}`}</title>
-          <path className="budget-optimized" d={path(plan.optimizedTail)} />
-          <circle className="budget-dot optimized" cx={px(optimizedEnd.x)} cy={py(optimizedEnd.y)} r={3} />
+          <title>{budgetLineTitle(forecast)}</title>
+          <line
+            className="budget-line"
+            x1={BF_AXIS_W}
+            y1={py(forecast.budget)}
+            x2={BF_VB_W - 8}
+            y2={py(forecast.budget)}
+          />
+          <text className="budget-line-label" x={BF_AXIS_W + 4} y={py(forecast.budget) - 5}>
+            Budget {compactMoney(forecast.budget)}
+          </text>
         </g>
       )}
 
       <g>
-        <title>{`Forecast if nothing changes: ${money(plan.forecast)}`}</title>
-        <path
-          className={`budget-projected ${plan.overBudget ? "over" : "under"}`}
-          d={path(plan.projected)}
-        />
-        <circle
-          className={`budget-dot ${plan.overBudget ? "over" : "under"}`}
-          cx={px(end.x)}
-          cy={py(end.y)}
-          r={3}
-        />
+        <title>{`${forecast.status === "closed" ? "Final spend" : "Spent so far"}: ${money(forecast.actual)}`}</title>
+        <path className="budget-actual" d={path(shape.actual)} />
       </g>
 
-      {/* Where the actuals stop and the guessing starts. */}
-      <circle className="budget-dot actual" cx={px(last.x)} cy={py(last.y)} r={3} />
+      {shape.optimizedTail && optimizedEnd && (
+        <g>
+          <title>{`With identified savings: ${money(optimizedEnd.y)}`}</title>
+          <path className="budget-optimized" d={path(shape.optimizedTail)} />
+          <circle
+            className="budget-dot optimized"
+            cx={px(optimizedEnd.x)}
+            cy={py(optimizedEnd.y)}
+            r={3}
+          />
+        </g>
+      )}
 
-      {plan.actual.slice(1).map((point, i) => (
+      {shape.projected && end && (
+        <g>
+          <title>{`Forecast if nothing changes: ${money(end.y)}`}</title>
+          <path className={`budget-projected ${over ? "over" : "under"}`} d={path(shape.projected)} />
+          <circle
+            className={`budget-dot ${over ? "over" : "under"}`}
+            cx={px(end.x)}
+            cy={py(end.y)}
+            r={3}
+          />
+        </g>
+      )}
+
+      {/* Where the actuals stop and the projection starts. */}
+      <circle className="budget-dot actual" cx={px(lastActual.x)} cy={py(lastActual.y)} r={3} />
+
+      {shape.labels.map((label, i) => (
         <text
           className="trend-axis-label"
-          key={point.label}
+          key={`${label}-${i}`}
           x={px(i + 0.5)}
           y={BF_PLOT_BOTTOM + 13}
           textAnchor="middle"
         >
-          {point.label.replace(/^End of |^| so far$/g, "").slice(0, 3)}
+          {label}
         </text>
       ))}
     </svg>
   );
 }
 
-/**
- * Where the period lands against the budget, and whether the savings the
- * Optimize engine has already found would be enough to change that.
- *
- * The forecast is always named as a forecast: the figure of what was spent sits
- * beside it, and the two are never added or blended.
- */
-export function BudgetForecastPanel({
-  trend,
-  /** Monthly potential savings; null until the Optimize call lands. */
-  potentialMonthly,
-}: {
-  trend: TrendMonth[];
-  potentialMonthly: number | null;
-}) {
-  const plan = budgetForecast(trend, potentialMonthly);
+function budgetChartLabel(f: BudgetForecast): string {
+  const spend =
+    f.status === "closed"
+      ? `Final spend ${money(f.actual)}.`
+      : `${money(f.actual)} spent so far, forecast ${f.forecast === null ? "unavailable" : money(f.forecast)}.`;
+  const budget =
+    f.budget === null
+      ? "No budget is configured."
+      : `Budget ${money(f.budget)}${f.variance_pct === null ? "" : `, ${varianceWords(f)}`}.`;
+  const optimized =
+    f.forecast_optimized === null
+      ? ""
+      : ` With identified savings, ${money(f.forecast_optimized)}.`;
+  return `Cumulative spend against budget. ${spend} ${budget}${optimized}`;
+}
 
-  if (!plan) {
-    return (
-      <section className="panel budget-panel" aria-label="Budget and forecast">
-        <div className="panel-head">
-          <h2>Budget &amp; forecast</h2>
-        </div>
-        <p className="muted">No spend in this period to forecast from.</p>
-      </section>
-    );
+function budgetLineTitle(f: BudgetForecast): string {
+  const detail = f.budget_detail;
+  if (!detail || detail.fully_covered) {
+    return `Budget for this period: ${money(f.budget)}`;
   }
+  // A prorated figure is rarely the round number the customer typed in, so the
+  // tooltip says where it came from rather than leaving them to work it out.
+  return (
+    `Budget for this period: ${money(f.budget)} — ${detail.covered_days} of ` +
+    `${detail.window_days} days covered by the ${detail.method} budget, ` +
+    `from ${detail.covered_start}.`
+  );
+}
 
-  const overBy = Math.abs(Math.round(plan.overBy));
+/** "17% over budget" / "39% under budget". Rounded once, in one place. */
+function varianceWords(f: BudgetForecast): string {
+  const pct = Math.abs(Math.round(f.variance_pct ?? 0));
+  return `${pct}% ${(f.variance ?? 0) > 0 ? "over" : "under"} budget`;
+}
 
+/** The card's chrome, so every state below is the same box in the same place. */
+function BudgetShell({ children, status }: { children: ReactNode; status?: ReactNode }) {
   return (
     <section className="panel budget-panel" aria-label="Budget and forecast">
       <div className="panel-head">
         <h2>Budget &amp; forecast</h2>
-        <span className={`budget-status ${plan.overBudget ? "over" : "under"}`}>
-          {overBy}% {plan.overBudget ? "over" : "under"} budget
-        </span>
+        {status}
       </div>
+      {children}
+    </section>
+  );
+}
 
+/**
+ * Where the period lands against the organization's budget.
+ *
+ * Every figure here comes from the server, which reads the stored budget and the
+ * observed daily spend. This component chooses between states and draws; it does
+ * not compute money. When there is no budget it says so and offers the place to
+ * set one, rather than showing a plausible number nobody agreed to.
+ */
+export function BudgetForecastPanel({
+  trend,
+  forecast,
+  failed,
+}: {
+  trend: TrendMonth[];
+  /** Null while the forecast request is in flight. */
+  forecast: BudgetForecast | null;
+  failed: boolean;
+}) {
+  if (failed) {
+    return (
+      <BudgetShell>
+        <p className="muted budget-empty">
+          Budget and forecast are unavailable right now. Refresh to try again.
+        </p>
+      </BudgetShell>
+    );
+  }
+
+  if (!forecast) {
+    return (
+      <BudgetShell>
+        <p className="muted budget-empty" aria-live="polite">
+          Calculating…
+        </p>
+      </BudgetShell>
+    );
+  }
+
+  // No budget: the one state that is a call to action rather than a reading.
+  if (forecast.budget === null) {
+    return (
+      <BudgetShell>
+        <p className="budget-headline">No budget configured</p>
+        <p className="muted budget-empty">
+          Set a monthly or annual AI budget and this card will track the period against it,
+          forecast where it lands, and show what the identified savings would change.
+        </p>
+        <Link className="kpi-link budget-cta" to="/settings#budgets">
+          Set a budget →
+        </Link>
+      </BudgetShell>
+    );
+  }
+
+  const shape = forecastShape(trend, forecast);
+  const closed = forecast.status === "closed";
+
+  // Open, but nothing observed to project from. The budget and what has been
+  // spent are still real, so they are still shown.
+  if (forecast.forecast === null) {
+    return (
+      <BudgetShell>
+        <p className="budget-headline">Forecast unavailable</p>
+        <p className="muted budget-empty">
+          No daily spend has been recorded for this month yet, so there is nothing to project
+          from. {money(forecast.actual)} of a {compactMoney(forecast.budget)} budget is spent.
+        </p>
+      </BudgetShell>
+    );
+  }
+
+  return (
+    <BudgetShell
+      status={
+        <span
+          className={`budget-status ${(forecast.variance ?? 0) > 0 ? "over" : "under"}`}
+          title={
+            closed
+              ? "The period is over; this compares final spend with the budget."
+              : "Where the period is forecast to land against the budget."
+          }
+        >
+          {varianceWords(forecast)}
+        </span>
+      }
+    >
       <p className="budget-headline">
-        Forecast: <strong>{compactMoney(plan.forecast)}</strong>
+        {closed ? "Final spend: " : "Forecast: "}
+        <strong>{compactMoney(closed ? forecast.actual : forecast.forecast)}</strong>
       </p>
 
-      <BudgetChart plan={plan} />
+      {shape && <BudgetChart shape={shape} forecast={forecast} />}
 
       <dl className="budget-stats">
         <div>
           <dt>Budget</dt>
-          <dd title={money(plan.budget)}>{compactMoney(plan.budget)}</dd>
+          <dd title={budgetLineTitle(forecast)}>{compactMoney(forecast.budget)}</dd>
         </div>
         <div>
-          <dt>Spent so far</dt>
-          <dd title={money(plan.spent)}>{compactMoney(plan.spent)}</dd>
+          <dt>{closed ? "Final" : "Spent so far"}</dt>
+          <dd title={money(forecast.actual)}>{compactMoney(forecast.actual)}</dd>
         </div>
         <div>
-          <dt>With savings</dt>
-          <dd title={plan.optimized === null ? "Calculating…" : money(plan.optimized)}>
-            {plan.optimized === null ? "—" : compactMoney(plan.optimized)}
+          <dt>{closed ? "Variance" : "With savings"}</dt>
+          <dd
+            title={
+              closed
+                ? money(forecast.variance)
+                : forecast.forecast_optimized === null
+                  ? "No identified savings for this period."
+                  : `${money(forecast.identified_savings)} of identified savings applied to the forecast.`
+            }
+          >
+            {closed
+              ? compactMoney(forecast.variance)
+              : forecast.forecast_optimized === null
+                ? "—"
+                : compactMoney(forecast.forecast_optimized)}
           </dd>
         </div>
       </dl>
 
-      <p className="muted budget-foot">
-        {plan.optimized === null
-          ? "Checking what the identified savings would do to this forecast…"
-          : plan.savingsCloseTheGap
-            ? "Applying identified savings would bring forecasted spend within budget."
-            : plan.overBudget
-              ? "Identified savings would not be enough to bring this period within budget."
-              : "This period is forecast to land within budget."}
-      </p>
-    </section>
+      <p className="muted budget-foot">{budgetFootnote(forecast)}</p>
+    </BudgetShell>
   );
+}
+
+/** One sentence saying what the reader should take from the card. */
+function budgetFootnote(f: BudgetForecast): string {
+  if (f.status === "closed") {
+    return (
+      `This period closed on ${f.window_end}. Final spend was ` +
+      `${varianceWords(f)} — no forecast applies.`
+    );
+  }
+  const basis =
+    f.method === "recent_weighted"
+      ? `weighted towards the last week of ${f.observed_days} days observed`
+      : `the average of ${f.observed_days} days observed so far`;
+  if (f.forecast_optimized !== null && f.budget !== null) {
+    if ((f.variance ?? 0) > 0 && f.forecast_optimized <= f.budget) {
+      return `Applying identified savings would bring forecasted spend within budget. Projected from ${basis}.`;
+    }
+    if ((f.variance ?? 0) > 0) {
+      return `Identified savings would not be enough to bring this period within budget. Projected from ${basis}.`;
+    }
+  }
+  return `This period is forecast to land within budget. Projected from ${basis}.`;
 }
 
 // ---------------------------------------------------------------------------

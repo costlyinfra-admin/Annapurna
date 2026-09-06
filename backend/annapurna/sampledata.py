@@ -13,13 +13,27 @@ test build their data through here.
 
 from __future__ import annotations
 
-import calendar as _cal
 import datetime as _dt
 from typing import Optional
 
 import psycopg
 
 DEFAULT_PERIOD = _dt.date(2026, 5, 1)  # monthly bucket = first of the month
+
+#: DEMO ONLY. The date the demo tenant treats as today.
+#:
+#: The dataset is fixed in the past, so the real clock would call every month in
+#: it complete and the Budget & forecast card would have nothing to forecast.
+#: Pinning "today" inside the newest month gives the demo a genuinely open month
+#: with 21 days of observed daily spend behind it. Written to `tenant.demo_as_of`,
+#: which is NULL for every real organization.
+DEMO_AS_OF = _dt.date(2026, 5, 21)
+
+#: DEMO ONLY. The budget seeded for the demo organization. A real row in
+#: `org_budget`, set the way a customer would set it in Settings -> Budgets —
+#: not a fallback, and not consulted by any tenant that has not stored one.
+DEMO_BUDGET_ANNUAL = 200_000
+DEMO_BUDGET_FROM = _dt.date(2025, 1, 1)
 
 
 def create_tenant(conn: psycopg.Connection, name: str) -> str:
@@ -583,8 +597,30 @@ def insert_sample_data(conn: psycopg.Connection, tenant_id: str, *, extended: bo
             conn, tenant_id, {"triage": triage, "report": report, "soc": soc}
         )
         _add_alert_demo(conn, tenant_id, {"triage": triage, "report": report})
+        _add_budget_demo(conn, tenant_id)
 
     return {"features": feature_count, "tenant_id": tenant_id}
+
+
+def _add_budget_demo(conn, tenant_id) -> None:
+    """DEMO ONLY. Give the demo organization a real budget and a fixed "today".
+
+    Both are ordinary rows, written the way the product writes them: the budget
+    goes in `org_budget` exactly as Settings would store it, and the as-of date
+    goes in `tenant.demo_as_of`, which production leaves NULL. Nothing in the
+    application reads a hard-coded budget or a hard-coded date; a tenant without
+    these rows simply has no budget and uses the clock.
+    """
+    conn.execute(
+        """
+        INSERT INTO org_budget (tenant_id, amount, cadence, currency, effective_from,
+                                updated_by)
+        VALUES (%s, %s, 'annual', 'USD', %s, 'demo seed')
+        ON CONFLICT (tenant_id) DO NOTHING
+        """,
+        (tenant_id, DEMO_BUDGET_ANNUAL, DEMO_BUDGET_FROM),
+    )
+    conn.execute("UPDATE tenant SET demo_as_of = %s WHERE id = %s", (DEMO_AS_OF, tenant_id))
 
 
 # ==========================================================================
@@ -810,12 +846,23 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
             api_key=key,
         )
 
-    # Day-resolution inference for the current month, so the Overview "By provider"
+    # Day-resolution inference for the newest month, so the Overview "By provider"
     # tab renders a DAILY trend (a real sync writes inference_cost_daily; here we
     # synthesize a gentle daily rhythm split across two classifications).
+    #
+    # Two things make this a faithful stand-in for a live tenant mid-month rather
+    # than a decoration:
+    #
+    #   * It stops at DEMO_AS_OF. A real tenant has no rows for days that have not
+    #     happened, and the forecast reads this table for its run rate — leaving
+    #     the rest of the month here would be handing it the answer.
+    #   * The daily amounts are sized so a full month of them lands near the
+    #     month's own billed inference total (~$21.5k). Daily rows that summed to
+    #     a third of the month would give a run rate that quietly forecast a
+    #     collapse in spend.
     _wave = [0.6, 0.8, 1.0, 1.3, 1.6, 1.2, 0.9]  # weekly-ish shape, cycled by day
-    _ndays = _cal.monthrange(DEFAULT_PERIOD.year, DEFAULT_PERIOD.month)[1]
-    for _i in range(_ndays):
+    _elapsed = DEMO_AS_OF.day if DEMO_AS_OF.replace(day=1) == DEFAULT_PERIOD else 0
+    for _i in range(_elapsed):
         _day = DEFAULT_PERIOD.replace(day=_i + 1)
         _mult = _wave[_i % len(_wave)]
         _add_inference_daily(
@@ -823,7 +870,7 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
             tenant_id,
             base["triage"],
             _day,
-            round(180 * _mult, 2),
+            round(500 * _mult, 2),
             "production",
             workspace="threat-triage",
         )
@@ -832,7 +879,7 @@ def _add_extended_demo(conn, tenant_id, base: dict) -> int:
             tenant_id,
             base["soc"],
             _day,
-            round(60 * _mult, 2),
+            round(167 * _mult, 2),
             "development",
             "claude-haiku-4-5",
             workspace="soc-copilot",
