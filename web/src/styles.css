@@ -856,6 +856,18 @@ select {
   max-width: 640px;
 }
 
+/* The tablist sits under the page title rather than above a table, so it needs
+   less room beneath it than the Overview's does. */
+.settings-tabs {
+  margin: 0 0 1.5rem;
+}
+
+/* Inactive panels stay mounted so a half-typed budget survives a tab switch;
+   `hidden` is what takes them off screen, and nothing here may override it. */
+.settings-page [role="tabpanel"][hidden] {
+  display: none;
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;

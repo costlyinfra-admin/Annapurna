@@ -34,12 +34,19 @@ const SETTINGS: OrgSettings = {
   data_retention: "indefinite",
 };
 
-function renderPage() {
+function renderPage(route = "/settings") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[route]}>
       <SettingsPage />
     </MemoryRouter>,
   );
+}
+
+/** Open a Settings tab the way a person would. Panels stay mounted but hidden,
+ *  and accessible queries ignore hidden content — so every test that reaches
+ *  past the first tab has to click its way there, same as a user. */
+async function openTab(name: RegExp | string) {
+  fireEvent.click(await screen.findByRole("tab", { name }));
 }
 
 function setupMocks() {
@@ -66,20 +73,55 @@ function setupMocks() {
 describe("SettingsPage", () => {
   beforeEach(setupMocks);
 
-  it("shows Organization and Privacy sections with loaded values", async () => {
+  it("opens on Organization, with the other sections behind their tabs", async () => {
     renderPage();
-    expect(await screen.findByText("Organization")).toBeInTheDocument();
-    expect(screen.getByText("Privacy & data")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Organization" })).toBeInTheDocument();
     expect(screen.getByLabelText("Organization name")).toHaveValue("Transilience AI");
     expect(screen.getByLabelText("Time zone")).toHaveValue("America/Los_Angeles");
     expect(screen.getByLabelText("Default currency")).toHaveValue("USD");
+
+    // Four tabs, one selected.
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      "Organization",
+      "Budgets",
+      "Bring your own key",
+      "Privacy & data",
+    ]);
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+
+    // The other panels are mounted — so drafts survive — but not on screen, and
+    // not reachable by role, until their tab is opened.
+    expect(screen.getByLabelText("Data retention")).not.toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Privacy & data" })).not.toBeInTheDocument();
+
+    await openTab("Privacy & data");
     expect(screen.getByLabelText("Customer identifiers")).toHaveValue("hashed");
     expect(screen.getByLabelText("Data retention")).toHaveValue("indefinite");
   });
 
+  it("keeps an unsaved edit when you leave a tab and come back", async () => {
+    renderPage();
+    const input = await screen.findByLabelText("Organization name");
+    fireEvent.change(input, { target: { value: "Half typed" } });
+
+    await openTab("Privacy & data");
+    await openTab("Organization");
+    // Panels are hidden, not unmounted, so the draft survives.
+    expect(screen.getByLabelText("Organization name")).toHaveValue("Half typed");
+    expect(api.getSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the tab named by the URL fragment, so /settings#budgets lands there", async () => {
+    // The Alerts form links straight here when a rule needs a budget.
+    renderPage("/settings#budgets");
+    expect(await screen.findByRole("heading", { name: "Budgets" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Budgets" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("does NOT render Connected sources, Account, or a Sign out button", async () => {
     renderPage();
-    await screen.findByText("Organization");
+    await screen.findByRole("heading", { name: "Organization" });
     expect(screen.queryByText("Connected sources")).not.toBeInTheDocument();
     expect(screen.queryByText("Account")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /sign out/i })).not.toBeInTheDocument();
@@ -91,7 +133,7 @@ describe("SettingsPage", () => {
     renderPage();
     const input = await screen.findByLabelText("Organization name");
     fireEvent.change(input, { target: { value: "Acme Security" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
       expect(api.updateSettings).toHaveBeenCalledWith(
@@ -103,10 +145,10 @@ describe("SettingsPage", () => {
 
   it("saves privacy preferences together", async () => {
     renderPage();
-    const toggle = await screen.findByLabelText("Store prompt content");
-    fireEvent.click(toggle); // Off -> On
+    await openTab("Privacy & data");
+    fireEvent.click(screen.getByLabelText("Store prompt content")); // Off -> On
     fireEvent.change(screen.getByLabelText("Data retention"), { target: { value: "90d" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
       expect(api.updateSettings).toHaveBeenCalledWith(
@@ -119,8 +161,10 @@ describe("SettingsPage", () => {
 describe("Feature discovery model (BYOK)", () => {
   beforeEach(setupMocks);
 
+  // The panel is hidden until its tab is open, so these render straight to it.
+
   it("says Annapurna's model is in use until one is configured", async () => {
-    renderPage();
+    renderPage("/settings#byok");
     expect(await screen.findByText("Feature discovery model")).toBeInTheDocument();
     expect(screen.getByText("Using Annapurna's model")).toBeInTheDocument();
   });
@@ -134,7 +178,7 @@ describe("Feature discovery model (BYOK)", () => {
       model: "llama-3.3-70b-versatile",
       base_url: "https://api.groq.com/openai/v1",
     });
-    renderPage();
+    renderPage("/settings#byok");
     await screen.findByText("Feature discovery model");
 
     fireEvent.change(screen.getByLabelText("Model"), {
@@ -171,7 +215,7 @@ describe("Feature discovery model (BYOK)", () => {
       model: "new-model",
       base_url: "https://api.groq.com/openai/v1",
     });
-    renderPage();
+    renderPage("/settings#byok");
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
 
     // The field advertises that a key is stored, and holds no value.
@@ -192,7 +236,7 @@ describe("Feature discovery model (BYOK)", () => {
       ok: false,
       error: "401: invalid api key: ***",
     });
-    renderPage();
+    renderPage("/settings#byok");
     await screen.findByText("Feature discovery model");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
 
@@ -217,7 +261,7 @@ describe("Feature discovery model (BYOK)", () => {
       model: "m",
       base_url: "u",
     });
-    renderPage();
+    renderPage("/settings#byok");
     fireEvent.click(await screen.findByRole("button", { name: "Use Annapurna's model" }));
 
     await waitFor(() => expect(api.setDiscoveryLlmEnabled).toHaveBeenCalledWith(false));
@@ -230,8 +274,10 @@ describe("Feature discovery model (BYOK)", () => {
 describe("Budgets", () => {
   beforeEach(setupMocks);
 
+  // Same as BYOK: render with the fragment that opens this tab.
+
   it("says there is no budget rather than showing a plausible default", async () => {
-    renderPage();
+    renderPage("/settings#budgets");
     expect(await screen.findByRole("heading", { name: "Budgets" })).toBeInTheDocument();
     expect(await screen.findByText(/No budget is set/)).toBeInTheDocument();
     // Nothing prefilled: an amount in the box would read as a budget somebody set.
@@ -250,7 +296,7 @@ describe("Budgets", () => {
         updated_by: "cto@acme.com",
       },
     });
-    renderPage();
+    renderPage("/settings#budgets");
     await screen.findByRole("heading", { name: "Budgets" });
 
     fireEvent.change(screen.getByLabelText(/Budget amount/), { target: { value: "50000" } });
@@ -272,7 +318,7 @@ describe("Budgets", () => {
   });
 
   it("refuses an amount of zero without asking the server", async () => {
-    renderPage();
+    renderPage("/settings#budgets");
     await screen.findByRole("heading", { name: "Budgets" });
     fireEvent.change(screen.getByLabelText(/Budget amount/), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Set budget" }));
@@ -293,7 +339,7 @@ describe("Budgets", () => {
       },
     });
     vi.mocked(api.removeBudget).mockResolvedValue({ budget: null });
-    renderPage();
+    renderPage("/settings#budgets");
 
     expect(await screen.findByText(/Current budget: \$12,000 per month/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove budget" }));

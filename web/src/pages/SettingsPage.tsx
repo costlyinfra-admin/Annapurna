@@ -4,12 +4,35 @@
  * Deliberately NOT a place to connect sources or manage app functionality:
  * providers live in Cost sources, feature discovery in Features, and the
  * signed-in identity / Sign out live in the global navigation. This page is just
- * the organization profile and privacy preferences, stored at the tenant level.
+ * the organization profile, its budget, and privacy preferences, stored at the
+ * tenant level.
+ *
+ * Four tabs, using the same tablist the Overview's breakdown uses. Every panel
+ * stays mounted and inactive ones are hidden, rather than unmounted: each card
+ * holds its own draft state and its own request, and switching tabs should not
+ * discard a half-typed budget or re-fetch what is already on screen.
  */
 import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError, type OrgSettings } from "../api";
 import { BudgetCard } from "../components/BudgetCard";
 import { DiscoveryLlmCard } from "../components/DiscoveryLlmCard";
+
+/** Tab ids double as URL fragments, so /settings#budgets opens the right one —
+ *  the Alerts form links straight here when a rule needs a budget. */
+const TABS = [
+  { id: "organization", label: "Organization" },
+  { id: "budgets", label: "Budgets" },
+  { id: "byok", label: "Bring your own key" },
+  { id: "privacy", label: "Privacy & data" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
+function tabFromHash(hash: string): TabId | null {
+  const id = hash.replace(/^#/, "");
+  return TABS.some((t) => t.id === id) ? (id as TabId) : null;
+}
 
 const TIMEZONES = [
   "UTC",
@@ -52,6 +75,23 @@ export function SettingsPage() {
   const [privacySaved, setPrivacySaved] = useState(false);
   const [savingOrg, setSavingOrg] = useState(false);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
+
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<TabId>(() => tabFromHash(location.hash) ?? "organization");
+
+  // A link that arrives with a fragment wins, including when the page is already
+  // open and only the fragment changes.
+  useEffect(() => {
+    const fromHash = tabFromHash(location.hash);
+    if (fromHash) setTab(fromHash);
+  }, [location.hash]);
+
+  function selectTab(next: TabId) {
+    setTab(next);
+    // replace, not push: flicking through tabs should not fill up the back button.
+    navigate(`#${next}`, { replace: true });
+  }
 
   useEffect(() => {
     api
@@ -119,138 +159,183 @@ export function SettingsPage() {
         </p>
       )}
 
-      <section className="settings-card">
-        <h2>Organization</h2>
-        <div className="settings-field">
-          <label htmlFor="org-name">Organization name</label>
-          <input
-            id="org-name"
-            value={settings.org_name}
-            onChange={(e) => patch({ org_name: e.target.value })}
-          />
-        </div>
-        <div className="settings-field">
-          <label htmlFor="org-tz">Time zone</label>
-          <select
-            id="org-tz"
-            value={settings.timezone}
-            onChange={(e) => patch({ timezone: e.target.value })}
-          >
-            {TIMEZONES.map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="settings-field">
-          <label htmlFor="org-currency">Default currency</label>
-          <select
-            id="org-currency"
-            value={settings.currency}
-            onChange={(e) => patch({ currency: e.target.value })}
-          >
-            <option value="USD">USD</option>
-          </select>
-        </div>
-        <div className="settings-actions">
+      <div className="tabs settings-tabs" role="tablist" aria-label="Settings sections">
+        {TABS.map((t) => (
           <button
-            onClick={() =>
-              save(
-                {
-                  org_name: settings.org_name,
-                  timezone: settings.timezone,
-                  currency: settings.currency,
-                },
-                setSavingOrg,
-                setOrgSaved,
-              )
-            }
-            disabled={savingOrg || !settings.org_name.trim()}
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`settings-tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`settings-panel-${t.id}`}
+            className={tab === t.id ? "tab active" : "tab"}
+            onClick={() => selectTab(t.id)}
           >
-            {savingOrg ? "Saving…" : "Save changes"}
+            {t.label}
           </button>
-          {orgSaved && <span className="settings-saved">Saved ✓</span>}
-        </div>
-      </section>
+        ))}
+      </div>
 
-      <DiscoveryLlmCard />
-
-      <BudgetCard currency={settings.currency} />
-
-      <section className="settings-card">
-        <h2>Privacy &amp; data</h2>
-        <p className="muted">Control what Annapurna stores about your traffic and customers.</p>
-        <div className="settings-field">
-          <label htmlFor="cust-id">Customer identifiers</label>
-          <select
-            id="cust-id"
-            value={settings.customer_id_storage}
-            onChange={(e) =>
-              patch({ customer_id_storage: e.target.value as OrgSettings["customer_id_storage"] })
-            }
-          >
-            {CUSTOMER_ID_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <span className="settings-hint muted">
-            How customer identifiers are stored once customer-level attribution ships.
-          </span>
-        </div>
-        <div className="settings-field settings-field-inline">
-          <label htmlFor="store-prompts">Store prompt content</label>
-          <label className="toggle">
+      <div
+        role="tabpanel"
+        id="settings-panel-organization"
+        aria-labelledby="settings-tab-organization"
+        hidden={tab !== "organization"}
+      >
+        <section className="settings-card">
+          <h2>Organization</h2>
+          <div className="settings-field">
+            <label htmlFor="org-name">Organization name</label>
             <input
-              id="store-prompts"
-              type="checkbox"
-              checked={settings.store_prompts}
-              onChange={(e) => patch({ store_prompts: e.target.checked })}
+              id="org-name"
+              value={settings.org_name}
+              onChange={(e) => patch({ org_name: e.target.value })}
             />
-            <span>{settings.store_prompts ? "On" : "Off"}</span>
-          </label>
-          <span className="settings-hint muted">
-            Annapurna stores no prompt text today; leaving this off keeps it that way.
-          </span>
-        </div>
-        <div className="settings-field">
-          <label htmlFor="retention">Data retention</label>
-          <select
-            id="retention"
-            value={settings.data_retention}
-            onChange={(e) =>
-              patch({ data_retention: e.target.value as OrgSettings["data_retention"] })
-            }
-          >
-            {RETENTION_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="settings-actions">
-          <button
-            onClick={() =>
-              save(
-                {
-                  customer_id_storage: settings.customer_id_storage,
-                  store_prompts: settings.store_prompts,
-                  data_retention: settings.data_retention,
-                },
-                setSavingPrivacy,
-                setPrivacySaved,
-              )
-            }
-            disabled={savingPrivacy}
-          >
-            {savingPrivacy ? "Saving…" : "Save changes"}
-          </button>
-          {privacySaved && <span className="settings-saved">Saved ✓</span>}
-        </div>
-      </section>
+          </div>
+          <div className="settings-field">
+            <label htmlFor="org-tz">Time zone</label>
+            <select
+              id="org-tz"
+              value={settings.timezone}
+              onChange={(e) => patch({ timezone: e.target.value })}
+            >
+              {TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-field">
+            <label htmlFor="org-currency">Default currency</label>
+            <select
+              id="org-currency"
+              value={settings.currency}
+              onChange={(e) => patch({ currency: e.target.value })}
+            >
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div className="settings-actions">
+            <button
+              onClick={() =>
+                save(
+                  {
+                    org_name: settings.org_name,
+                    timezone: settings.timezone,
+                    currency: settings.currency,
+                  },
+                  setSavingOrg,
+                  setOrgSaved,
+                )
+              }
+              disabled={savingOrg || !settings.org_name.trim()}
+            >
+              {savingOrg ? "Saving…" : "Save changes"}
+            </button>
+            {orgSaved && <span className="settings-saved">Saved ✓</span>}
+          </div>
+        </section>
+      </div>
+
+      <div
+        role="tabpanel"
+        id="settings-panel-budgets"
+        aria-labelledby="settings-tab-budgets"
+        hidden={tab !== "budgets"}
+      >
+        <BudgetCard currency={settings.currency} />
+      </div>
+
+      <div
+        role="tabpanel"
+        id="settings-panel-byok"
+        aria-labelledby="settings-tab-byok"
+        hidden={tab !== "byok"}
+      >
+        <DiscoveryLlmCard />
+      </div>
+
+      <div
+        role="tabpanel"
+        id="settings-panel-privacy"
+        aria-labelledby="settings-tab-privacy"
+        hidden={tab !== "privacy"}
+      >
+        <section className="settings-card">
+          <h2>Privacy &amp; data</h2>
+          <p className="muted">Control what Annapurna stores about your traffic and customers.</p>
+          <div className="settings-field">
+            <label htmlFor="cust-id">Customer identifiers</label>
+            <select
+              id="cust-id"
+              value={settings.customer_id_storage}
+              onChange={(e) =>
+                patch({ customer_id_storage: e.target.value as OrgSettings["customer_id_storage"] })
+              }
+            >
+              {CUSTOMER_ID_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <span className="settings-hint muted">
+              How customer identifiers are stored once customer-level attribution ships.
+            </span>
+          </div>
+          <div className="settings-field settings-field-inline">
+            <label htmlFor="store-prompts">Store prompt content</label>
+            <label className="toggle">
+              <input
+                id="store-prompts"
+                type="checkbox"
+                checked={settings.store_prompts}
+                onChange={(e) => patch({ store_prompts: e.target.checked })}
+              />
+              <span>{settings.store_prompts ? "On" : "Off"}</span>
+            </label>
+            <span className="settings-hint muted">
+              Annapurna stores no prompt text today; leaving this off keeps it that way.
+            </span>
+          </div>
+          <div className="settings-field">
+            <label htmlFor="retention">Data retention</label>
+            <select
+              id="retention"
+              value={settings.data_retention}
+              onChange={(e) =>
+                patch({ data_retention: e.target.value as OrgSettings["data_retention"] })
+              }
+            >
+              {RETENTION_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-actions">
+            <button
+              onClick={() =>
+                save(
+                  {
+                    customer_id_storage: settings.customer_id_storage,
+                    store_prompts: settings.store_prompts,
+                    data_retention: settings.data_retention,
+                  },
+                  setSavingPrivacy,
+                  setPrivacySaved,
+                )
+              }
+              disabled={savingPrivacy}
+            >
+              {savingPrivacy ? "Saving…" : "Save changes"}
+            </button>
+            {privacySaved && <span className="settings-saved">Saved ✓</span>}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
