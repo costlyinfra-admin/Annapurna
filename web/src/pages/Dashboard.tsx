@@ -20,12 +20,12 @@ import { DeveloperBreakdown } from "../components/DeveloperBreakdown";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import { PeriodSelector } from "../components/PeriodSelector";
 import {
+  BudgetForecastPanel,
   KeyInsights,
   KpiRow,
   OpenActions,
   ProviderSpendPanel,
   SpendTrend,
-  TokenEfficiency,
   type SavingsSummary,
 } from "../components/OverviewPanels";
 
@@ -249,10 +249,13 @@ export function Dashboard() {
       {data && (
         <div className="overview-grid">
           <KeyInsights insights={data.insights} />
-          {/* The middle column: what it cost, then what that bought. */}
+          {/* The middle column: what it cost, then where that is heading. */}
           <div className="overview-middle">
             <SpendTrend trend={data.trend} />
-            <TokenEfficiency trend={data.trend} />
+            <BudgetForecastPanel
+              trend={data.trend}
+              potentialMonthly={savings?.potentialMonthly ?? null}
+            />
           </div>
           <div className="overview-side">
             <ProviderSpendPanel providers={data.providers} />

@@ -41,6 +41,20 @@ export function unitMoney(value: number | null | undefined): string {
   return Math.abs(value) < 1 ? USD_UNIT.format(value) : money(value);
 }
 
+const COMPACT_USD = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+/** Compact dollar amount for headline figures — 58366 -> "$58.4K". `null` -> em
+ *  dash. Use `money` anywhere the exact figure is the point. */
+export function compactMoney(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return COMPACT_USD.format(value);
+}
+
 const COMPACT = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,

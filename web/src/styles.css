@@ -4961,7 +4961,7 @@ a.exec-value:hover {
 /* The chart and the token grid share the column's slack rather than the chart
    keeping a fixed height and the grid absorbing all of it. */
 .overview-middle .trend-panel,
-.overview-middle .tokens-panel {
+.overview-middle .budget-panel {
   flex: 1;
 }
 
@@ -5127,72 +5127,148 @@ a.exec-value:hover {
   fill: var(--chart-4);
 }
 
-/* ---- token efficiency ---- */
+/* ---- budget & forecast ---- */
 .panel-note {
   font-size: 0.72rem;
 }
 
-/* Head, grid, footnote — the slack goes between them, so the footnote sits on
-   the bottom edge and the bars keep a spacing that does not depend on how tall
-   the neighbouring columns happen to be. */
-.tokens-panel {
+/* Head, chart, figures, footnote — the slack goes between them, so the footnote
+   sits on the bottom edge and the card keeps the shape it had when this column
+   held the token grid. */
+.budget-panel {
   justify-content: space-between;
 }
 
-.token-grid {
-  display: grid;
-  align-items: center;
-  gap: 0.5rem 0.6rem;
-  flex: 0 0 auto;
-}
-
-.token-month {
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  color: var(--muted);
-}
-
-.token-label {
-  font-size: 0.78rem;
-  color: var(--ink-soft);
+.budget-status {
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  font-weight: 650;
   white-space: nowrap;
 }
 
-/* A track per cell, so a short bar still shows where the month is. */
-.token-bar {
-  display: block;
-  height: 12px;
-  border-radius: 3px;
-  background: var(--surface-alt);
-  overflow: hidden;
+.budget-status.over {
+  color: var(--warn);
+  background: var(--warn-tint);
 }
 
-.token-fill {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  min-width: 1px;
+.budget-status.under {
+  color: var(--good);
+  background: var(--good-tint);
 }
 
-.token-fill.in {
-  background: var(--chart-1);
+.budget-headline {
+  margin: 0 0 0.2rem;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
 }
 
-/* Cached input is part of input, so it is the same hue a shade back rather
-   than a colour of its own. */
-.token-fill.cached {
-  background: var(--chart-1);
-  opacity: 0.45;
+.budget-headline strong {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
 
-.token-fill.out {
-  background: var(--chart-4);
+.budget-svg {
+  flex: 0 0 auto;
 }
 
-.token-foot {
-  margin: 0.9rem 0 0;
-  padding-top: 0.7rem;
+/* Solid for what happened. */
+.budget-actual {
+  fill: none;
+  stroke: var(--chart-1);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* Dashed for what has not. Same dash for both tails, so the colour is the only
+   thing telling them apart — one is the same period with savings applied. */
+.budget-projected,
+.budget-optimized {
+  fill: none;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  stroke-linecap: round;
+}
+
+.budget-projected.over {
+  stroke: var(--warn);
+}
+
+.budget-projected.under {
+  stroke: var(--chart-1);
+}
+
+.budget-optimized {
+  stroke: var(--good);
+}
+
+.budget-dot.actual {
+  fill: var(--chart-1);
+}
+
+.budget-dot.over {
+  fill: var(--warn);
+}
+
+.budget-dot.under {
+  fill: var(--chart-1);
+}
+
+.budget-dot.optimized {
+  fill: var(--good);
+}
+
+/* The ceiling, not another series: flat, unbroken and quieter than the lines. */
+.budget-line {
+  stroke: var(--ink-soft);
+  stroke-width: 1.25;
+}
+
+.budget-line-label {
+  font-size: 9px;
+  font-weight: 600;
+  fill: var(--ink-soft);
+}
+
+/* Label and figure on one line each, three across: the card has a chart to fit
+   in as well, and these three are read as a set rather than one at a time. */
+.budget-stats {
+  display: grid;
+  /* Three across where they fit, wrapping rather than overflowing the card when
+     they do not — a phone gives each of these about 100px and the widest needs
+     125. */
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.35rem 0.6rem;
+  margin: 0.7rem 0 0;
+}
+
+.budget-stats > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.budget-stats dt {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.budget-stats dd {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-foot {
+  margin: 0.7rem 0 0;
+  padding-top: 0.6rem;
   border-top: 1px solid var(--line);
   font-size: 0.78rem;
 }
@@ -5270,24 +5346,25 @@ a.exec-value:hover {
   padding-top: 0.6rem;
 }
 
-.provider-toggle {
+/* Carries the `link` class for the chromeless base, and is typed as
+   `button.provider-toggle` so it outweighs the global `button:hover` — which is
+   a filled pill, and turned this control into a black slab on hover. */
+button.provider-toggle {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  width: 100%;
   margin-top: 0.7rem;
-  padding: 0;
-  border: 0;
-  background: none;
   color: var(--muted);
-  font: inherit;
   font-size: 0.78rem;
-  font-weight: 600;
   text-align: left;
-  cursor: pointer;
 }
 
-.provider-toggle:hover {
+button.provider-toggle:hover,
+button.provider-toggle:focus-visible {
+  background: none;
   color: var(--ink);
+  text-decoration: none;
 }
 
 .provider-toggle-chevron {

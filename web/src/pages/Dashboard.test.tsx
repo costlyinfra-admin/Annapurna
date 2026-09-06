@@ -287,30 +287,67 @@ describe("Dashboard (Overview)", () => {
     expect(chart.querySelectorAll(".trend-bar-run")).toHaveLength(2);
   });
 
-  it("shows what the money bought, alongside what it cost", async () => {
+  it("forecasts the period against the budget, and names it as a forecast", async () => {
     renderDashboard();
-    const panel = (await screen.findByText("Token efficiency")).closest("section")!;
+    const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
 
-    expect(within(panel).getByText("Input")).toBeInTheDocument();
-    expect(within(panel).getByText("Cached")).toBeInTheDocument();
-    expect(within(panel).getByText("Output")).toBeInTheDocument();
-    // One rate for the period, not one per month: a dozen columns are narrower
-    // than the text. 230k cache reads against 1.7M input tokens.
-    expect(within(panel).getByText(/Cache rate 13\.5%/)).toBeInTheDocument();
-    // The month's own rate is on the bar, where a pointer can reach it.
-    expect(within(panel).getByTitle(/Cached Apr: 50K \(10\.0% of input\)/)).toBeInTheDocument();
+    // 2100 in April and 5171 in May: 7271 spent. May is 0.67 elapsed, so it
+    // projects to 5171/0.67 = 7718 and the period to 9818 — against a two-month
+    // budget of 200,000/12*2 = 33,333.
+    expect(within(panel).getByText("$9.8K")).toBeInTheDocument();
+    expect(within(panel).getByText("$33.3K")).toBeInTheDocument();
+    expect(within(panel).getByText("$7.3K")).toBeInTheDocument();
+    expect(within(panel).getByText("71% under budget")).toBeInTheDocument();
+
+    // Spend to date is solid; the projection is a separate dashed line, never
+    // continuous with it and never added into the figure of what was spent.
+    expect(panel.querySelector(".budget-actual")).toBeInTheDocument();
+    expect(panel.querySelector(".budget-projected.under")).toBeInTheDocument();
+    expect(panel.querySelector(".budget-line")).toBeInTheDocument();
   });
 
-  it("states no cache rate at all when nothing was sent to be cached", async () => {
+  it("flags an over-budget forecast, and whether savings would close the gap", async () => {
+    // The demo's own three months, which is where the card's figures come from:
+    // 45,142 spent, a 58,366 forecast against a 50,000 budget — 17% over — and
+    // 8,755/mo of identified savings, which lands it at 49,611.
     vi.mocked(api.dashboard).mockResolvedValue({
       ...DATA,
-      trend: DATA.trend.map((m) => ({ ...m, tokens_in: 0, cached_tokens_in: 0, cache_rate: 0 })),
+      trend: [
+        { ...DATA.trend[0], period: "2026-03-01", build_cost: 0, inference_cost: 8_548.68 },
+        { ...DATA.trend[0], period: "2026-04-01", build_cost: 0, inference_cost: 9_745.39 },
+        { ...DATA.trend[1], period: "2026-05-01", build_cost: 0, inference_cost: 26_847.95 },
+      ],
+    });
+    vi.mocked(api.copilotOverview).mockResolvedValue({
+      totals: { measured: 8755, modeled_ceiling: 0, directional: 0 },
+      verified_monthly_savings: 0,
+      verified_annual_savings: 0,
+      by_feature: [],
+    } as never);
+    renderDashboard();
+    const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
+
+    await waitFor(() =>
+      expect(within(panel).getByText(/would bring forecasted spend within budget/)).toBeInTheDocument(),
+    );
+    expect(within(panel).getByText("17% over budget")).toBeInTheDocument();
+    expect(within(panel).getByText("$58.4K")).toBeInTheDocument();
+    expect(within(panel).getByText("$49.6K")).toBeInTheDocument();
+    expect(panel.querySelector(".budget-projected.over")).toBeInTheDocument();
+    expect(panel.querySelector(".budget-optimized")).toBeInTheDocument();
+  });
+
+  it("draws no forecast when the period has no spend to forecast from", async () => {
+    vi.mocked(api.dashboard).mockResolvedValue({
+      ...DATA,
+      trend: DATA.trend.map((m) => ({ ...m, build_cost: 0, inference_cost: 0 })),
     });
     renderDashboard();
-    const panel = (await screen.findByText("Token efficiency")).closest("section")!;
-    // Output tokens remain, so the panel still draws — but 0/0 is not 0%.
-    expect(within(panel).getByText("No input tokens in this period.")).toBeInTheDocument();
-    expect(within(panel).queryByText(/Cache rate/)).not.toBeInTheDocument();
+    const panel = (await screen.findByText("Budget & forecast")).closest("section")!;
+    expect(
+      within(panel).getByText("No spend in this period to forecast from."),
+    ).toBeInTheDocument();
+    expect(panel.querySelector(".budget-actual")).not.toBeInTheDocument();
   });
 
   it("shows the top three providers, and folds the rest behind a disclosure", async () => {
@@ -344,22 +381,6 @@ describe("Dashboard (Overview)", () => {
     const panel = (await screen.findByText("Provider spend")).closest("section")!;
     // The fixture has two providers, which is fewer than the three shown.
     expect(within(panel).queryByRole("button")).not.toBeInTheDocument();
-  });
-
-  it("says so when there are no token counts, rather than drawing nothing", async () => {
-    vi.mocked(api.dashboard).mockResolvedValue({
-      ...DATA,
-      trend: DATA.trend.map((m) => ({
-        ...m,
-        tokens_in: 0,
-        cached_tokens_in: 0,
-        tokens_out: 0,
-        cache_rate: 0,
-      })),
-    });
-    renderDashboard();
-    const panel = (await screen.findByText("Token efficiency")).closest("section")!;
-    expect(within(panel).getByText("No token counts for this period.")).toBeInTheDocument();
   });
 
   it("shows one period-over-period delta on total spend", async () => {

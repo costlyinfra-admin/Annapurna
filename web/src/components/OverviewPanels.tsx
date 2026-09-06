@@ -11,12 +11,13 @@
  * data does not support: a card with no history shows no sparkline rather than
  * a flat line implying one.
  */
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Dashboard, Insight, OpenAction, ProviderTotal, TrendMonth } from "../api";
-import { GRID_LEVELS, niceCeil } from "./chartAxis";
+import { FINE_STEPS, GRID_LEVELS, niceCeil } from "./chartAxis";
 import { ConnectorMark } from "./ConnectorMark";
-import { compact, money, wholeMoney } from "../format";
+import { budgetForecast, type BudgetForecast, type ForecastPoint } from "../budget";
+import { compact, compactMoney, money, wholeMoney } from "../format";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -414,88 +415,196 @@ export function SpendTrend({ trend }: { trend: TrendMonth[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Token efficiency
+// Budget & forecast
 // ---------------------------------------------------------------------------
+// Same 320-unit width as the spend trend above it, so the two charts in this
+// column are drawn to one grid — but half the height. This one carries a single
+// line and a reference level, and the card below it has figures to fit in.
+const BF_VB_W = 320;
+const BF_VB_H = 104;
+const BF_AXIS_W = 44;
+const BF_PLOT_TOP = 12;
+const BF_PLOT_BOTTOM = 78;
+/** Three levels, not the trend chart's five: at this height five would crowd. */
+const BF_GRID_LEVELS = [0, 0.5, 1] as const;
+
+/** Cumulative spend against the budget: solid where it happened, dashed where
+ *  it is a projection. Two dashed tails when Optimize has an answer — what the
+ *  window comes to if nothing changes, and what it comes to if it does. */
+function BudgetChart({ plan }: { plan: BudgetForecast }) {
+  const ceiling = niceCeil(Math.max(plan.forecast, plan.budget), FINE_STEPS);
+  const px = (x: number) => BF_AXIS_W + (x / plan.months) * (BF_VB_W - BF_AXIS_W - 8);
+  const py = (y: number) => BF_PLOT_BOTTOM - (y / ceiling) * (BF_PLOT_BOTTOM - BF_PLOT_TOP);
+  const path = (points: ForecastPoint[]) =>
+    points.map((p, i) => `${i === 0 ? "M" : "L"}${px(p.x)} ${py(p.y)}`).join(" ");
+
+  const last = plan.actual[plan.actual.length - 1];
+  const end = plan.projected[plan.projected.length - 1];
+  const optimizedEnd = plan.optimizedTail?.[plan.optimizedTail.length - 1] ?? null;
+
+  return (
+    <svg
+      className="trend-svg budget-svg"
+      viewBox={`0 0 ${BF_VB_W} ${BF_VB_H}`}
+      role="img"
+      aria-label={
+        `Cumulative spend against a ${money(plan.budget)} budget. ` +
+        `${money(plan.spent)} spent so far, forecast ${money(plan.forecast)} — ` +
+        `${Math.abs(Math.round(plan.overBy))}% ${plan.overBudget ? "over" : "under"} budget.` +
+        (optimizedEnd ? ` With identified savings, ${money(optimizedEnd.y)}.` : "")
+      }
+    >
+      {BF_GRID_LEVELS.map((level) => (
+        <g key={level}>
+          <line
+            className="trend-grid-line"
+            x1={BF_AXIS_W}
+            y1={py(level * ceiling)}
+            x2={BF_VB_W - 8}
+            y2={py(level * ceiling)}
+          />
+          <text
+            className="trend-axis-label"
+            x={BF_AXIS_W - 6}
+            y={py(level * ceiling) + 3}
+            textAnchor="end"
+          >
+            {wholeMoney(level * ceiling)}
+          </text>
+        </g>
+      ))}
+
+      {/* The budget, drawn across the whole plot so it reads as a ceiling
+          rather than as another series. */}
+      <g>
+        <title>{`Budget for this period: ${money(plan.budget)}`}</title>
+        <line
+          className="budget-line"
+          x1={BF_AXIS_W}
+          y1={py(plan.budget)}
+          x2={BF_VB_W - 8}
+          y2={py(plan.budget)}
+        />
+        <text className="budget-line-label" x={BF_AXIS_W + 4} y={py(plan.budget) - 5}>
+          Budget {compactMoney(plan.budget)}
+        </text>
+      </g>
+
+      <g>
+        <title>{`Spent so far: ${money(plan.spent)}`}</title>
+        <path className="budget-actual" d={path(plan.actual)} />
+      </g>
+
+      {plan.optimizedTail && optimizedEnd && (
+        <g>
+          <title>{`With identified savings: ${money(optimizedEnd.y)}`}</title>
+          <path className="budget-optimized" d={path(plan.optimizedTail)} />
+          <circle className="budget-dot optimized" cx={px(optimizedEnd.x)} cy={py(optimizedEnd.y)} r={3} />
+        </g>
+      )}
+
+      <g>
+        <title>{`Forecast if nothing changes: ${money(plan.forecast)}`}</title>
+        <path
+          className={`budget-projected ${plan.overBudget ? "over" : "under"}`}
+          d={path(plan.projected)}
+        />
+        <circle
+          className={`budget-dot ${plan.overBudget ? "over" : "under"}`}
+          cx={px(end.x)}
+          cy={py(end.y)}
+          r={3}
+        />
+      </g>
+
+      {/* Where the actuals stop and the guessing starts. */}
+      <circle className="budget-dot actual" cx={px(last.x)} cy={py(last.y)} r={3} />
+
+      {plan.actual.slice(1).map((point, i) => (
+        <text
+          className="trend-axis-label"
+          key={point.label}
+          x={px(i + 0.5)}
+          y={BF_PLOT_BOTTOM + 13}
+          textAnchor="middle"
+        >
+          {point.label.replace(/^End of |^| so far$/g, "").slice(0, 3)}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
 /**
- * What the money bought, which is a different question from what it cost.
+ * Where the period lands against the budget, and whether the savings the
+ * Optimize engine has already found would be enough to change that.
  *
- * Three bars per month on one shared scale, so input, cached and output are
- * comparable across the row as well as down it. Cached input is a SUBSET of
- * input, not a fourth quantity — the provider counts a cached read as input and
- * bills it at a fraction — so it is drawn against the same scale rather than
- * stacked onto it.
+ * The forecast is always named as a forecast: the figure of what was spent sits
+ * beside it, and the two are never added or blended.
  */
-export function TokenEfficiency({ trend }: { trend: TrendMonth[] }) {
-  const max = Math.max(...trend.flatMap((m) => [m.tokens_in, m.tokens_out]), 0);
-  if (max <= 0) {
+export function BudgetForecastPanel({
+  trend,
+  /** Monthly potential savings; null until the Optimize call lands. */
+  potentialMonthly,
+}: {
+  trend: TrendMonth[];
+  potentialMonthly: number | null;
+}) {
+  const plan = budgetForecast(trend, potentialMonthly);
+
+  if (!plan) {
     return (
-      <section className="panel tokens-panel" aria-label="Token efficiency">
+      <section className="panel budget-panel" aria-label="Budget and forecast">
         <div className="panel-head">
-          <h2>Token efficiency</h2>
+          <h2>Budget &amp; forecast</h2>
         </div>
-        <p className="muted">No token counts for this period.</p>
+        <p className="muted">No spend in this period to forecast from.</p>
       </section>
     );
   }
 
-  const rows = [
-    { key: "tokens_in" as const, label: "Input", className: "in" },
-    { key: "cached_tokens_in" as const, label: "Cached", className: "cached" },
-    { key: "tokens_out" as const, label: "Output", className: "out" },
-  ];
-
-  // The rate is stated once for the period rather than once per month: twelve
-  // columns leave about fifteen pixels each, which is narrower than "0.0%".
-  // Per-month rates are on the Cached bars, where the pointer can reach them.
-  const totalIn = trend.reduce((sum, m) => sum + m.tokens_in, 0);
-  const totalCached = trend.reduce((sum, m) => sum + m.cached_tokens_in, 0);
-  const periodRate = totalIn > 0 ? (totalCached / totalIn) * 100 : null;
+  const overBy = Math.abs(Math.round(plan.overBy));
 
   return (
-    <section className="panel tokens-panel" aria-label="Token efficiency">
+    <section className="panel budget-panel" aria-label="Budget and forecast">
       <div className="panel-head">
-        <h2>Token efficiency</h2>
-        <span className="muted panel-note">Cached input is part of input</span>
+        <h2>Budget &amp; forecast</h2>
+        <span className={`budget-status ${plan.overBudget ? "over" : "under"}`}>
+          {overBy}% {plan.overBudget ? "over" : "under"} budget
+        </span>
       </div>
-      <div
-        className="token-grid"
-        style={{ gridTemplateColumns: `auto repeat(${trend.length}, minmax(0, 1fr))` }}
-      >
-        <span />
-        {trend.map((month) => (
-          <span key={month.period} className="token-month">
-            {monthLabel(month.period)}
-          </span>
-        ))}
 
-        {rows.map((row) => (
-          <Fragment key={row.key}>
-            <span className="token-label">{row.label}</span>
-            {trend.map((month) => (
-              <span
-                key={month.period}
-                className="token-bar"
-                title={
-                  `${row.label} ${monthLabel(month.period)}: ${compact(month[row.key])}` +
-                  (row.key === "cached_tokens_in" && month.tokens_in > 0
-                    ? ` (${month.cache_rate.toFixed(1)}% of input)`
-                    : "")
-                }
-              >
-                <span
-                  className={`token-fill ${row.className}`}
-                  style={{ width: `${(month[row.key] / max) * 100}%` }}
-                />
-              </span>
-            ))}
-          </Fragment>
-        ))}
-      </div>
-      <p className="muted token-foot">
-        {periodRate === null
-          ? "No input tokens in this period."
-          : `Cache rate ${periodRate.toFixed(1)}% — that share of input tokens was read` +
-            " from cache, and billed at a fraction of the standard rate."}
+      <p className="budget-headline">
+        Forecast: <strong>{compactMoney(plan.forecast)}</strong>
+      </p>
+
+      <BudgetChart plan={plan} />
+
+      <dl className="budget-stats">
+        <div>
+          <dt>Budget</dt>
+          <dd title={money(plan.budget)}>{compactMoney(plan.budget)}</dd>
+        </div>
+        <div>
+          <dt>Spent so far</dt>
+          <dd title={money(plan.spent)}>{compactMoney(plan.spent)}</dd>
+        </div>
+        <div>
+          <dt>With savings</dt>
+          <dd title={plan.optimized === null ? "Calculating…" : money(plan.optimized)}>
+            {plan.optimized === null ? "—" : compactMoney(plan.optimized)}
+          </dd>
+        </div>
+      </dl>
+
+      <p className="muted budget-foot">
+        {plan.optimized === null
+          ? "Checking what the identified savings would do to this forecast…"
+          : plan.savingsCloseTheGap
+            ? "Applying identified savings would bring forecasted spend within budget."
+            : plan.overBudget
+              ? "Identified savings would not be enough to bring this period within budget."
+              : "This period is forecast to land within budget."}
       </p>
     </section>
   );
@@ -559,7 +668,7 @@ export function ProviderSpendPanel({ providers }: { providers: ProviderTotal[] }
               </div>
               <button
                 type="button"
-                className="provider-toggle"
+                className="link provider-toggle"
                 aria-expanded={open}
                 onClick={() => setOpen((was) => !was)}
               >
