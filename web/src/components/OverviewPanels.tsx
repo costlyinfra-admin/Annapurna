@@ -22,6 +22,7 @@ import type {
   TrendMonth,
 } from "../api";
 import { FINE_STEPS, GRID_LEVELS, niceCeil } from "./chartAxis";
+import { ChartHoverCard, HoverRow } from "./ChartHoverCard";
 import { ConnectorMark } from "./ConnectorMark";
 import { forecastShape, type ForecastPoint, type ForecastShape } from "../budget";
 import { compact, compactMoney, money, wholeMoney } from "../format";
@@ -325,6 +326,10 @@ const PLOT_TOP = 8;
 const PLOT_BOTTOM = 150; // baseline; month labels sit below it
 
 export function SpendTrend({ trend }: { trend: TrendMonth[] }) {
+  // Which month the pointer is over. Null is "not hovering", which is why the
+  // dimming and the card both key off it rather than off a separate flag.
+  const [hover, setHover] = useState<number | null>(null);
+
   const max = Math.max(...trend.map((m) => m.build_cost + m.inference_cost), 0);
   const ceiling = niceCeil(max);
   const y = (value: number) => PLOT_BOTTOM - (value / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
@@ -332,6 +337,9 @@ export function SpendTrend({ trend }: { trend: TrendMonth[] }) {
   const plotW = VB_W - AXIS_W - 6;
   const slot = plotW / Math.max(trend.length, 1);
   const barW = Math.min(slot * 0.55, 28);
+  const centre = (i: number) => AXIS_W + i * slot + slot / 2;
+
+  const hovered = hover === null ? null : trend[hover];
 
   return (
     <section className="panel trend-panel" aria-label="Spend trend">
@@ -349,73 +357,114 @@ export function SpendTrend({ trend }: { trend: TrendMonth[] }) {
       {max <= 0 ? (
         <p className="muted">No spend in this period.</p>
       ) : (
-        <svg
-          className="trend-svg"
-          viewBox={`0 0 ${VB_W} ${VB_H}`}
-          role="img"
-          aria-label="Build and inference cost per month"
-        >
-          {GRID_LEVELS.map((level) => (
-            <g key={level}>
-              <line
-                className="trend-grid-line"
-                x1={AXIS_W}
-                y1={y(level * ceiling)}
-                x2={VB_W - 6}
-                y2={y(level * ceiling)}
-              />
-              <text
-                className="trend-axis-label"
-                x={AXIS_W - 6}
-                y={y(level * ceiling) + 3}
-                textAnchor="end"
-              >
-                {wholeMoney(level * ceiling)}
-              </text>
-            </g>
-          ))}
-
-          {trend.map((month, i) => {
-            const total = month.build_cost + month.inference_cost;
-            const x = AXIS_W + i * slot + (slot - barW) / 2;
-            // Inference sits on top of build, so the two are read as parts of
-            // the month rather than as one blended number.
-            const buildH = (month.build_cost / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
-            const runH = (month.inference_cost / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
-            return (
-              <g key={month.period}>
-                <title>{`${monthLabel(month.period)}: ${money(month.build_cost)} build · ${money(month.inference_cost)} inference`}</title>
-                {total > 0 && (
-                  <>
-                    <rect
-                      className="trend-bar-run"
-                      x={x}
-                      y={y(total)}
-                      width={barW}
-                      height={Math.max(runH, month.inference_cost > 0 ? 1 : 0)}
-                      rx={2}
-                    />
-                    <rect
-                      className="trend-bar-build"
-                      x={x}
-                      y={PLOT_BOTTOM - buildH}
-                      width={barW}
-                      height={Math.max(buildH, month.build_cost > 0 ? 1 : 0)}
-                    />
-                  </>
-                )}
+        <div className="trend-line-wrap" onMouseLeave={() => setHover(null)}>
+          <svg
+            className="trend-svg"
+            viewBox={`0 0 ${VB_W} ${VB_H}`}
+            role="img"
+            aria-label="Build and inference cost per month"
+          >
+            {GRID_LEVELS.map((level) => (
+              <g key={level}>
+                <line
+                  className="trend-grid-line"
+                  x1={AXIS_W}
+                  y1={y(level * ceiling)}
+                  x2={VB_W - 6}
+                  y2={y(level * ceiling)}
+                />
                 <text
                   className="trend-axis-label"
-                  x={x + barW / 2}
-                  y={PLOT_BOTTOM + 14}
-                  textAnchor="middle"
+                  x={AXIS_W - 6}
+                  y={y(level * ceiling) + 3}
+                  textAnchor="end"
                 >
-                  {monthLabel(month.period)}
+                  {wholeMoney(level * ceiling)}
                 </text>
               </g>
-            );
-          })}
-        </svg>
+            ))}
+
+            {trend.map((month, i) => {
+              const total = month.build_cost + month.inference_cost;
+              const x = centre(i) - barW / 2;
+              // Inference sits on top of build, so the two are read as parts of
+              // the month rather than as one blended number.
+              const buildH = (month.build_cost / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
+              const runH = (month.inference_cost / ceiling) * (PLOT_BOTTOM - PLOT_TOP);
+              return (
+                <g
+                  key={month.period}
+                  className={
+                    hover === null || hover === i ? "trend-bar-group" : "trend-bar-group dim"
+                  }
+                >
+                  {total > 0 && (
+                    <>
+                      <rect
+                        className="trend-bar-run"
+                        x={x}
+                        y={y(total)}
+                        width={barW}
+                        height={Math.max(runH, month.inference_cost > 0 ? 1 : 0)}
+                        rx={2}
+                      />
+                      <rect
+                        className="trend-bar-build"
+                        x={x}
+                        y={PLOT_BOTTOM - buildH}
+                        width={barW}
+                        height={Math.max(buildH, month.build_cost > 0 ? 1 : 0)}
+                      />
+                    </>
+                  )}
+                  <text
+                    className="trend-axis-label"
+                    x={centre(i)}
+                    y={PLOT_BOTTOM + 14}
+                    textAnchor="middle"
+                  >
+                    {monthLabel(month.period)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* One invisible band per month, so a short bar is as easy to hit as
+                a tall one and the pointer never falls between two of them. */}
+            {trend.map((month, i) => (
+              <rect
+                key={`hit-${month.period}`}
+                x={centre(i) - slot / 2}
+                y={0}
+                width={slot}
+                height={PLOT_BOTTOM}
+                fill="transparent"
+                onMouseEnter={() => setHover(i)}
+              />
+            ))}
+          </svg>
+
+          {hovered && (
+            <ChartHoverCard
+              pct={(centre(hover!) / VB_W) * 100}
+              title={monthLabel(hovered.period)}
+              total={money(hovered.build_cost + hovered.inference_cost)}
+            >
+              <ul className="trend-hover-list">
+                <HoverRow
+                  swatch="trend-key-swatch build"
+                  label="Build"
+                  value={money(hovered.build_cost)}
+                />
+                <HoverRow
+                  swatch="trend-key-swatch run"
+                  label="Inference"
+                  value={money(hovered.inference_cost)}
+                />
+              </ul>
+            </ChartHoverCard>
+          )}
+        </div>
       )}
     </section>
   );
@@ -440,15 +489,16 @@ const BF_GRID_LEVELS = [0, 0.5, 1] as const;
 function BudgetChart({
   shape,
   forecast,
+  trend,
 }: {
   shape: ForecastShape;
   forecast: BudgetForecast;
+  /** The same months the line is drawn from, for the hover card's per-month split. */
+  trend: TrendMonth[];
 }) {
-  const top = Math.max(
-    forecast.forecast ?? 0,
-    forecast.actual,
-    forecast.budget ?? 0,
-  );
+  const [hover, setHover] = useState<number | null>(null);
+
+  const top = Math.max(forecast.forecast ?? 0, forecast.actual, forecast.budget ?? 0);
   const ceiling = niceCeil(top, FINE_STEPS);
   const px = (x: number) => BF_AXIS_W + (x / shape.months) * (BF_VB_W - BF_AXIS_W - 8);
   const py = (y: number) => BF_PLOT_BOTTOM - (y / ceiling) * (BF_PLOT_BOTTOM - BF_PLOT_TOP);
@@ -460,97 +510,166 @@ function BudgetChart({
   const end = shape.projected?.[1] ?? null;
   const optimizedEnd = shape.optimizedTail?.[1] ?? null;
 
+  const slot = (BF_VB_W - BF_AXIS_W - 8) / shape.months;
+  // The cumulative point for month i — index 0 of shape.actual is the origin.
+  const pointAt = (i: number) => shape.actual[i + 1];
+  const isFinal = (i: number) => i === shape.months - 1;
+
   return (
-    <svg
-      className="trend-svg budget-svg"
-      viewBox={`0 0 ${BF_VB_W} ${BF_VB_H}`}
-      role="img"
-      aria-label={budgetChartLabel(forecast)}
-    >
-      {BF_GRID_LEVELS.map((level) => (
-        <g key={level}>
+    <div className="trend-line-wrap" onMouseLeave={() => setHover(null)}>
+      <svg
+        className="trend-svg budget-svg"
+        viewBox={`0 0 ${BF_VB_W} ${BF_VB_H}`}
+        role="img"
+        aria-label={budgetChartLabel(forecast)}
+      >
+        {BF_GRID_LEVELS.map((level) => (
+          <g key={level}>
+            <line
+              className="trend-grid-line"
+              x1={BF_AXIS_W}
+              y1={py(level * ceiling)}
+              x2={BF_VB_W - 8}
+              y2={py(level * ceiling)}
+            />
+            <text
+              className="trend-axis-label"
+              x={BF_AXIS_W - 6}
+              y={py(level * ceiling) + 3}
+              textAnchor="end"
+            >
+              {wholeMoney(level * ceiling)}
+            </text>
+          </g>
+        ))}
+
+        {/* The budget, drawn across the whole plot so it reads as a ceiling
+            rather than as another series. Absent when there is no budget. */}
+        {forecast.budget !== null && (
+          <g>
+            <line
+              className="budget-line"
+              x1={BF_AXIS_W}
+              y1={py(forecast.budget)}
+              x2={BF_VB_W - 8}
+              y2={py(forecast.budget)}
+            />
+            <text className="budget-line-label" x={BF_AXIS_W + 4} y={py(forecast.budget) - 5}>
+              Budget {compactMoney(forecast.budget)}
+            </text>
+          </g>
+        )}
+
+        <path className="budget-actual" d={path(shape.actual)} />
+
+        {shape.optimizedTail && optimizedEnd && (
+          <>
+            <path className="budget-optimized" d={path(shape.optimizedTail)} />
+            <circle
+              className="budget-dot optimized"
+              cx={px(optimizedEnd.x)}
+              cy={py(optimizedEnd.y)}
+              r={3}
+            />
+          </>
+        )}
+
+        {shape.projected && end && (
+          <>
+            <path
+              className={`budget-projected ${over ? "over" : "under"}`}
+              d={path(shape.projected)}
+            />
+            <circle
+              className={`budget-dot ${over ? "over" : "under"}`}
+              cx={px(end.x)}
+              cy={py(end.y)}
+              r={3}
+            />
+          </>
+        )}
+
+        {/* Where the actuals stop and the projection starts. */}
+        <circle className="budget-dot actual" cx={px(lastActual.x)} cy={py(lastActual.y)} r={3} />
+
+        {/* A guide down to the hovered month, so the card and the line agree. */}
+        {hover !== null && (
           <line
-            className="trend-grid-line"
-            x1={BF_AXIS_W}
-            y1={py(level * ceiling)}
-            x2={BF_VB_W - 8}
-            y2={py(level * ceiling)}
+            className="trend-line-guide"
+            x1={px(pointAt(hover).x)}
+            y1={BF_PLOT_TOP - 4}
+            x2={px(pointAt(hover).x)}
+            y2={BF_PLOT_BOTTOM}
           />
+        )}
+        {hover !== null && (
+          <circle
+            className="budget-dot actual"
+            cx={px(pointAt(hover).x)}
+            cy={py(pointAt(hover).y)}
+            r={4}
+          />
+        )}
+
+        {shape.labels.map((label, i) => (
           <text
             className="trend-axis-label"
-            x={BF_AXIS_W - 6}
-            y={py(level * ceiling) + 3}
-            textAnchor="end"
+            key={`${label}-${i}`}
+            x={BF_AXIS_W + (i + 0.5) * slot}
+            y={BF_PLOT_BOTTOM + 13}
+            textAnchor="middle"
           >
-            {wholeMoney(level * ceiling)}
+            {label}
           </text>
-        </g>
-      ))}
+        ))}
 
-      {/* The budget, drawn across the whole plot so it reads as a ceiling
-          rather than as another series. Absent when there is no budget. */}
-      {forecast.budget !== null && (
-        <g>
-          <title>{budgetLineTitle(forecast)}</title>
-          <line
-            className="budget-line"
-            x1={BF_AXIS_W}
-            y1={py(forecast.budget)}
-            x2={BF_VB_W - 8}
-            y2={py(forecast.budget)}
+        {/* Contiguous invisible bands: one month each, the full height of the
+            plot, so the card opens the moment the pointer enters a month. */}
+        {shape.labels.map((label, i) => (
+          <rect
+            key={`hit-${label}-${i}`}
+            x={BF_AXIS_W + i * slot}
+            y={0}
+            width={slot}
+            height={BF_PLOT_BOTTOM}
+            fill="transparent"
+            onMouseEnter={() => setHover(i)}
           />
-          <text className="budget-line-label" x={BF_AXIS_W + 4} y={py(forecast.budget) - 5}>
-            Budget {compactMoney(forecast.budget)}
-          </text>
-        </g>
-      )}
+        ))}
+      </svg>
 
-      <g>
-        <title>{`${forecast.status === "closed" ? "Final spend" : "Spent so far"}: ${money(forecast.actual)}`}</title>
-        <path className="budget-actual" d={path(shape.actual)} />
-      </g>
-
-      {shape.optimizedTail && optimizedEnd && (
-        <g>
-          <title>{`With identified savings: ${money(optimizedEnd.y)}`}</title>
-          <path className="budget-optimized" d={path(shape.optimizedTail)} />
-          <circle
-            className="budget-dot optimized"
-            cx={px(optimizedEnd.x)}
-            cy={py(optimizedEnd.y)}
-            r={3}
-          />
-        </g>
-      )}
-
-      {shape.projected && end && (
-        <g>
-          <title>{`Forecast if nothing changes: ${money(end.y)}`}</title>
-          <path className={`budget-projected ${over ? "over" : "under"}`} d={path(shape.projected)} />
-          <circle
-            className={`budget-dot ${over ? "over" : "under"}`}
-            cx={px(end.x)}
-            cy={py(end.y)}
-            r={3}
-          />
-        </g>
-      )}
-
-      {/* Where the actuals stop and the projection starts. */}
-      <circle className="budget-dot actual" cx={px(lastActual.x)} cy={py(lastActual.y)} r={3} />
-
-      {shape.labels.map((label, i) => (
-        <text
-          className="trend-axis-label"
-          key={`${label}-${i}`}
-          x={px(i + 0.5)}
-          y={BF_PLOT_BOTTOM + 13}
-          textAnchor="middle"
+      {hover !== null && (
+        <ChartHoverCard
+          pct={(px(pointAt(hover).x) / BF_VB_W) * 100}
+          title={`${shape.labels[hover]} · cumulative`}
+          total={money(pointAt(hover).y)}
         >
-          {label}
-        </text>
-      ))}
-    </svg>
+          <ul className="trend-hover-list">
+            <HoverRow
+              swatch="trend-key-swatch build"
+              label="Build this month"
+              value={money(trend[hover]?.build_cost ?? 0)}
+            />
+            <HoverRow
+              swatch="trend-key-swatch run"
+              label="Inference this month"
+              value={money(trend[hover]?.inference_cost ?? 0)}
+            />
+            {/* The final month is where the projection lives, so its card is the
+                one that carries the forecast and the budget it is measured on. */}
+            {isFinal(hover) && forecast.forecast !== null && forecast.status !== "closed" && (
+              <HoverRow label="Forecast at month end" value={money(forecast.forecast)} />
+            )}
+            {isFinal(hover) && forecast.forecast_optimized !== null && (
+              <HoverRow label="With savings" value={money(forecast.forecast_optimized)} />
+            )}
+            {isFinal(hover) && forecast.budget !== null && (
+              <HoverRow label="Budget" value={money(forecast.budget)} muted />
+            )}
+          </ul>
+        </ChartHoverCard>
+      )}
+    </div>
   );
 }
 
@@ -694,7 +813,7 @@ export function BudgetForecastPanel({
         <strong>{compactMoney(closed ? forecast.actual : forecast.forecast)}</strong>
       </p>
 
-      {shape && <BudgetChart shape={shape} forecast={forecast} />}
+      {shape && <BudgetChart shape={shape} forecast={forecast} trend={trend} />}
 
       <dl className="budget-stats">
         <div>

@@ -15,6 +15,7 @@ import { type ClassificationTrendPoint } from "../api";
 import { money, wholeMoney } from "../format";
 import { smoothArea, smoothLine } from "../chartCurve";
 import { GRID_LEVELS, niceCeil } from "./chartAxis";
+import { ChartHoverCard, HoverRow } from "./ChartHoverCard";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -412,28 +413,24 @@ function HoverCard({
   pct: number;
   granularity: Granularity;
 }) {
-  const flip = pct > 60; // near the right edge -> open leftwards
   const workspaces = (point.workspaces ?? []).slice(0, 4);
   const rest = (point.workspaces ?? []).slice(4);
   const restTotal = rest.reduce((s, w) => s + w.amount, 0);
 
   return (
-    <div
-      className={`trend-hover-card${flip ? " flip" : ""}`}
-      style={{ left: `${pct}%` }}
-      role="status"
+    <ChartHoverCard
+      pct={pct}
+      title={pointLabel(point.period, granularity)}
+      total={money(point.total)}
     >
-      <div className="trend-hover-head">
-        <span className="trend-hover-date">{pointLabel(point.period, granularity)}</span>
-        <span className="trend-hover-total">{money(point.total)}</span>
-      </div>
       <ul className="trend-hover-list">
         {BUCKETS.filter((b) => point[b.key] > 0).map((b) => (
-          <li key={b.key}>
-            <span className={`trend-legend-swatch trend-seg-${b.key}`} aria-hidden />
-            <span className="trend-hover-name">{b.label}</span>
-            <span className="trend-hover-amt">{money(point[b.key])}</span>
-          </li>
+          <HoverRow
+            key={b.key}
+            swatch={`trend-seg-${b.key}`}
+            label={b.label}
+            value={money(point[b.key])}
+          />
         ))}
       </ul>
       {workspaces.length > 0 && (
@@ -441,20 +438,14 @@ function HoverCard({
           <span className="trend-hover-sub">By workspace</span>
           <ul className="trend-hover-list">
             {workspaces.map((w) => (
-              <li key={w.workspace}>
-                <span className="trend-hover-name">{w.workspace}</span>
-                <span className="trend-hover-amt">{money(w.amount)}</span>
-              </li>
+              <HoverRow key={w.workspace} label={w.workspace} value={money(w.amount)} />
             ))}
             {rest.length > 0 && (
-              <li>
-                <span className="trend-hover-name muted">+{rest.length} more</span>
-                <span className="trend-hover-amt">{money(restTotal)}</span>
-              </li>
+              <HoverRow label={`+${rest.length} more`} value={money(restTotal)} muted />
             )}
           </ul>
         </>
       )}
-    </div>
+    </ChartHoverCard>
   );
 }

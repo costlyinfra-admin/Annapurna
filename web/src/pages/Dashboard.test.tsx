@@ -348,6 +348,59 @@ describe("Dashboard (Overview)", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens a breakdown card the moment the pointer enters a spend-trend month", async () => {
+    renderDashboard();
+    await screen.findByText("Spend trend");
+    const chart = screen.getByRole("img", { name: /Build and inference cost per month/ });
+
+    // Nothing until the pointer arrives. The card is ours, not a native SVG
+    // <title> — those wait about a second and cannot hold a breakdown.
+    expect(document.querySelector(".trend-hover-card")).toBeNull();
+    expect(chart.querySelector("title")).toBeNull();
+
+    // One invisible band per month, so a short bar is as easy to hit as a tall one.
+    const bands = chart.querySelectorAll('rect[fill="transparent"]');
+    expect(bands).toHaveLength(2);
+
+    fireEvent.mouseEnter(bands[1]);
+    const card = document.querySelector(".trend-hover-card")!;
+    expect(card.textContent).toContain("May");
+    expect(card.textContent).toContain("Build");
+    expect(card.textContent).toContain("$211"); // build
+    expect(card.textContent).toContain("$4,960"); // inference
+    // Build and inference stay separate in the card, as everywhere else.
+    expect(card.textContent).toContain("Inference");
+    // The other month dims so the hovered one reads on its own.
+    expect(document.querySelectorAll(".trend-bar-group.dim")).toHaveLength(1);
+
+    fireEvent.mouseLeave(chart.parentElement!);
+    expect(document.querySelector(".trend-hover-card")).toBeNull();
+  });
+
+  it("breaks the budget line down by month, and carries the forecast on the last one", async () => {
+    renderDashboard();
+    await screen.findByText("Budget & forecast");
+    const chart = await screen.findByRole("img", { name: /Cumulative spend against budget/ });
+    const bands = chart.querySelectorAll('rect[fill="transparent"]');
+    expect(bands).toHaveLength(2);
+
+    // An earlier month: cumulative to there, and what that month itself cost.
+    fireEvent.mouseEnter(bands[0]);
+    let card = document.querySelector(".trend-hover-card")!;
+    expect(card.textContent).toContain("Apr");
+    expect(card.textContent).toContain("cumulative");
+    expect(card.textContent).toContain("$2,100");
+    expect(card.textContent).not.toContain("Forecast at month end");
+
+    // The final month is where the projection lives, so it carries the forecast.
+    fireEvent.mouseEnter(bands[1]);
+    card = document.querySelector(".trend-hover-card")!;
+    expect(card.textContent).toContain("Forecast at month end");
+    expect(card.textContent).toContain("$13,500");
+    expect(card.textContent).toContain("With savings");
+    expect(card.textContent).toContain("Budget");
+  });
+
   it("asks for the forecast on the window the page is showing", async () => {
     renderDashboard();
     await waitFor(() =>
