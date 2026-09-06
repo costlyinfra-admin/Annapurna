@@ -698,6 +698,17 @@ export interface ProviderSpend {
     build_cost: number;
     cost_per_pr: number | null;
   }[];
+  /** Why the activity table is empty, when it is — so the UI can name which of
+   *  the several possible reasons applies instead of rendering nothing at all. */
+  activity_coverage: {
+    github_connected: boolean;
+    /** PR evidence anywhere in the tenant, not only in this window. */
+    dated_prs: number;
+    /** Discovered before merge dates were recorded, so placeable in no window. */
+    undated_prs: number;
+    first_merged: string | null;
+    last_merged: string | null;
+  };
   build_by_developer: {
     developer_id: string;
     // Display label: "Name (handle)", or whichever identity is available.

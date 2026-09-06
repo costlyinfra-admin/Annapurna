@@ -24,6 +24,7 @@ import type {
 import { FINE_STEPS, GRID_LEVELS, niceCeil } from "./chartAxis";
 import { ChartHoverCard, HoverRow } from "./ChartHoverCard";
 import { ConnectorMark } from "./ConnectorMark";
+import type { SpendSource } from "./ProviderBreakdown";
 import { forecastShape, type ForecastPoint, type ForecastShape } from "../budget";
 import { compact, compactMoney, money, wholeMoney } from "../format";
 
@@ -76,7 +77,8 @@ function Delta({ current, prev, label }: { current: number; prev: number; label:
       {Math.abs(change) >= 10 ? Math.round(Math.abs(change)) : Math.abs(change).toFixed(1)}%
       <span className="muted kpi-note">
         {" "}
-        vs {label} ({money(prev)})
+        {/* The label carries its own "vs" — "vs last month", "vs prev 3 months". */}
+        {label} ({money(prev)})
       </span>
     </span>
   );
@@ -93,12 +95,15 @@ export function KpiRow({
   savings,
   savingsFailed,
   deltaLabel,
+  onShowSource,
 }: {
   data: Dashboard;
   /** Loaded separately, so a slow Optimize calculation never holds up the page. */
   savings: SavingsSummary | null;
   savingsFailed: boolean;
   deltaLabel: string;
+  /** Opens the By Provider tab on one half of the build/run split. */
+  onShowSource: (source: SpendSource) => void;
 }) {
   const totalSpend = data.totals.build_cost + data.totals.inference_cost;
   const prevSpend = data.totals.prev_build_cost + data.totals.prev_inference_cost;
@@ -115,9 +120,26 @@ export function KpiRow({
         </div>
         <Delta current={totalSpend} prev={prevSpend} label={deltaLabel} />
         {/* Build and inference are added here only to answer "how much in
-            total"; the split is right beneath, and never blended below. */}
+            total"; the split is right beneath, and never blended below. Each
+            half opens the breakdown that explains it. */}
         <span className="muted kpi-note">
-          {money(data.totals.build_cost)} build · {money(data.totals.inference_cost)} run
+          <button
+            type="button"
+            className="kpi-note-link"
+            onClick={() => onShowSource("build")}
+            title="Show build cost by tool and by developer"
+          >
+            {money(data.totals.build_cost)} build
+          </button>{" "}
+          ·{" "}
+          <button
+            type="button"
+            className="kpi-note-link"
+            onClick={() => onShowSource("inference")}
+            title="Show inference (run) cost by provider, model and workspace"
+          >
+            {money(data.totals.inference_cost)} run
+          </button>
         </span>
         {data.totals.estimated_inference > 0 && (
           <span className="muted kpi-note" title="Recent usage the provider has not billed yet">

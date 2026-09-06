@@ -22,6 +22,13 @@ const EMPTY: ProviderSpend = {
   build_by_tool: [],
   build_by_developer: [],
   developer_activity: [],
+  activity_coverage: {
+    github_connected: false,
+    dated_prs: 0,
+    undated_prs: 0,
+    first_merged: null,
+    last_merged: null,
+  },
   build_trend: [],
   customer_total: 0,
   by_customer: [],
@@ -31,16 +38,27 @@ const EMPTY: ProviderSpend = {
   by_workspace: [],
 };
 
+/** Which half of the split this tab is showing. Build and inference never blend,
+ *  so there is always exactly one of them on screen. */
+export type SpendSource = "inference" | "build";
+
 export function ProviderBreakdown({
   range,
   refreshKey = 0,
+  source,
+  onSourceChange,
 }: {
   range: ReviewRange;
   /** Bumped by the Overview's refresh control to re-pull this breakdown. */
   refreshKey?: number;
+  /** Controlled by the Overview so the headline card's "build" and "run" can
+   *  open the matching half directly. */
+  source: SpendSource;
+  onSourceChange: (source: SpendSource) => void;
 }) {
   const [data, setData] = useState<ProviderSpend | null>(null);
-  const [sourceTab, setSourceTab] = useState<"inference" | "build">("inference");
+  const sourceTab = source;
+  const setSourceTab = onSourceChange;
 
   useEffect(() => {
     let active = true;

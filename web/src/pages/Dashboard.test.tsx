@@ -46,6 +46,13 @@ const EMPTY_SPEND = {
   build_total: 0,
   build_by_tool: [],
   developer_activity: [],
+  activity_coverage: {
+    github_connected: true,
+    dated_prs: 12,
+    undated_prs: 0,
+    first_merged: "2026-04-02",
+    last_merged: "2026-05-21",
+  },
   build_by_developer: [],
   build_trend: [],
   customer_total: 0,
@@ -216,7 +223,9 @@ describe("Dashboard (Overview)", () => {
     const spend = screen.getByRole("heading", { name: "Total AI spend" }).closest("article")!;
     expect(within(spend).getByText("$5,171")).toBeInTheDocument(); // 211 + 4960
     // …and the split is still shown, because they answer different questions.
-    expect(within(spend).getByText(/\$211 build · \$4,960 run/)).toBeInTheDocument();
+    // Each half is a control now, so the text sits in its own button.
+    expect(within(spend).getByRole("button", { name: "$211 build" })).toBeInTheDocument();
+    expect(within(spend).getByRole("button", { name: "$4,960 run" })).toBeInTheDocument();
 
     // Tokens keep their own card and their own split.
     const tokens = screen.getByRole("heading", { name: "Total tokens" }).closest("article")!;
@@ -346,6 +355,51 @@ describe("Dashboard (Overview)", () => {
     expect(
       within(panel).getByText(/would bring forecasted spend within budget/),
     ).toBeInTheDocument();
+  });
+
+  it("sends build and run to the half of the breakdown that explains them", async () => {
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      ...EMPTY_SPEND,
+      total: 4960,
+      by_provider: [
+        { provider: "anthropic", amount: 4960, pct: 100, requests: 10, by_model: [] },
+      ],
+      build_total: 211,
+      build_by_tool: [{ tool: "cursor", amount: 211, pct: 100 }],
+    });
+    renderDashboard();
+    await screen.findByText("Key insights");
+    const spend = screen.getByRole("heading", { name: "Total AI spend" }).closest("article")!;
+
+    // "run" opens By Provider on the inference half…
+    fireEvent.click(within(spend).getByRole("button", { name: "$4,960 run" }));
+    expect(await screen.findByText("Inference (run) cost by provider")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "By Provider" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Inference cost" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // …and "build" opens the other one, which is a different question.
+    fireEvent.click(within(spend).getByRole("button", { name: "$211 build" }));
+    expect(await screen.findByText("Build cost by tool")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Build cost" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByText("Inference (run) cost by provider")).not.toBeInTheDocument();
+  });
+
+  it("names the comparison window once, not twice", async () => {
+    renderDashboard();
+    await screen.findByText("Key insights");
+    // The labels already read "vs prev 3 months"; the card used to prefix
+    // another "vs" onto them.
+    expect(screen.getByText(/vs prev 3 months/)).toBeInTheDocument();
+    expect(screen.queryByText(/vs vs/)).not.toBeInTheDocument();
   });
 
   it("opens a breakdown card the moment the pointer enters a spend-trend month", async () => {
@@ -616,6 +670,13 @@ describe("Dashboard (Overview)", () => {
         { tool: "cursor", amount: 89, pct: 32.96 },
       ],
       developer_activity: [],
+      activity_coverage: {
+        github_connected: true,
+        dated_prs: 12,
+        undated_prs: 0,
+        first_merged: "2026-04-02",
+        last_merged: "2026-05-21",
+      },
       build_by_developer: [
         {
           developer_id: "erin",
@@ -729,6 +790,13 @@ describe("Dashboard (Overview)", () => {
       build_total: 270,
       build_by_tool: [],
       developer_activity: [],
+      activity_coverage: {
+        github_connected: true,
+        dated_prs: 12,
+        undated_prs: 0,
+        first_merged: "2026-04-02",
+        last_merged: "2026-05-21",
+      },
       build_by_developer: [
         {
           developer_id: "Muzaffar-ni",
@@ -765,6 +833,98 @@ describe("Dashboard (Overview)", () => {
     expect(screen.getByText(/\$181 · 67%/)).toBeInTheDocument();
     // Each developer breaks down by the tool they used.
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
+  });
+
+  it("explains an empty activity table instead of hiding the section", async () => {
+    // Build cost exists, so the developer tab renders — but no PR evidence lands
+    // in this window. Showing nothing left the reader unable to tell "nobody
+    // shipped" from "discovery has not covered these months".
+    const withBuild = {
+      ...EMPTY_SPEND,
+      build_total: 270,
+      build_by_developer: [
+        {
+          developer_id: "d1",
+          label: "Alice (alice)",
+          amount: 270,
+          pct: 100,
+          by_tool: [{ tool: "cursor", amount: 270, pct: 100 }],
+        },
+      ],
+      developer_activity: [],
+    };
+
+    // 1. Nothing connected: point at the connector first, then discovery.
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      ...withBuild,
+      activity_coverage: {
+        github_connected: false,
+        dated_prs: 0,
+        undated_prs: 0,
+        first_merged: null,
+        last_merged: null,
+      },
+    });
+    const first = renderDashboard();
+    fireEvent.click(await screen.findByRole("tab", { name: "By Developer" }));
+    expect(await screen.findByText("No pull-request evidence yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cost sources" })).toHaveAttribute(
+      "href",
+      "/cost-sources",
+    );
+    first.unmount();
+
+    // 2. Connected but never discovered: only discovery is missing.
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      ...withBuild,
+      activity_coverage: {
+        github_connected: true,
+        dated_prs: 0,
+        undated_prs: 0,
+        first_merged: null,
+        last_merged: null,
+      },
+    });
+    const second = renderDashboard();
+    fireEvent.click(await screen.findByRole("tab", { name: "By Developer" }));
+    expect(await screen.findByText("Discovery has not run yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute("href", "/features");
+    second.unmount();
+  });
+
+  it("says which months the PR evidence does cover, and counts undated PRs", async () => {
+    vi.mocked(api.providerSpend).mockResolvedValue({
+      ...EMPTY_SPEND,
+      start: "2026-05-01",
+      end: "2026-05-01",
+      build_total: 270,
+      build_by_developer: [
+        {
+          developer_id: "d1",
+          label: "Alice (alice)",
+          amount: 270,
+          pct: 100,
+          by_tool: [{ tool: "cursor", amount: 270, pct: 100 }],
+        },
+      ],
+      developer_activity: [],
+      activity_coverage: {
+        github_connected: true,
+        dated_prs: 40,
+        undated_prs: 3,
+        first_merged: "2026-01-04",
+        last_merged: "2026-03-28",
+      },
+    });
+    renderDashboard();
+    fireEvent.click(await screen.findByRole("tab", { name: "By Developer" }));
+
+    expect(await screen.findByText("No pull requests merged in May 2026")).toBeInTheDocument();
+    // Naming the covered range is what tells a quiet month from an uncovered one.
+    expect(screen.getByText(/Jan 2026 – Mar 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/longer lookback/)).toBeInTheDocument();
+    // Undated PRs are counted, never quietly dropped.
+    expect(screen.getByText(/3 pull requests discovered before merge dates/)).toBeInTheDocument();
   });
 
   it("tracks engineering activity per developer under the cost breakdown", async () => {
@@ -914,6 +1074,13 @@ describe("Dashboard (Overview)", () => {
       build_total: 0,
       build_by_tool: [],
       developer_activity: [],
+      activity_coverage: {
+        github_connected: true,
+        dated_prs: 12,
+        undated_prs: 0,
+        first_merged: "2026-04-02",
+        last_merged: "2026-05-21",
+      },
       build_by_developer: [],
       build_trend: [],
       customer_total: 0,

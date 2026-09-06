@@ -1595,6 +1595,34 @@ def spend_by_provider(
             )
         ]
 
+        # ---- Why the activity table is empty, when it is ------------------
+        # An empty table has four quite different causes, and the reader can only
+        # act on the right one: GitHub was never connected, discovery has not run,
+        # it ran but covered other months, or nothing was merged in this window.
+        # These facts let the UI say which, instead of rendering nothing at all.
+        coverage = conn.execute(
+            """
+            SELECT COUNT(*) FILTER (WHERE merged_at IS NOT NULL),
+                   COUNT(*) FILTER (WHERE merged_at IS NULL),
+                   MIN(merged_at), MAX(merged_at)
+            FROM feature_signal WHERE signal_type = 'pr'
+            """
+        ).fetchone()
+        github = conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM connector_credential WHERE connector_type = 'github')"
+        ).fetchone()
+        activity_coverage = {
+            "github_connected": bool(github[0]),
+            # PR evidence anywhere in the tenant, not just this window — that is
+            # the difference between "discovery never ran" and "it ran elsewhere".
+            "dated_prs": int(coverage[0] or 0),
+            # Merged before migration 0035, so they carry no date and cannot be
+            # placed in any window. Counted, never silently dropped.
+            "undated_prs": int(coverage[1] or 0),
+            "first_merged": coverage[2].isoformat() if coverage[2] else None,
+            "last_merged": coverage[3].isoformat() if coverage[3] else None,
+        }
+
         # ---- Per-customer metered spend (from SDK metadata.customer_id) ----
         customer_rows = conn.execute(
             """
@@ -1722,6 +1750,7 @@ def spend_by_provider(
         "build_by_tool": build_by_tool,
         "build_by_developer": build_by_developer,
         "developer_activity": developer_activity,
+        "activity_coverage": activity_coverage,
         "build_trend": build_trend,
         "customer_total": customer_total,
         "by_customer": by_customer,

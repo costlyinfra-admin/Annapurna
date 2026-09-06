@@ -5,7 +5,7 @@
  * Each cost number links to the feature's drill-down, where its evidence trail
  * lives. An Unattributed row carries spend not yet mapped to a feature.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   api,
@@ -34,7 +34,7 @@ interface SavingsState extends SavingsSummary {
   /** feature id -> potential monthly savings, for the table's column. */
   byFeature: Record<string, number>;
 }
-import { ProviderBreakdown } from "../components/ProviderBreakdown";
+import { ProviderBreakdown, type SpendSource } from "../components/ProviderBreakdown";
 import { compact, money, num } from "../format";
 
 type OverviewTab = "features" | "providers" | "developers" | "customers";
@@ -72,6 +72,10 @@ function freshnessDetail(inferenceAt: string | null, buildAt: string | null): st
 export function Dashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<OverviewTab>("features");
+  // Which half of the By Provider tab is showing. Lifted here so the headline
+  // card's "build" and "run" can open the matching one directly.
+  const [providerSource, setProviderSource] = useState<SpendSource>("inference");
+  const tabsRef = useRef<HTMLDivElement>(null);
   // Three months rather than one: a single month has no shape to it — the trend
   // is a lone bar and a period-over-period delta is the only comparison there
   // is. Three is the shortest window where the charts say something.
@@ -196,6 +200,14 @@ export function Dashboard() {
   const setupComplete = hasFeatures && hasBuild && hasInference;
   const deltaLabel = DELTA_LABEL[range.kind];
 
+  /** Open the By Provider tab on one half of the split, and bring it into view —
+   *  the tabs sit well below the headline figures that link to them. */
+  function showSource(source: SpendSource) {
+    setTab("providers");
+    setProviderSource(source);
+    tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <div className="content">
       <div className="dash-head">
@@ -264,6 +276,7 @@ export function Dashboard() {
           savings={savings}
           savingsFailed={savingsFailed}
           deltaLabel={deltaLabel}
+          onShowSource={showSource}
         />
       )}
 
@@ -289,7 +302,7 @@ export function Dashboard() {
       {/* Tabs switch only the detailed breakdown below; the summary, insights,
           and totals above stay put no matter which tab is active. */}
       {data && (
-        <div className="tabs" role="tablist" aria-label="Cost breakdown">
+        <div className="tabs" role="tablist" aria-label="Cost breakdown" ref={tabsRef}>
           <button
             type="button"
             role="tab"
@@ -422,7 +435,14 @@ export function Dashboard() {
         </p>
       )}
 
-      {data && tab === "providers" && <ProviderBreakdown range={range} refreshKey={refreshKey} />}
+      {data && tab === "providers" && (
+        <ProviderBreakdown
+          range={range}
+          refreshKey={refreshKey}
+          source={providerSource}
+          onSourceChange={setProviderSource}
+        />
+      )}
 
       {data && tab === "developers" && <DeveloperBreakdown range={range} refreshKey={refreshKey} />}
 

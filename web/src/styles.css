@@ -4917,6 +4917,34 @@ a.exec-value:hover {
   font-weight: 400;
 }
 
+/* The build/run split doubles as the way into the breakdown that explains it.
+   Typed as `button.kpi-note-link` so it outweighs the global filled-pill button
+   styles, which would otherwise turn a footnote into two black lozenges. */
+button.kpi-note-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+button.kpi-note-link:hover,
+button.kpi-note-link:focus-visible {
+  background: none;
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+button.kpi-note-link:active {
+  transform: none;
+}
+
 .kpi-bar {
   display: block;
   height: 6px;
@@ -5208,6 +5236,12 @@ a.exec-value:hover {
 .template-note {
   font-weight: 400;
   opacity: 0.75;
+}
+
+/* The footnote about undated PRs sits under the main explanation. */
+.activity-gap-note {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
 }
 
 .settings-lead {

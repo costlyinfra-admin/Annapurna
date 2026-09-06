@@ -857,6 +857,50 @@ def test_developer_activity_is_scoped_to_the_period(seeded, app_env):
     assert wide["alice"]["prs"] == 4  # February's PR is inside this window
 
 
+def test_activity_coverage_explains_an_empty_activity_table(seeded, app_env):
+    # An empty table has several causes and the reader can only act on the right
+    # one, so the payload carries the facts that tell them apart.
+    cov = dashboard.spend_by_provider(seeded, PERIOD)["activity_coverage"]
+    assert cov["github_connected"] is False  # the fixture connects nothing
+    assert cov["dated_prs"] > 0
+    assert cov["first_merged"] is not None and cov["last_merged"] is not None
+
+    # A window with no merged PRs still reports the evidence that exists
+    # elsewhere -- which is what turns "nothing here" into "re-run discovery".
+    far = dashboard.spend_by_provider(seeded, dt.date(2020, 1, 1))
+    assert far["developer_activity"] == []
+    assert far["activity_coverage"]["dated_prs"] == cov["dated_prs"]
+
+
+def test_activity_coverage_counts_undated_prs_rather_than_dropping_them(seeded, app_env):
+    # PRs discovered before migration 0035 carry no merge date, so they cannot be
+    # placed in any window. They are counted, not silently ignored.
+    app_env.execute(
+        """
+        INSERT INTO feature_signal
+            (tenant_id, feature_id, signal_type, external_ref, confidence, source, actor)
+        SELECT %s, id, 'pr', 'acme/core#901', 'high', 'github', 'alice'
+        FROM feature WHERE tenant_id = %s ORDER BY created_at LIMIT 1
+        """,
+        (seeded, seeded),
+    )
+    app_env.commit()
+    cov = dashboard.spend_by_provider(seeded, PERIOD)["activity_coverage"]
+    assert cov["undated_prs"] == 1
+
+
+def test_activity_coverage_notices_a_connected_github(seeded, app_env):
+    app_env.execute(
+        """
+        INSERT INTO connector_credential (tenant_id, connector_type, ciphertext)
+        VALUES (%s, 'github', %s)
+        """,
+        (seeded, b"x"),
+    )
+    app_env.commit()
+    assert dashboard.spend_by_provider(seeded, PERIOD)["activity_coverage"]["github_connected"]
+
+
 def test_developer_activity_joins_spend_by_github_handle(seeded):
     activity = dashboard.spend_by_provider(seeded, PERIOD)["developer_activity"]
     by_handle = {a["handle"]: a for a in activity}
